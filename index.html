@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>eBay 代采合规审核系统 · 多维风控终版</title>
+<title>eBay 代采合规审核系统 · 精准风控版</title>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
@@ -185,7 +185,7 @@
 
 <script>
 /* ====================================================
-   ⚠️ 必填配置区
+   ⚠️ 必填配置区（请确认此处已填入真实数据）
    ==================================================== */
 const supabaseUrl = 'https://pzmcbalkbycmfnugppbh.supabase.co/rest/v1/'; 
 const supabaseKey = 'sb_publishable_Bv_Ib0Yh4Spie676mXV5bw_FAiNwch-'; 
@@ -208,10 +208,9 @@ try {
 }
 
 /* ====================================================
-   规则库 (新增官方/业务分类标签)
+   规则库
    ==================================================== */
 const RULES = [
-  // A类：官方禁售
   {id:'A01',lv:'R1',type:'Official',name:'二氯甲烷/脱漆剂',kw:['dichloromethane','methylene chloride','二氯甲烷','paint stripper','脱漆剂','headlight restoration']},
   {id:'A04',lv:'R1',type:'Official',name:'警用/应急警示灯',kw:['police light','police siren','emergency light','warning light bar','strobe','警灯','警用','应急照明']},
   {id:'A06',lv:'R1',type:'Official',name:'安全气囊',kw:['airbag','air bag','安全气囊','inflator module']},
@@ -223,20 +222,17 @@ const RULES = [
   {id:'DEC01',lv:'R1',type:'Official',name:'原产地声明(FTC违规)',kw:['made in usa','american made']},
   {id:'DEC02',lv:'R1',type:'Official',name:'医疗/治疗功效声明',kw:['cures','treats','prevents disease','therapeutic','medical grade']},
 
-  // F类：资质门槛 (代采无法提供)
   {id:'F01',lv:'R1',type:'Business',name:'儿童产品认证 (CPC)',kw:['cpc certified','cpsia','children toy','kids toy','baby toy','infant','toddler','儿童玩具','婴儿']},
   {id:'F02',lv:'R1',type:'Business',name:'医疗/化妆品认证 (FDA)',kw:['fda approved','fda registered','medical device','cosmetic','skincare','supplement','vitamin','医疗器械','化妆品','保健品','处方药','cpap']},
   {id:'F03',lv:'R1',type:'Business',name:'农药/杀菌认证 (EPA)',kw:['epa registered','pesticide','insecticide','herbicide','disinfectant','sanitizer','杀虫剂','除草剂','消毒液','杀菌']},
   {id:'F04',lv:'R1',type:'Business',name:'无线电/排放认证 (FCC/EPA)',kw:['fcc id','carb compliant','catalytic converter','carburetor','fuel tank','催化转换器','化油器','bluetooth','wi-fi','wifi','wireless transmitter','drone']},
   {id:'F05',lv:'R1',type:'Business',name:'品牌知识产权授权',kw:['disney','marvel','pokemon','apple','iphone','samsung','nike','adidas','anime character']},
 
-  // E类：物理形态红线 (物流/售后不友好)
   {id:'E01',lv:'R1',type:'Business',name:'易碎/玻璃/陶瓷',kw:['glass','ceramic','porcelain','crystal','fragile','glassware','玻璃','陶瓷','易碎','水晶']},
   {id:'E02',lv:'R1',type:'Business',name:'电池/带电产品',kw:['battery','lithium','lipo','aaa battery','aa battery','rechargeable','电池','锂电池','充电']},
   {id:'E03',lv:'R1',type:'Business',name:'液体/喷雾/膏体',kw:['liquid','spray','aerosol','perfume','oil','lotion','液体','喷雾','香水','精油','乳液']},
   {id:'E04',lv:'R1',type:'Business',name:'定制品/刻字/印图',kw:['custom made','customized','personalized','engraved','monogram','made to order','定制','定做','刻字','印字','专属']},
 
-  // S类：高售后/安全关键
   {id:'S01',lv:'R1',type:'Business',name:'安全关键/防护/救生',kw:['life jacket','life vest','helmet','safety harness','respirator','救生衣','头盔','安全带','防毒面具']},
   {id:'S02',lv:'R1',type:'Business',name:'承重/高压/燃气',kw:['weight capacity','load bearing','propane','gas regulator','high pressure','承重','高压','燃气']},
   {id:'S03',lv:'R1',type:'Business',name:'复杂安装/需布线',kw:['wiring kit','hardwired','installation kit','需布线','复杂安装']}
@@ -256,20 +252,15 @@ const DEFAULT_CAT_MAP = [
 const DEFAULT_COLUMNS = ['Action','Category','Title','Description','Condition ID','Quantity','Format','StartPrice','SKU','UPC'];
 const DEFAULT_INFO = '#INFO,Version=0.0.2,Template=eBay-draft-listing-template';
 
-/* ====================================================
-   书签抓取脚本 (增强版)
-   ==================================================== */
+/* ================= 抓取脚本 ================= */
 const GRAB_SCRIPT = '(function(){' +
 'var p=function(s){for(var i=0;i<s.length;i++){var e=document.querySelector(s[i]);if(e&&e.innerText&&e.innerText.trim())return e.innerText.trim()}return""};' +
 'var t=p(["#productTitle","#title","h1[data-testid=\'product-title\']","h1"])||document.title;' +
 'var b=p(["#feature-bullets","#feature_bullets","[data-testid=\'feature-bullets\']"]);' +
 'var d=p(["#productDescription","#aplus","#aplus_feature_div","[data-testid=\'product-description\']"]);' +
 'var spec=p(["#productDetails_techSpec_section_1","#productDetails_detailBullets_sections1","#detailBullets_feature_div","#prodDetails"]);' +
-// 变体抓取
 'var vary=p(["#twister","#twister_feature_div","#variation_feature_div"]);' +
-// 图片特征抓取 (alt标签和src)
 'var imgStr=""; var imgs=document.querySelectorAll("#altImages img, #landingImage"); for(var i=0;i<imgs.length;i++){imgStr+=(imgs[i].alt||"")+" "+(imgs[i].src||"")+" ";}' +
-// 兼容性抓取
 'var comp=p(["#fitment_feature_div","#productDetails_techSpec_section_1"]);' +
 'var m=location.href.match(/\\/(?:dp|gp\\/product)\\/([A-Z0-9]{10})/);' +
 'var rawText = [t, b, d, spec].join(" \\n ").replace(/[\\r\\n]+/g, " ");' +
@@ -456,7 +447,6 @@ function processPasteData(text){
   return true;
 }
 
-/* ================= 多维交叉验证核心引擎 ================= */
 function matchRules(item){
   const g = state.grabMap[item.asin] || {};
   const rawText = [item.title, item.desc, item.category, item.model, g.title, g.raw].filter(Boolean).join(' \n ').toLowerCase();
@@ -464,22 +454,22 @@ function matchRules(item){
   
   const hits = [];
 
-  // 1. 变体一票否决（变体含电池/玻璃/定制，直接挂）
+  // 变体一票否决
   if (g.vary && /battery|glass|lithium|custom|engrave/i.test(g.vary)) {
       hits.push({rule:{id:'VAR01',lv:'R1',type:'Business',name:'变体命中高风险品'}, kw:'变体选项', evidence: g.vary.slice(0, 50)});
   }
 
-  // 2. 图片平台标识风险（Amazon Logo/水印）
+  // 图片平台标识风险
   if (g.img && (g.img.includes('amazon') || g.img.includes('watermark') || g.img.includes('logo'))) {
       hits.push({rule:{id:'IMG01',lv:'R1',type:'Business',name:'图片带有平台标识/水印'}, kw:'图片特征', evidence: g.img.slice(0, 50)});
   }
 
-  // 3. 汽配兼容性缺失检查
+  // 汽配兼容性缺失检查
   if (/automotive|motors|parts/i.test(item.category || '') && (!g.comp || g.comp.length < 10)) {
       hits.push({rule:{id:'FIT01',lv:'R3',type:'Official',name:'兼容性列表缺失'}, kw:'配件数据', evidence:'汽配类目缺少Fitment数据'});
   }
 
-  // 4. 品牌兼容前缀检查（VeRO）
+  // 品牌兼容前缀检查（VeRO）
   const bigBrands = ['apple', 'samsung', 'sony', 'nike', 'adidas', 'disney', 'marvel', 'lego'];
   for (const brand of bigBrands) {
       if (new RegExp(`\\b${brand}\\b`, 'i').test(rawText)) {
@@ -489,7 +479,7 @@ function matchRules(item){
       }
   }
 
-  // 5. 执行主规则库（分句精准豁免）
+  // 核心规则库（分句精准匹配）
   for (const r of RULES){
     let hitKw = null;
     let isHit = false;
@@ -529,11 +519,19 @@ function matchRules(item){
         const mechExceptions = ['oil filter', 'oil pan', 'oil seal', 'oil pump', 'oil cap', 'oil dipstick', 'coil', 'soil', 'oil cooler', 'liquid level sensor', 'liquid cooling', 'gas strut', 'gas shock', 'gas spring', 'form: solid'];
         if (mechExceptions.some(ex => evidence.includes(ex))) exempted = true;
       }
+      
+      // 【重点修复：E01 易碎品豁免逻辑】
       if (r.id === 'E01') {
         const safeGlass = ['fiberglass', 'windshield', 'wiper', 'glass cleaner', 'tempered glass screen', 'sunglasses', 'reading glasses', 'glass lens'];
-        const isAutoPart = /automotive|motors|wiper|brake|suspension/i.test(evidence);
-        if (safeGlass.some(ex => evidence.includes(ex)) || isAutoPart) exempted = true;
+        const hasSafeWord = safeGlass.some(ex => evidence.includes(ex));
+        
+        // 强行检查整个标题或类目是否为汽车配件，如果是，直接豁免
+        const fullTitleAndCat = (item.title + " " + (item.category||"") + " " + (g.title||"")).toLowerCase();
+        const isAutoPart = /automotive|motors|wiper|brake|suspension|headlight|tail light/i.test(fullTitleAndCat);
+        
+        if (hasSafeWord || isAutoPart) exempted = true;
       }
+
       if (r.id === 'E04') {
         if (evidence.includes('custom fit') || evidence.includes('customized: no')) exempted = true;
       }
