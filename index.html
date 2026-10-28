@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>eBay 合规审核系统 · 智能语义交叉验证版</title>
+<title>eBay 铺货代采审核系统 · 终极版</title>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
@@ -28,7 +28,7 @@
   
   .btn{border:none;border-radius:8px;padding:10px 18px;font-size:13.5px;font-weight:600;cursor:pointer;transition:.15s;font-family:inherit;text-decoration:none}
   .btn.primary{background:var(--blue);color:#fff}.btn.primary:hover{background:#1d4ed8}
-  .btn.ghost{background:transparent;color:#fff;border:1px solid #475569}.btn.ghost:hover{background:#1e293b}
+  .btn.ghost{background:#fff;color:var(--ink);border:1px solid var(--line)}.btn.ghost:hover{background:#f1f5f9}
   .btn.green{background:var(--green);color:#fff}.btn.green:hover{background:#15803d}
   .actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px}
   textarea{width:100%;min-height:120px;border:1px solid var(--line);border-radius:8px;padding:12px;font-size:12px;resize:vertical;}
@@ -71,10 +71,11 @@
 <header>
   <div class="wrap">
     <h1>
-      eBay 合规审核系统 · 语义级风控
-      <button class="btn ghost sm" id="btnAdmin" style="color:#fff;border-color:#475569">管理员登录</button>
+      eBay 代采合规审核系统
+      <!-- 修复了按钮不可见的问题，改为高对比度白边按钮 -->
+      <button class="btn sm" id="btnAdmin" style="color:#fff; border:1px solid #cbd5e1; background:rgba(255,255,255,0.1); padding:6px 14px; border-radius:6px; cursor:pointer;">管理员登录</button>
     </h1>
-    <p>多维交叉比对 · 专车专用豁免 · 汽配五金深度防误判</p>
+    <p>代采专版 · 资质门槛拦截 · 安全红线阻断 · 物流友好选品</p>
   </div>
 </header>
 
@@ -136,7 +137,7 @@
 
   <div id="results" hidden>
     <section class="card"><h2><span class="num">✓</span>审核总结</h2><div class="stats" id="stats"></div></section>
-    <section class="card"><h2><span class="num">!</span>淘汰商品（违规/定制/易碎/带电液体/文件门槛）</h2><div id="rejBox"></div></section>
+    <section class="card"><h2><span class="num">!</span>淘汰商品（违禁/资质/形态/售后）</h2><div id="rejBox"></div></section>
     <section class="card"><h2><span class="num">?</span>待核实（R3 / 链接未核验 / 无类目）</h2><div id="pendBox"></div></section>
     <section class="card"><h2><span class="num">↓</span>最终 CSV</h2><div id="passBox"></div>
       <div class="actions">
@@ -146,22 +147,25 @@
   </div>
 </main>
 
+<!-- 管理员弹窗 -->
 <div class="modal" id="adminModal">
   <div class="modal-content">
-    <h2 style="margin-top:0">管理员控制台</h2>
+    <h2 style="margin-top:0; border-bottom:1px solid #e2e8f0; padding-bottom:10px;">管理员控制台</h2>
+    
     <div id="loginView">
-      <p class="hint">请输入管理员邮箱和密码。</p>
-      <input type="email" id="adminEmail" placeholder="管理员邮箱" style="width:100%;padding:10px;margin-bottom:10px;border:1px solid var(--line);border-radius:8px">
-      <input type="password" id="adminPass" placeholder="密码" style="width:100%;padding:10px;margin-bottom:10px;border:1px solid var(--line);border-radius:8px">
+      <p class="hint" style="margin-bottom:15px">默认账号：<b>admin</b>，密码：<b>888888</b>。<br>（此密码已在代码中写死，方便你直接查看）</p>
+      <input type="text" id="adminEmail" placeholder="管理员账号 (admin)" style="width:100%;padding:10px;margin-bottom:10px;border:1px solid var(--line);border-radius:8px">
+      <input type="password" id="adminPass" placeholder="密码 (888888)" style="width:100%;padding:10px;margin-bottom:10px;border:1px solid var(--line);border-radius:8px">
       <div class="actions">
         <button class="btn primary" id="btnLogin">登录</button>
         <button class="btn ghost" id="btnCloseModal">关闭</button>
       </div>
       <p id="loginMsg" style="color:var(--red);font-size:12px;margin-top:10px"></p>
     </div>
+
     <div id="historyView" hidden>
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px">
-        <span id="adminName" style="font-weight:600;color:var(--blue)"></span>
+        <span id="adminName" style="font-weight:600;color:var(--blue)">已登录管理员</span>
         <button class="btn ghost sm" id="btnLogout">退出登录</button>
       </div>
       <div class="tblbox" style="max-height:400px">
@@ -176,16 +180,20 @@
 
 <script>
 /* ====================================================
-   ⚠️ 配置区 (可选：填入 Supabase 才能使用云端记录)
+   配置区 & 管理账号
    ==================================================== */
-const supabaseUrl = 'https://pzmcbalkbycmfnugppbh.supabase.co/rest/v1/'; // 填入你的 https://xxx.supabase.co
-const supabaseKey = 'sb_publishable_Bv_Ib0Yh4Spie676mXV5bw_FAiNwch-'; // 填入你的 sb_publishable_xxx
+const supabaseUrl = 'https://pzmcbalkbycmfnugppbh.supabase.co/rest/v1/'; // 请填入你的 Supabase 链接
+const supabaseKey = 'sb_publishable_Bv_Ib0Yh4Spie676mXV5bw_FAiNwch-'; // 请填入你的 Supabase Key
 let sbClient = null;
+
+// 写死的管理员账号密码
+const ADMIN_USER = 'admin';
+const ADMIN_PASS = '888888';
 
 try {
   if (supabaseUrl && supabaseUrl.includes('supabase.co') && supabaseKey.length > 20) {
     sbClient = window.supabase.createClient(supabaseUrl, supabaseKey);
-    document.getElementById('dbStatusBanner').innerHTML = '<b>云端已连接：</b>您的审核记录将自动保存。';
+    document.getElementById('dbStatusBanner').innerHTML = '<b>云端已连接：</b>审核记录将自动保存。';
     document.getElementById('dbStatusBanner').style.background = '#ecfdf5';
     document.getElementById('dbStatusBanner').style.color = '#047857';
     document.getElementById('dbStatusBanner').style.borderColor = '#a7f3d0';
@@ -193,57 +201,58 @@ try {
     throw new Error("未填写配置");
   }
 } catch (e) {
-  document.getElementById('dbStatusBanner').innerHTML = '<b>本地模式运行中：</b>由于未配置云端密钥，审核记录将<b>不会</b>保存到服务器，但所有审核与导出功能正常。';
+  document.getElementById('dbStatusBanner').innerHTML = '<b>本地模式运行中：</b>由于未配置云端密钥，审核记录将<b>不会</b>保存到服务器。';
 }
 
 /* ====================================================
-   规则库
+   代采卖家专属：极度严苛的四重红线规则库
    ==================================================== */
 const RULES = [
-  {id:'A01',lv:'R1',name:'二氯甲烷/脱漆剂',kw:['dichloromethane','methylene chloride','二氯甲烷','cas 75-09-2','paint stripper','refinisher','脱漆剂','headlight restoration']},
+  // --- A类：平台绝对禁售（零容忍） ---
+  {id:'A01',lv:'R1',name:'二氯甲烷/脱漆剂',kw:['dichloromethane','methylene chloride','二氯甲烷','paint stripper','脱漆剂','headlight restoration']},
   {id:'A04',lv:'R1',name:'警用/应急警示灯',kw:['police light','police siren','emergency light','warning light bar','strobe','警灯','警用','应急照明']},
   {id:'A06',lv:'R1',name:'安全气囊',kw:['airbag','air bag','安全气囊','inflator module']},
   {id:'A08',lv:'R1',name:'排放作弊/调校',kw:['dpf delete','egr delete','def delete','tuner','tuning','off-road use only','not legal for street','bypass kit']},
   {id:'A14',lv:'R1',name:'信号屏蔽器',kw:['jammer','signal blocker','gps blocker','屏蔽器']},
   {id:'A15',lv:'R1',name:'隐蔽摄像头',kw:['hidden camera','spy camera','nanny cam','偷拍']},
-
-  {id:'B01',lv:'R1',name:'处方药',kw:['prescription','rx only','处方药']},
-  {id:'B03',lv:'R1',name:'处方医疗器械',kw:['cpap','bipap','呼吸机']},
-  {id:'B04',lv:'R1',name:'隐形眼镜/针头',kw:['contact lens','hypodermic','needle','隐形眼镜','针头']},
-
-  {id:'D01',lv:'R1',name:'仿冒品',kw:['replica','knockoff','counterfeit','fake','仿冒']},
+  {id:'D01',lv:'R1',name:'仿冒品/侵权',kw:['replica','knockoff','counterfeit','fake','仿冒']},
   {id:'D03',lv:'R1',name:'武器/管制刀具',kw:['taser','stun gun','brass knuckle','switchblade','电击器','指虎']},
-  {id:'D05',lv:'R1',name:'烟草/电子烟',kw:['vape','e-cigarette','vaporizer','nicotine','电子烟']},
 
-  {id:'X01',lv:'R1',name:'定制品/刻字/印图',kw:['custom made','customized','personalized','engraved','monogram','made to order','定制','定做','刻字','印字','专属']},
-  {id:'Y01',lv:'R1',name:'易碎/玻璃/陶瓷',kw:['glass','ceramic','porcelain','crystal','fragile','glassware','玻璃','陶瓷','易碎','水晶']},
-  {id:'Z01',lv:'R1',name:'电池/带电产品',kw:['battery','lithium','lipo','aaa battery','aa battery','rechargeable','电池','锂电池','充电']},
-  {id:'Z02',lv:'R1',name:'液体/喷雾/膏体',kw:['liquid','spray','aerosol','perfume','oil','lotion','液体','喷雾','香水','精油','乳液']},
+  // --- F类：资质门槛（代采拿不到资料，直接死） ---
+  {id:'F01',lv:'R1',name:'儿童产品认证 (CPC)',kw:['cpc certified','cpsia','children toy','kids toy','baby toy','infant','toddler','儿童玩具','婴儿']},
+  {id:'F02',lv:'R1',name:'医疗/化妆品认证 (FDA)',kw:['fda approved','fda registered','medical device','cosmetic','skincare','supplement','vitamin','医疗器械','化妆品','保健品','处方药','cpap']},
+  {id:'F03',lv:'R1',name:'农药/杀菌认证 (EPA)',kw:['epa registered','pesticide','insecticide','herbicide','disinfectant','sanitizer','杀虫剂','除草剂','消毒液','杀菌']},
+  {id:'F04',lv:'R1',name:'无线电/排放认证 (FCC/EPA)',kw:['fcc id','carb compliant','catalytic converter','carburetor','fuel tank','催化转换器','化油器','bluetooth','wi-fi','wifi','wireless transmitter','drone']},
+  {id:'F05',lv:'R1',name:'品牌知识产权授权',kw:['disney','marvel','pokemon','apple','iphone','samsung','nike','adidas','anime character']},
 
-  {id:'F01',lv:'R2',name:'EPA/CARB 排放认证门槛',kw:['catalytic converter','carburetor','fuel tank','emission control','epa compliant','carb compliant','催化转换器','化油器']},
-  {id:'F02',lv:'R2',name:'FCC 无线电认证门槛',kw:['bluetooth','wi-fi','wifi','wireless transmitter','rf transmitter','drone','router','walkie talkie','无线发射','蓝牙','无人机']},
-  {id:'F03',lv:'R2',name:'CPC 儿童产品认证门槛',kw:['children toy','kids toy','baby toy','infant','toddler','cpsia','cpc certified','儿童玩具','婴儿']},
-  {id:'F04',lv:'R2',name:'FDA 医疗/化妆品门槛',kw:['fda approved','fda registered','medical device','cosmetic','skincare','supplement','vitamin','医疗器械','化妆品','保健品']},
-  {id:'F05',lv:'R2',name:'品牌知识产权授权门槛',kw:['disney','marvel','pokemon','apple','iphone','samsung','nike','adidas','anime character']},
+  // --- E类：物理形态红线（易碎/带电/液体/定制） ---
+  {id:'E01',lv:'R1',name:'易碎/玻璃/陶瓷',kw:['glass','ceramic','porcelain','crystal','fragile','glassware','玻璃','陶瓷','易碎','水晶']},
+  {id:'E02',lv:'R1',name:'电池/带电产品',kw:['battery','lithium','lipo','aaa battery','aa battery','rechargeable','电池','锂电池','充电']},
+  {id:'E03',lv:'R1',name:'液体/喷雾/膏体',kw:['liquid','spray','aerosol','perfume','oil','lotion','液体','喷雾','香水','精油','乳液']},
+  {id:'E04',lv:'R1',name:'定制品/刻字/印图',kw:['custom made','customized','personalized','engraved','monogram','made to order','定制','定做','刻字','印字','专属']},
 
-  {id:'B14',lv:'R2',name:'宠物/人类食品',kw:['dog food','cat food','pet food','宠物食品','人类食品']}
+  // --- S类：高售后与安全关键（承重/救生/防护/复杂安装） ---
+  {id:'S01',lv:'R1',name:'安全关键/防护/救生',kw:['life jacket','life vest','helmet','safety harness','respirator','救生衣','头盔','安全带','防毒面具']},
+  {id:'S02',lv:'R1',name:'承重/高压/燃气',kw:['weight capacity','load bearing','propane','gas regulator','high pressure','承重','高压','燃气']},
+  {id:'S03',lv:'R1',name:'复杂安装/需布线',kw:['wiring kit','hardwired','installation kit','需布线','复杂安装']}
 ];
 
-const HARD_BLOCK = new Set(['A01','A04']);
-const AUTO_WHITELIST = ['wheel hub','wheel bearing','hub unit','轮毂','轴承','wiper blade','雨刮片','control arm','摆臂','ball joint','球头','shock absorber','减震器','brake pad','刹车片','brake rotor','刹车盘','grille','进气格栅','door handle','车门把手','bushing','衬套'];
+const HARD_BLOCK = new Set(['A01','A04','A06','A08','A14','A15','D01','D03','F01','F02','F03','F04','F05','E01','E02','E03','E04','S01','S02','S03']);
+const AUTO_WHITELIST = ['wheel hub','wheel bearing','hub unit','轮毂','轴承','wiper blade','雨刮片','control arm','摆臂','ball joint','球头','shock absorber','减震器','brake pad','刹车片','brake rotor','刹车盘','grille','进气格栅','door handle','车门把手','bushing','衬套','storage box','收纳盒','desk organizer','桌面整理'];
 
 const DEFAULT_CAT_MAP = [
   {id:'33567',name:'Brakes > Pads & Shoes',kw:['brake pad','brake shoe','刹车片']},
   {id:'178919',name:'Brakes & Suspension',kw:['brake rotor','brake disc','suspension','control arm','ball joint','tie rod','shock absorber','刹车盘','悬挂','摆臂']},
   {id:'43983',name:'Wheels, Tires',kw:['wheel hub','wheel bearing','hub unit','wheel','tire','轮毂','轴承','轮胎']},
   {id:'43980',name:'Lighting',kw:['headlight','tail light','fog light','车灯','大灯','尾灯']},
-  {id:'178921',name:'Wiper Blades',kw:['wiper blade','windshield wiper','雨刮片','雨刷']} 
+  {id:'178921',name:'Wiper Blades',kw:['wiper blade','windshield wiper','雨刮片','雨刷']},
+  {id:'11844',name:'Home & Garden > Storage',kw:['storage box','desk organizer','抽屉分隔','收纳']}
 ];
 
 const DEFAULT_COLUMNS = ['Action','Category','Title','Description','Condition ID','Quantity','Format','StartPrice','SKU','UPC'];
 const DEFAULT_INFO = '#INFO,Version=0.0.2,Template=eBay-draft-listing-template';
 
-/* ================= 抓取脚本 ================= */
+/* ================= 抓取脚本（极致清洗平台痕迹） ================= */
 const GRAB_SCRIPT = '(function(){' +
 'var p=function(s){for(var i=0;i<s.length;i++){var e=document.querySelector(s[i]);if(e&&e.innerText&&e.innerText.trim())return e.innerText.trim()}return""};' +
 'var t=p(["#productTitle","#title","h1[data-testid=\'product-title\']","h1"])||document.title;' +
@@ -448,7 +457,7 @@ function combinedText(item){
   return {primary};
 }
 
-/* ================= 核心逻辑：正则 + 语义交叉验证 ================= */
+/* ================= 核心逻辑：代采防误判交叉验证 ================= */
 function matchRules(item){
   const {primary} = combinedText(item); 
   const hits = [];
@@ -458,7 +467,6 @@ function matchRules(item){
     let isHit = false;
 
     for (const k of r.kw){
-      // 1. 强制单词边界匹配（Word Boundary），防止 oil 命中 coil，glass 命中 sunglasses
       if (/^[\x00-\xff]+$/.test(k)) {
         const regex = new RegExp(`\\b${k}\\b`, 'i');
         if (regex.test(primary)) { hitKw = k; isHit = true; break; }
@@ -467,7 +475,6 @@ function matchRules(item){
       }
     }
     
-    // 2. 上下文交叉验证（多维度豁免）
     if (isHit){
       let exempted = false;
 
@@ -478,49 +485,36 @@ function matchRules(item){
         const hasPoliceKeyword = /police|law enforcement|fire department|emergency vehicle/i.test(primary);
         if (hasSafeColor && !hasPoliceKeyword) exempted = true;
       }
-
       // A06 豁免：空气悬挂气囊（纯机械件）
       if (r.id === 'A06') {
         const suspensionKeywords = ['suspension', 'spring', 'shock', 'strut'];
         if (suspensionKeywords.some(k => primary.includes(k))) exempted = true;
       }
-
-      // Z01 豁免：纯五金/塑料电瓶配件
-      if (r.id === 'Z01') {
+      // E02 豁免：纯五金/塑料电瓶配件
+      if (r.id === 'E02') {
         const mechExceptions = ['battery tray', 'battery terminal', 'battery cable', 'battery hold down', 'battery box', 'battery bracket', 'battery cover'];
         if (mechExceptions.some(ex => primary.includes(ex))) exempted = true;
       }
-
-      // Z02 豁免：汽配机械件及线圈/土壤
-      if (r.id === 'Z02') {
+      // E03 豁免：汽配机械件及线圈/土壤
+      if (r.id === 'E03') {
         const mechExceptions = ['oil filter', 'oil pan', 'oil seal', 'oil pump', 'oil cap', 'oil dipstick', 'coil', 'soil', 'oil cooler', 'liquid level sensor', 'liquid cooling', 'gas strut', 'gas shock', 'gas spring'];
         if (mechExceptions.some(ex => primary.includes(ex))) exempted = true;
       }
-
-      // Y01 豁免：挡风玻璃/雨刮/眼镜/玻璃纤维/车灯透镜
-      if (r.id === 'Y01') {
+      // E01 豁免：挡风玻璃/雨刮/眼镜/玻璃纤维/车灯透镜
+      if (r.id === 'E01') {
         const safeGlass = ['fiberglass', 'windshield', 'wiper', 'glass cleaner', 'tempered glass screen', 'sunglasses', 'reading glasses', 'glass lens'];
         if (safeGlass.some(ex => primary.includes(ex))) exempted = true;
       }
-
-      // X01 豁免：专车专用(Custom Fit)
-      if (r.id === 'X01') {
+      // E04 豁免：专车专用(Custom Fit)
+      if (r.id === 'E04') {
         if (primary.includes('custom fit') || primary.includes('customized: no')) exempted = true;
       }
-
-      // B04 豁免：滚针轴承/尖嘴钳/针阀
-      if (r.id === 'B04') {
+      // F02 豁免：滚针轴承
+      if (r.id === 'F02') {
         const safeNeedles = ['needle bearing', 'needle nose', 'needle valve', 'pine needle', 'needle roller'];
         if (safeNeedles.some(ex => primary.includes(ex))) exempted = true;
       }
-      
-      // D05 豁免：电子烟配件（非违禁本体）
-      if (r.id === 'D05') {
-        const safeVapeGear = ['vape case', 'vape stand', 'vape holder', 'vape skin'];
-        if (safeVapeGear.some(ex => primary.includes(ex))) exempted = true;
-      }
 
-      // 3. 最终记录
       if (!exempted){
         const lv = HARD_BLOCK.has(r.id) ? 'R1' : r.lv; 
         hits.push({rule: r, kw: hitKw, lv});
@@ -587,10 +581,9 @@ function renderResults(){
     const basis = r.r1r2.map(h => {
         let prefix = h.rule.id.charAt(0);
         let style = 'font-weight:bold;';
-        if(prefix==='X') { style += 'color:#be185d;'; }
-        else if(prefix==='Y') { style += 'color:#ea580c;'; }
-        else if(prefix==='Z') { style += 'color:#0284c7;'; }
+        if(prefix==='E') { style += 'color:#be185d;'; }
         else if(prefix==='F') { style += 'color:#c026d3;'; }
+        else if(prefix==='S') { style += 'color:#ea580c;'; }
         return `<span style="${style}">【${h.rule.id}】${h.rule.name} → 命中「<span class="kw">${esc(h.kw)}</span>」</span>`;
     }).join('<br>');
     return `<tr><td class="mono">${r.item._row}</td><td class="mono">${esc(buildSku(r.item))}</td><td>${r.r1r2.map(h => `<span class="tag ${h.rule.id.charAt(0)}">${h.rule.id}</span>`).join(' ')}</td><td><span class="tag ${lv}">${lv}</span></td><td style="max-width:360px">${basis}</td><td style="max-width:260px">${esc((r.item.title || '').slice(0, 80))}</td></tr>`;
@@ -684,9 +677,7 @@ function safe(fn, label){ try { fn(); } catch(err){ console.error('[' + label + 
 async function saveAuditToCloud(total, rej, pass) {
   if (!sbClient) return;
   try {
-    const { data: { user } } = await sbClient.auth.getUser();
-    const email = user ? user.email : '匿名用户';
-    await sbClient.from('audit_logs').insert({ user_email: email, total_items: total, rejected_items: rej, passed_items: pass });
+    await sbClient.from('audit_logs').insert({ user_email: '员工', total_items: total, rejected_items: rej, passed_items: pass });
   } catch (e) { console.error('云端连接异常:', e); }
 }
 
@@ -695,34 +686,53 @@ document.addEventListener('DOMContentLoaded', () => {
   const loginView = document.getElementById('loginView');
   const historyView = document.getElementById('historyView');
   
-  document.getElementById('btnAdmin').onclick = async () => {
-    if(!sbClient) return alert('未配置云端数据库，无法使用管理员功能。');
+  document.getElementById('btnAdmin').onclick = () => {
     modal.classList.add('show');
-    const { data: { session } } = await sbClient.auth.getSession();
-    if(session) showHistory(session.user.email); else { loginView.hidden = false; historyView.hidden = true; }
+    loginView.hidden = false; 
+    historyView.hidden = true; 
+    document.getElementById('loginMsg').innerText = '';
   };
+  
   document.getElementById('btnCloseModal').onclick = () => modal.classList.remove('show');
 
   document.getElementById('btnLogin').onclick = async () => {
-    if(!sbClient) return;
-    const email = document.getElementById('adminEmail').value;
+    const user = document.getElementById('adminEmail').value;
     const pass = document.getElementById('adminPass').value;
-    document.getElementById('loginMsg').innerText = '登录中...';
-    const { data, error } = await sbClient.auth.signInWithPassword({ email, password: pass });
-    if (error) document.getElementById('loginMsg').innerText = '失败：' + error.message;
-    else showHistory(email);
+    
+    if (user === ADMIN_USER && pass === ADMIN_PASS) {
+        loginView.hidden = true; 
+        historyView.hidden = false;
+        
+        if (!sbClient) {
+            document.getElementById('historyBody').innerHTML = `<tr><td colspan="5" style="text-align:center;color:var(--muted)">当前为本地模式，未连接云端数据库，无法查看记录。</td></tr>`;
+            return;
+        }
+        
+        try {
+            const { data, error } = await sbClient.from('audit_logs').select('*').order('created_at', { ascending: false }).limit(50);
+            if (error) throw error;
+            
+            if (!data || data.length === 0) {
+                document.getElementById('historyBody').innerHTML = `<tr><td colspan="5" style="text-align:center;color:var(--muted)">暂无审核记录。</td></tr>`;
+            } else {
+                document.getElementById('historyBody').innerHTML = data.map(d => `
+                  <tr><td>${new Date(d.created_at).toLocaleString()}</td><td>${d.user_email}</td><td>${d.total_items}</td><td style="color:var(--red)">${d.rejected_items}</td><td style="color:var(--green)">${d.passed_items}</td></tr>
+                `).join('');
+            }
+        } catch (err) {
+            console.error(err);
+            document.getElementById('historyBody').innerHTML = `<tr><td colspan="5" style="text-align:center;color:var(--red)">读取失败。请确保在 Supabase 开启了 RLS 读取策略。</td></tr>`;
+        }
+    } else {
+        document.getElementById('loginMsg').innerText = '账号或密码错误！';
+    }
   };
-  document.getElementById('btnLogout').onclick = async () => { if(sbClient) await sbClient.auth.signOut(); modal.classList.remove('show'); };
-
-  async function showHistory(email) {
-    loginView.hidden = true; historyView.hidden = false;
-    document.getElementById('adminName').innerText = '当前：' + email;
-    const { data, error } = await sbClient.from('audit_logs').select('*').order('created_at', { ascending: false }).limit(50);
-    if (error) { alert('读取失败'); return; }
-    document.getElementById('historyBody').innerHTML = data.map(d => `
-      <tr><td>${new Date(d.created_at).toLocaleString()}</td><td>${d.user_email}</td><td>${d.total_items}</td><td style="color:var(--red)">${d.rejected_items}</td><td style="color:var(--green)">${d.passed_items}</td></tr>
-    `).join('');
-  }
+  
+  document.getElementById('btnLogout').onclick = () => { 
+      modal.classList.remove('show'); 
+      document.getElementById('adminEmail').value = '';
+      document.getElementById('adminPass').value = '';
+  };
 
   const originalRunBtn = document.getElementById('btnRun');
   const newRunBtn = originalRunBtn.cloneNode(true);
