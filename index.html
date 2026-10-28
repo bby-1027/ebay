@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>eBay 代采合规审核系统 · 多维交叉验证</title>
+<title>eBay 代采合规审核系统 · 云端多维版</title>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
@@ -74,7 +74,7 @@
       eBay 代采合规审核系统
       <button id="btnAdmin" style="background:#fbbf24; color:#0f172a; font-weight:700; border:none; padding:8px 16px; border-radius:6px; cursor:pointer; font-size:13px;">管理员登录</button>
     </h1>
-    <p>代采专版 · 多维属性交叉验证 · 安全红线阻断</p>
+    <p>代采专版 · 全局云端记录 · 安全红线阻断</p>
   </div>
 </header>
 
@@ -179,7 +179,7 @@
 
 <script>
 /* ====================================================
-   ⚠️ 配置区（请填入你的 Supabase 数据）
+   ⚠️ 必填配置区（请将复制的链接和Key填在引号内）
    ==================================================== */
 const supabaseUrl = 'https://pzmcbalkbycmfnugppbh.supabase.co/rest/v1/'; 
 const supabaseKey = 'sb_publishable_Bv_Ib0Yh4Spie676mXV5bw_FAiNwch-'; 
@@ -199,7 +199,7 @@ try {
     throw new Error("未填写配置");
   }
 } catch (e) {
-  document.getElementById('dbStatusBanner').innerHTML = '<b>本地模式运行中：</b>由于未配置云端密钥，审核记录将保存在本地浏览器中。';
+  document.getElementById('dbStatusBanner').innerHTML = '<b>本地模式运行中：</b>由于未配置云端密钥，审核记录将<b>不会</b>跨设备同步。请去代码顶部填入 Supabase 配置。';
 }
 
 /* ====================================================
@@ -246,13 +246,12 @@ const DEFAULT_CAT_MAP = [
 const DEFAULT_COLUMNS = ['Action','Category','Title','Description','Condition ID','Quantity','Format','StartPrice','SKU','UPC'];
 const DEFAULT_INFO = '#INFO,Version=0.0.2,Template=eBay-draft-listing-template';
 
-/* ================= 抓取脚本（深度提取多维属性） ================= */
+/* ================= 抓取脚本 ================= */
 const GRAB_SCRIPT = '(function(){' +
 'var p=function(s){for(var i=0;i<s.length;i++){var e=document.querySelector(s[i]);if(e&&e.innerText&&e.innerText.trim())return e.innerText.trim()}return""};' +
 'var t=p(["#productTitle","#title","h1[data-testid=\'product-title\']","h1"])||document.title;' +
 'var b=p(["#feature-bullets","#feature_bullets","[data-testid=\'feature-bullets\']"]);' +
 'var d=p(["#productDescription","#aplus","#aplus_feature_div","[data-testid=\'product-description\']"]);' +
-// 强制抓取商品参数表（兼容性、材质、是否带电等）
 'var spec=p(["#productDetails_techSpec_section_1","#productDetails_detailBullets_sections1","#detailBullets_feature_div","#prodDetails"]);' +
 'var m=location.href.match(/\\/(?:dp|gp\\/product)\\/([A-Z0-9]{10})/);' +
 'var cleanText=function(str){' +
@@ -267,7 +266,6 @@ const GRAB_SCRIPT = '(function(){' +
 '            .replace(/is electric[:\\s]*no/ig, " ")' +
 '            .replace(/[\\r\\n]+/g, " ").trim();' +
 '};' +
-// 把参数表拼接进详情描述中
 'var o={asin:m?m[1]:"",url:location.href,title:cleanText(t),bullets:cleanText(b),desc:cleanText(d) + " " + cleanText(spec),ts:Date.now()};' +
 'if(window.opener && !window.opener.closed){' +
 '  try{' +
@@ -450,7 +448,6 @@ function processPasteData(text){
 
 function combinedText(item){
   const g = state.grabMap[item.asin] || {};
-  // 合并标题、详情、类目、参数表（现在参数表包含在 desc 中）
   const primary = [item.title, item.desc, item.category, item.model, g.title, g.bullets, g.desc].filter(Boolean).join(' \n ').toLowerCase();
   return {primary};
 }
@@ -476,46 +473,32 @@ function matchRules(item){
     if (isHit){
       let exempted = false;
 
-      // 多维交叉验证 1：A04警用灯豁免（工程拖车灯颜色：绿/黄/白，且无警察字眼）
       if (r.id === 'A04') {
         const safeColors = ['green', 'amber', 'yellow', 'white'];
         const hasSafeColor = safeColors.some(c => new RegExp(`\\b${c}\\b`, 'i').test(primary));
         const hasPoliceKeyword = /police|law enforcement|fire department|emergency vehicle/i.test(primary);
         if (hasSafeColor && !hasPoliceKeyword) exempted = true;
       }
-      
-      // 多维交叉验证 2：A06安全气囊豁免（空气悬挂）
       if (r.id === 'A06') {
         const suspensionKeywords = ['suspension', 'spring', 'shock', 'strut'];
         if (suspensionKeywords.some(k => primary.includes(k))) exempted = true;
       }
-
-      // 多维交叉验证 3：E02电池豁免（如果是纯五金件，或者参数明确写 "Batteries Required: No"）
       if (r.id === 'E02') {
         const mechExceptions = ['battery tray', 'battery terminal', 'battery cable', 'battery hold down', 'battery box', 'battery bracket', 'battery cover', 'batteries required: no'];
         if (mechExceptions.some(ex => primary.includes(ex))) exempted = true;
       }
-
-      // 多维交叉验证 4：E03液体豁免（机滤、油底壳等，或参数明确写形态为 Solid）
       if (r.id === 'E03') {
         const mechExceptions = ['oil filter', 'oil pan', 'oil seal', 'oil pump', 'oil cap', 'oil dipstick', 'coil', 'soil', 'oil cooler', 'liquid level sensor', 'liquid cooling', 'gas strut', 'gas shock', 'gas spring', 'form: solid'];
         if (mechExceptions.some(ex => primary.includes(ex))) exempted = true;
       }
-
-      // 多维交叉验证 5：E01易碎豁免（挡风玻璃、雨刮、眼镜等汽车/穿戴配件）
       if (r.id === 'E01') {
         const safeGlass = ['fiberglass', 'windshield', 'wiper', 'glass cleaner', 'tempered glass screen', 'sunglasses', 'reading glasses', 'glass lens'];
-        // 如果命中玻璃，但类目是 Automotive 或标题有车配件，也直接豁免
         const isAutoPart = /automotive|motors|wiper|brake|suspension/i.test(primary);
         if (safeGlass.some(ex => primary.includes(ex)) || isAutoPart) exempted = true;
       }
-
-      // 多维交叉验证 6：E04定制豁免（如果是专车专用）
       if (r.id === 'E04') {
         if (primary.includes('custom fit') || primary.includes('customized: no')) exempted = true;
       }
-
-      // 多维交叉验证 7：医疗针头豁免（滚针轴承）
       if (r.id === 'F02') {
         const safeNeedles = ['needle bearing', 'needle nose', 'needle valve', 'pine needle', 'needle roller'];
         if (safeNeedles.some(ex => primary.includes(ex))) exempted = true;
@@ -679,32 +662,32 @@ function download(filename, content){
 function loadCatMap(){ let raw = null; try { raw = localStorage.getItem('ebay_cat_map'); } catch(e){} if (raw){ try { state.catMap = JSON.parse(raw); return; } catch(e){} } state.catMap = JSON.parse(JSON.stringify(DEFAULT_CAT_MAP)); }
 function safe(fn, label){ try { fn(); } catch(err){ console.error('[' + label + '] 初始化失败：', err); } }
 
-/* ================= 云端保存 & 管理员逻辑 ================= */
+/* ================= 云端全局记录与管理员 ================= */
 async function saveAuditToCloud(total, rej, pass) {
   const logData = {
-      user_email: '员工', 
+      user_email: '员工',
       total_items: total, 
       rejected_items: rej, 
       passed_items: pass,
       created_at: new Date().toISOString()
   };
 
-  // 1. 尝试保存到云端
+  // 保存到云端（如果有配置）
   if (sbClient) {
       try {
         await sbClient.from('audit_logs').insert(logData);
       } catch (e) { 
-        console.error('云端连接异常:', e); 
+        console.error('云端记录异常:', e); 
       }
   }
-
-  // 2. 同时永远保存到本地浏览器，作为兜底
+  
+  // 同时保存一份到本地浏览器作为备用
   try {
       let localLogs = JSON.parse(localStorage.getItem('local_audit_logs') || '[]');
-      localLogs.unshift(logData); // 放在最前面
-      if (localLogs.length > 50) localLogs.pop(); // 最多存50条
+      localLogs.unshift(logData); 
+      if (localLogs.length > 20) localLogs.pop(); 
       localStorage.setItem('local_audit_logs', JSON.stringify(localLogs));
-  } catch (e) { console.error('本地存储异常:', e); }
+  } catch (e) {}
 }
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -731,22 +714,17 @@ document.addEventListener('DOMContentLoaded', () => {
         
         let displayData = [];
 
-        // 如果配置了 Supabase，优先从云端拉取
+        // 如果有云端，强制去云端拉取所有记录
         if (sbClient) {
             try {
-                const { data, error } = await sbClient.from('audit_logs').select('*').order('created_at', { ascending: false }).limit(50);
-                if (error) throw error; // 触发 catch
-                if (data) displayData = data;
-            } catch (err) {
-                console.error("云端读取失败，降级到本地读取:", err);
-            }
+                const { data, error } = await sbClient.from('audit_logs').select('*').order('created_at', { ascending: false }).limit(100);
+                if (!error && data) displayData = data;
+            } catch (err) {}
         }
         
-        // 如果云端没有数据，或者云端读取失败，则使用本地记录兜底
+        // 如果云端拉取失败，则展示本地的
         if (displayData.length === 0) {
-            try {
-                displayData = JSON.parse(localStorage.getItem('local_audit_logs') || '[]');
-            } catch (e) { console.error(e); }
+            try { displayData = JSON.parse(localStorage.getItem('local_audit_logs') || '[]'); } catch (e) {}
         }
 
         if (displayData.length === 0) {
