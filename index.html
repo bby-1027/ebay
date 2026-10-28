@@ -110,9 +110,9 @@
     <div class="prog"><i id="progBar" style="width:0%"></i></div>
     <p class="hint" id="progText" style="margin:4px 0 12px">0 / 0 已核验</p>
     
-    <!-- 流水线极速操作区 -->
+    <!-- 缓释打开按钮 -->
     <div style="display:flex; gap:10px; margin-bottom:15px; align-items:center;">
-      <button class="btn violet" id="btnBatchOpen" onclick="openBatch()">⚡ 批量打开 5 个待抓取链接（全自动挂机）</button>
+      <button class="btn violet" id="btnBatchOpen" onclick="openBatch()">⚡ 挂机模式：依次打开 3 个链接</button>
       <span style="font-size:12px; color:var(--muted);">打开后请切回本页面喝茶，页面会自动关闭并打勾</span>
     </div>
 
@@ -402,21 +402,24 @@ function renderQueue(){
   $('queueBox').innerHTML = `<div class="tblbox" style="max-height:420px"><table><thead><tr><th>行</th><th>ASIN</th><th>表格标题</th><th>链接核验</th><th>操作</th></tr></thead><tbody>${rows}</tbody></table></div>`;
 }
 
-window.openLink = function(url) { window.open(url, '_blank'); };
+window.openLink = function(url) { window.open(url, '_blank', 'noopener,noreferrer'); };
 
 window.openBatch = function() {
     const ungrabbed = state.items.filter(it => it.link && !state.grabMap[it.asin]);
     if (!ungrabbed.length) { alert('所有链接都抓取完毕了！'); return; }
     
-    const count = Math.min(5, ungrabbed.length);
+    const count = Math.min(3, ungrabbed.length);
     const toOpen = ungrabbed.slice(0, count);
     
-    toOpen.forEach((it) => {
-        window.open(it.link, '_blank');
+    // 缓释挂机模式：每隔 2 秒打开一个
+    toOpen.forEach((it, index) => {
+        setTimeout(() => {
+            window.open(it.link, '_blank', 'noopener,noreferrer');
+        }, index * 2000);
     });
     
     const toast = $('toast'); 
-    toast.textContent = `已请求打开 ${count} 个窗口，请允许弹窗`;
+    toast.textContent = `正在依次打开 ${count} 个窗口...`;
     toast.style.opacity = '1'; 
     setTimeout(() => { toast.style.opacity = '0'; toast.textContent = '✅ 已自动吸附数据！'; }, 3000);
 };
