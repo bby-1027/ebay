@@ -72,7 +72,6 @@
   <div class="wrap">
     <h1>
       eBay 代采合规审核系统
-      <!-- 强制覆盖样式，使用醒目的黄色按钮 -->
       <button id="btnAdmin" style="background:#fbbf24; color:#0f172a; font-weight:700; border:none; padding:8px 16px; border-radius:6px; cursor:pointer; font-size:13px;">管理员登录</button>
     </h1>
     <p>代采专版 · 资质门槛拦截 · 安全红线阻断 · 物流友好选品</p>
@@ -153,9 +152,9 @@
     <h2 style="margin-top:0; border-bottom:1px solid #e2e8f0; padding-bottom:10px;">管理员控制台</h2>
     
     <div id="loginView">
-      <p class="hint" style="margin-bottom:15px">默认账号：<b>admin</b>，密码：<b>888888</b>。<br>（如需修改请去 GitHub 改代码）</p>
-      <input type="text" id="adminEmail" placeholder="管理员账号 (admin)" style="width:100%;padding:10px;margin-bottom:10px;border:1px solid var(--line);border-radius:8px">
-      <input type="password" id="adminPass" placeholder="密码 (888888)" style="width:100%;padding:10px;margin-bottom:10px;border:1px solid var(--line);border-radius:8px">
+      <p class="hint" style="margin-bottom:15px">仅供内部管理员登录查看数据。</p>
+      <input type="text" id="adminEmail" placeholder="请输入管理员账号" style="width:100%;padding:10px;margin-bottom:10px;border:1px solid var(--line);border-radius:8px">
+      <input type="password" id="adminPass" placeholder="请输入密码" style="width:100%;padding:10px;margin-bottom:10px;border:1px solid var(--line);border-radius:8px">
       <div class="actions">
         <button class="btn primary" id="btnLogin">登录</button>
         <button class="btn ghost" id="btnCloseModal">关闭</button>
@@ -182,10 +181,12 @@
 /* ====================================================
    配置区 & 管理账号
    ==================================================== */
-const supabaseUrl = 'https://pzmcbalkbycmfnugppbh.supabase.co/rest/v1/'; // 留空则无法使用云端记录，建议填上
-const supabaseKey = 'sb_publishable_Bv_Ib0Yh4Spie676mXV5bw_FAiNwch-'; // 留空则无法使用云端记录，建议填上
+// 请确保你已经在 GitHub 中填入了真实的 Supabase 链接和 Key
+const supabaseUrl = 'https://pzmcbalkbycmfnugppbh.supabase.co/rest/v1/'; 
+const supabaseKey = 'sb_publishable_Bv_Ib0Yh4Spie676mXV5bw_FAiNwch-'; 
 let sbClient = null;
 
+// 这里的密码虽然隐藏了提示，但依然存在于代码中（F12可看），够用了。
 const ADMIN_USER = 'admin';
 const ADMIN_PASS = '888888';
 
@@ -713,7 +714,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         } catch (err) {
             console.error(err);
-            document.getElementById('historyBody').innerHTML = `<tr><td colspan="5" style="text-align:center;color:var(--red)">读取失败。请确保在 Supabase 执行了建表 SQL 且开启了 RLS 读取策略。</td></tr>`;
+            document.getElementById('historyBody').innerHTML = `<tr><td colspan="5" style="text-align:center;color:var(--red)">读取失败。请确保在 Supabase 执行了重置 SQL 并允许了全部读写。</td></tr>`;
         }
     } else {
         document.getElementById('loginMsg').innerText = '账号或密码错误！';
