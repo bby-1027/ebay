@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>eBay 铺货代采审核系统 · 终极版</title>
+<title>eBay 代采合规审核系统</title>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
@@ -72,8 +72,8 @@
   <div class="wrap">
     <h1>
       eBay 代采合规审核系统
-      <!-- 修复了按钮不可见的问题，改为高对比度白边按钮 -->
-      <button class="btn sm" id="btnAdmin" style="color:#fff; border:1px solid #cbd5e1; background:rgba(255,255,255,0.1); padding:6px 14px; border-radius:6px; cursor:pointer;">管理员登录</button>
+      <!-- 强制覆盖样式，使用醒目的黄色按钮 -->
+      <button id="btnAdmin" style="background:#fbbf24; color:#0f172a; font-weight:700; border:none; padding:8px 16px; border-radius:6px; cursor:pointer; font-size:13px;">管理员登录</button>
     </h1>
     <p>代采专版 · 资质门槛拦截 · 安全红线阻断 · 物流友好选品</p>
   </div>
@@ -153,7 +153,7 @@
     <h2 style="margin-top:0; border-bottom:1px solid #e2e8f0; padding-bottom:10px;">管理员控制台</h2>
     
     <div id="loginView">
-      <p class="hint" style="margin-bottom:15px">默认账号：<b>admin</b>，密码：<b>888888</b>。<br>（此密码已在代码中写死，方便你直接查看）</p>
+      <p class="hint" style="margin-bottom:15px">默认账号：<b>admin</b>，密码：<b>888888</b>。<br>（如需修改请去 GitHub 改代码）</p>
       <input type="text" id="adminEmail" placeholder="管理员账号 (admin)" style="width:100%;padding:10px;margin-bottom:10px;border:1px solid var(--line);border-radius:8px">
       <input type="password" id="adminPass" placeholder="密码 (888888)" style="width:100%;padding:10px;margin-bottom:10px;border:1px solid var(--line);border-radius:8px">
       <div class="actions">
@@ -182,11 +182,10 @@
 /* ====================================================
    配置区 & 管理账号
    ==================================================== */
-const supabaseUrl = 'https://pzmcbalkbycmfnugppbh.supabase.co/rest/v1/'; // 请填入你的 Supabase 链接
-const supabaseKey = 'sb_publishable_Bv_Ib0Yh4Spie676mXV5bw_FAiNwch-'; // 请填入你的 Supabase Key
+const supabaseUrl = 'https://pzmcbalkbycmfnugppbh.supabase.co/rest/v1/'; // 留空则无法使用云端记录，建议填上
+const supabaseKey = 'sb_publishable_Bv_Ib0Yh4Spie676mXV5bw_FAiNwch-'; // 留空则无法使用云端记录，建议填上
 let sbClient = null;
 
-// 写死的管理员账号密码
 const ADMIN_USER = 'admin';
 const ADMIN_PASS = '888888';
 
@@ -252,7 +251,7 @@ const DEFAULT_CAT_MAP = [
 const DEFAULT_COLUMNS = ['Action','Category','Title','Description','Condition ID','Quantity','Format','StartPrice','SKU','UPC'];
 const DEFAULT_INFO = '#INFO,Version=0.0.2,Template=eBay-draft-listing-template';
 
-/* ================= 抓取脚本（极致清洗平台痕迹） ================= */
+/* ================= 抓取脚本 ================= */
 const GRAB_SCRIPT = '(function(){' +
 'var p=function(s){for(var i=0;i<s.length;i++){var e=document.querySelector(s[i]);if(e&&e.innerText&&e.innerText.trim())return e.innerText.trim()}return""};' +
 'var t=p(["#productTitle","#title","h1[data-testid=\'product-title\']","h1"])||document.title;' +
@@ -478,38 +477,31 @@ function matchRules(item){
     if (isHit){
       let exempted = false;
 
-      // A04 豁免：工程/拖车灯（绿、黄、白），且没提警用
       if (r.id === 'A04') {
         const safeColors = ['green', 'amber', 'yellow', 'white'];
         const hasSafeColor = safeColors.some(c => new RegExp(`\\b${c}\\b`, 'i').test(primary));
         const hasPoliceKeyword = /police|law enforcement|fire department|emergency vehicle/i.test(primary);
         if (hasSafeColor && !hasPoliceKeyword) exempted = true;
       }
-      // A06 豁免：空气悬挂气囊（纯机械件）
       if (r.id === 'A06') {
         const suspensionKeywords = ['suspension', 'spring', 'shock', 'strut'];
         if (suspensionKeywords.some(k => primary.includes(k))) exempted = true;
       }
-      // E02 豁免：纯五金/塑料电瓶配件
       if (r.id === 'E02') {
         const mechExceptions = ['battery tray', 'battery terminal', 'battery cable', 'battery hold down', 'battery box', 'battery bracket', 'battery cover'];
         if (mechExceptions.some(ex => primary.includes(ex))) exempted = true;
       }
-      // E03 豁免：汽配机械件及线圈/土壤
       if (r.id === 'E03') {
         const mechExceptions = ['oil filter', 'oil pan', 'oil seal', 'oil pump', 'oil cap', 'oil dipstick', 'coil', 'soil', 'oil cooler', 'liquid level sensor', 'liquid cooling', 'gas strut', 'gas shock', 'gas spring'];
         if (mechExceptions.some(ex => primary.includes(ex))) exempted = true;
       }
-      // E01 豁免：挡风玻璃/雨刮/眼镜/玻璃纤维/车灯透镜
       if (r.id === 'E01') {
         const safeGlass = ['fiberglass', 'windshield', 'wiper', 'glass cleaner', 'tempered glass screen', 'sunglasses', 'reading glasses', 'glass lens'];
         if (safeGlass.some(ex => primary.includes(ex))) exempted = true;
       }
-      // E04 豁免：专车专用(Custom Fit)
       if (r.id === 'E04') {
         if (primary.includes('custom fit') || primary.includes('customized: no')) exempted = true;
       }
-      // F02 豁免：滚针轴承
       if (r.id === 'F02') {
         const safeNeedles = ['needle bearing', 'needle nose', 'needle valve', 'pine needle', 'needle roller'];
         if (safeNeedles.some(ex => primary.includes(ex))) exempted = true;
@@ -721,7 +713,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         } catch (err) {
             console.error(err);
-            document.getElementById('historyBody').innerHTML = `<tr><td colspan="5" style="text-align:center;color:var(--red)">读取失败。请确保在 Supabase 开启了 RLS 读取策略。</td></tr>`;
+            document.getElementById('historyBody').innerHTML = `<tr><td colspan="5" style="text-align:center;color:var(--red)">读取失败。请确保在 Supabase 执行了建表 SQL 且开启了 RLS 读取策略。</td></tr>`;
         }
     } else {
         document.getElementById('loginMsg').innerText = '账号或密码错误！';
