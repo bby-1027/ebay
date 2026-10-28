@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>eBay 代采合规审核系统</title>
+<title>eBay 代采合规审核系统 · 多维交叉验证</title>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
@@ -74,7 +74,7 @@
       eBay 代采合规审核系统
       <button id="btnAdmin" style="background:#fbbf24; color:#0f172a; font-weight:700; border:none; padding:8px 16px; border-radius:6px; cursor:pointer; font-size:13px;">管理员登录</button>
     </h1>
-    <p>代采专版 · 资质门槛拦截 · 安全红线阻断 · 物流友好选品</p>
+    <p>代采专版 · 多维属性交叉验证 · 安全红线阻断</p>
   </div>
 </header>
 
@@ -108,7 +108,7 @@
     <div class="step"><div class="n">1</div><div class="t"><b>把紫色按钮拖到浏览器书签栏</b></div></div>
     <div class="step"><div class="n">2</div><div class="t"><b>点列表里的「打开并抓取」，在亚马逊页面点书签，数据会自动回传并清洗</b></div></div>
     <div style="text-align:center;padding:14px 0">
-      <a class="bmk" id="bmkLink" href="#" draggable="true">📋 eBay审核·清洗抓取</a>
+      <a class="bmk" id="bmkLink" href="#" draggable="true">📋 eBay审核·多维抓取</a>
     </div>
     <div class="actions" style="justify-content:center"><button class="btn ghost sm" id="btnCopyBmk" type="button">复制书签代码</button></div>
   </section>
@@ -179,14 +179,12 @@
 
 <script>
 /* ====================================================
-   配置区 & 管理账号
+   ⚠️ 配置区（请填入你的 Supabase 数据）
    ==================================================== */
-// 请确保你已经在 GitHub 中填入了真实的 Supabase 链接和 Key
 const supabaseUrl = 'https://pzmcbalkbycmfnugppbh.supabase.co/rest/v1/'; 
 const supabaseKey = 'sb_publishable_Bv_Ib0Yh4Spie676mXV5bw_FAiNwch-'; 
 let sbClient = null;
 
-// 这里的密码虽然隐藏了提示，但依然存在于代码中（F12可看），够用了。
 const ADMIN_USER = 'admin';
 const ADMIN_PASS = '888888';
 
@@ -205,10 +203,9 @@ try {
 }
 
 /* ====================================================
-   代采卖家专属：极度严苛的四重红线规则库
+   规则库
    ==================================================== */
 const RULES = [
-  // --- A类：平台绝对禁售（零容忍） ---
   {id:'A01',lv:'R1',name:'二氯甲烷/脱漆剂',kw:['dichloromethane','methylene chloride','二氯甲烷','paint stripper','脱漆剂','headlight restoration']},
   {id:'A04',lv:'R1',name:'警用/应急警示灯',kw:['police light','police siren','emergency light','warning light bar','strobe','警灯','警用','应急照明']},
   {id:'A06',lv:'R1',name:'安全气囊',kw:['airbag','air bag','安全气囊','inflator module']},
@@ -218,20 +215,17 @@ const RULES = [
   {id:'D01',lv:'R1',name:'仿冒品/侵权',kw:['replica','knockoff','counterfeit','fake','仿冒']},
   {id:'D03',lv:'R1',name:'武器/管制刀具',kw:['taser','stun gun','brass knuckle','switchblade','电击器','指虎']},
 
-  // --- F类：资质门槛（代采拿不到资料，直接死） ---
   {id:'F01',lv:'R1',name:'儿童产品认证 (CPC)',kw:['cpc certified','cpsia','children toy','kids toy','baby toy','infant','toddler','儿童玩具','婴儿']},
   {id:'F02',lv:'R1',name:'医疗/化妆品认证 (FDA)',kw:['fda approved','fda registered','medical device','cosmetic','skincare','supplement','vitamin','医疗器械','化妆品','保健品','处方药','cpap']},
   {id:'F03',lv:'R1',name:'农药/杀菌认证 (EPA)',kw:['epa registered','pesticide','insecticide','herbicide','disinfectant','sanitizer','杀虫剂','除草剂','消毒液','杀菌']},
   {id:'F04',lv:'R1',name:'无线电/排放认证 (FCC/EPA)',kw:['fcc id','carb compliant','catalytic converter','carburetor','fuel tank','催化转换器','化油器','bluetooth','wi-fi','wifi','wireless transmitter','drone']},
   {id:'F05',lv:'R1',name:'品牌知识产权授权',kw:['disney','marvel','pokemon','apple','iphone','samsung','nike','adidas','anime character']},
 
-  // --- E类：物理形态红线（易碎/带电/液体/定制） ---
   {id:'E01',lv:'R1',name:'易碎/玻璃/陶瓷',kw:['glass','ceramic','porcelain','crystal','fragile','glassware','玻璃','陶瓷','易碎','水晶']},
   {id:'E02',lv:'R1',name:'电池/带电产品',kw:['battery','lithium','lipo','aaa battery','aa battery','rechargeable','电池','锂电池','充电']},
   {id:'E03',lv:'R1',name:'液体/喷雾/膏体',kw:['liquid','spray','aerosol','perfume','oil','lotion','液体','喷雾','香水','精油','乳液']},
   {id:'E04',lv:'R1',name:'定制品/刻字/印图',kw:['custom made','customized','personalized','engraved','monogram','made to order','定制','定做','刻字','印字','专属']},
 
-  // --- S类：高售后与安全关键（承重/救生/防护/复杂安装） ---
   {id:'S01',lv:'R1',name:'安全关键/防护/救生',kw:['life jacket','life vest','helmet','safety harness','respirator','救生衣','头盔','安全带','防毒面具']},
   {id:'S02',lv:'R1',name:'承重/高压/燃气',kw:['weight capacity','load bearing','propane','gas regulator','high pressure','承重','高压','燃气']},
   {id:'S03',lv:'R1',name:'复杂安装/需布线',kw:['wiring kit','hardwired','installation kit','需布线','复杂安装']}
@@ -252,12 +246,14 @@ const DEFAULT_CAT_MAP = [
 const DEFAULT_COLUMNS = ['Action','Category','Title','Description','Condition ID','Quantity','Format','StartPrice','SKU','UPC'];
 const DEFAULT_INFO = '#INFO,Version=0.0.2,Template=eBay-draft-listing-template';
 
-/* ================= 抓取脚本 ================= */
+/* ================= 抓取脚本（深度提取多维属性） ================= */
 const GRAB_SCRIPT = '(function(){' +
 'var p=function(s){for(var i=0;i<s.length;i++){var e=document.querySelector(s[i]);if(e&&e.innerText&&e.innerText.trim())return e.innerText.trim()}return""};' +
 'var t=p(["#productTitle","#title","h1[data-testid=\'product-title\']","h1"])||document.title;' +
 'var b=p(["#feature-bullets","#feature_bullets","[data-testid=\'feature-bullets\']"]);' +
 'var d=p(["#productDescription","#aplus","#aplus_feature_div","[data-testid=\'product-description\']"]);' +
+// 核心升级：强制抓取商品参数表（兼容性、材质、是否带电等）
+'var spec=p(["#productDetails_techSpec_section_1","#productDetails_detailBullets_sections1","#detailBullets_feature_div","#prodDetails"]);' +
 'var m=location.href.match(/\\/(?:dp|gp\\/product)\\/([A-Z0-9]{10})/);' +
 'var cleanText=function(str){' +
 '  if(!str) return "";' +
@@ -271,7 +267,8 @@ const GRAB_SCRIPT = '(function(){' +
 '            .replace(/is electric[:\\s]*no/ig, " ")' +
 '            .replace(/[\\r\\n]+/g, " ").trim();' +
 '};' +
-'var o={asin:m?m[1]:"",url:location.href,title:cleanText(t),bullets:cleanText(b),desc:cleanText(d),ts:Date.now()};' +
+// 把参数表拼接进详情描述中
+'var o={asin:m?m[1]:"",url:location.href,title:cleanText(t),bullets:cleanText(b),desc:cleanText(d) + " " + cleanText(spec),ts:Date.now()};' +
 'if(window.opener && !window.opener.closed){' +
 '  try{' +
 '    window.opener.postMessage({type:"EBAY_GRAB", data:o}, "*");' +
@@ -453,11 +450,12 @@ function processPasteData(text){
 
 function combinedText(item){
   const g = state.grabMap[item.asin] || {};
+  // 合并标题、详情、类目、参数表（现在参数表包含在 desc 中）
   const primary = [item.title, item.desc, item.category, item.model, g.title, g.bullets, g.desc].filter(Boolean).join(' \n ').toLowerCase();
   return {primary};
 }
 
-/* ================= 核心逻辑：代采防误判交叉验证 ================= */
+/* ================= 核心逻辑：多维属性交叉比对 ================= */
 function matchRules(item){
   const {primary} = combinedText(item); 
   const hits = [];
@@ -478,31 +476,46 @@ function matchRules(item){
     if (isHit){
       let exempted = false;
 
+      // 多维交叉验证 1：A04警用灯豁免（工程拖车灯颜色：绿/黄/白，且无警察字眼）
       if (r.id === 'A04') {
         const safeColors = ['green', 'amber', 'yellow', 'white'];
         const hasSafeColor = safeColors.some(c => new RegExp(`\\b${c}\\b`, 'i').test(primary));
         const hasPoliceKeyword = /police|law enforcement|fire department|emergency vehicle/i.test(primary);
         if (hasSafeColor && !hasPoliceKeyword) exempted = true;
       }
+      
+      // 多维交叉验证 2：A06安全气囊豁免（空气悬挂）
       if (r.id === 'A06') {
         const suspensionKeywords = ['suspension', 'spring', 'shock', 'strut'];
         if (suspensionKeywords.some(k => primary.includes(k))) exempted = true;
       }
+
+      // 多维交叉验证 3：E02电池豁免（如果是纯五金件，或者参数明确写 "Batteries Required: No"）
       if (r.id === 'E02') {
-        const mechExceptions = ['battery tray', 'battery terminal', 'battery cable', 'battery hold down', 'battery box', 'battery bracket', 'battery cover'];
+        const mechExceptions = ['battery tray', 'battery terminal', 'battery cable', 'battery hold down', 'battery box', 'battery bracket', 'battery cover', 'batteries required: no'];
         if (mechExceptions.some(ex => primary.includes(ex))) exempted = true;
       }
+
+      // 多维交叉验证 4：E03液体豁免（机滤、油底壳等，或参数明确写形态为 Solid）
       if (r.id === 'E03') {
-        const mechExceptions = ['oil filter', 'oil pan', 'oil seal', 'oil pump', 'oil cap', 'oil dipstick', 'coil', 'soil', 'oil cooler', 'liquid level sensor', 'liquid cooling', 'gas strut', 'gas shock', 'gas spring'];
+        const mechExceptions = ['oil filter', 'oil pan', 'oil seal', 'oil pump', 'oil cap', 'oil dipstick', 'coil', 'soil', 'oil cooler', 'liquid level sensor', 'liquid cooling', 'gas strut', 'gas shock', 'gas spring', 'form: solid'];
         if (mechExceptions.some(ex => primary.includes(ex))) exempted = true;
       }
+
+      // 多维交叉验证 5：E01易碎豁免（挡风玻璃、雨刮、眼镜等汽车/穿戴配件）
       if (r.id === 'E01') {
         const safeGlass = ['fiberglass', 'windshield', 'wiper', 'glass cleaner', 'tempered glass screen', 'sunglasses', 'reading glasses', 'glass lens'];
-        if (safeGlass.some(ex => primary.includes(ex))) exempted = true;
+        // 如果命中玻璃，但类目是 Automotive 或标题有车配件，也直接豁免
+        const isAutoPart = /automotive|motors|wiper|brake|suspension/i.test(primary);
+        if (safeGlass.some(ex => primary.includes(ex)) || isAutoPart) exempted = true;
       }
+
+      // 多维交叉验证 6：E04定制豁免（如果是专车专用）
       if (r.id === 'E04') {
         if (primary.includes('custom fit') || primary.includes('customized: no')) exempted = true;
       }
+
+      // 多维交叉验证 7：医疗针头豁免（滚针轴承）
       if (r.id === 'F02') {
         const safeNeedles = ['needle bearing', 'needle nose', 'needle valve', 'pine needle', 'needle roller'];
         if (safeNeedles.some(ex => primary.includes(ex))) exempted = true;
@@ -697,13 +710,13 @@ document.addEventListener('DOMContentLoaded', () => {
         historyView.hidden = false;
         
         if (!sbClient) {
-            document.getElementById('historyBody').innerHTML = `<tr><td colspan="5" style="text-align:center;color:var(--muted)">当前为本地模式，未连接云端数据库，无法查看记录。</td></tr>`;
+            document.getElementById('historyBody').innerHTML = `<tr><td colspan="5" style="text-align:center;color:var(--muted)">当前为本地模式，未连接云端数据库。</td></tr>`;
             return;
         }
         
         try {
             const { data, error } = await sbClient.from('audit_logs').select('*').order('created_at', { ascending: false }).limit(50);
-            if (error) throw error;
+            if (error) throw error; // 捕捉具体错误
             
             if (!data || data.length === 0) {
                 document.getElementById('historyBody').innerHTML = `<tr><td colspan="5" style="text-align:center;color:var(--muted)">暂无审核记录。</td></tr>`;
@@ -714,7 +727,8 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         } catch (err) {
             console.error(err);
-            document.getElementById('historyBody').innerHTML = `<tr><td colspan="5" style="text-align:center;color:var(--red)">读取失败。请确保在 Supabase 执行了重置 SQL 并允许了全部读写。</td></tr>`;
+            // 显示具体的报错信息，方便排错
+            document.getElementById('historyBody').innerHTML = `<tr><td colspan="5" style="text-align:center;color:var(--red);font-size:12px;">读取失败，请检查 Supabase URL/Key。错误详情：${esc(err.message)}</td></tr>`;
         }
     } else {
         document.getElementById('loginMsg').innerText = '账号或密码错误！';
