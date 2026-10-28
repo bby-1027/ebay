@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>eBay 代采合规审核系统 · 精准风控版</title>
+<title>eBay 代采合规审核系统 · 终极稳定版</title>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
@@ -94,8 +94,8 @@
   </section>
 
   <section class="card" id="tplCard">
-    <h2><span class="num">2</span>上传固定 eBay 模板（必传）</h2>
-    <p class="hint">系统强制要求上传。确保生成的 CSV 列顺序与你的模板绝对一致。</p>
+    <h2><span class="num">2</span>上传固定 eBay 模板</h2>
+    <p class="hint" id="tplHint">首次使用需上传。系统会记住你的模板列顺序，以后无需重复上传。</p>
     <div class="drop" id="dropTpl" style="padding: 20px;">
       <p>请选择 eBay 固定模板 CSV，或拖入此区域</p>
       <input type="file" id="fileTpl" accept=".csv,.txt">
@@ -366,7 +366,7 @@ function ingestGoods(rows, name){
   renderQueue();
 }
 
-/* ================= 读取模板 ================= */
+/* ================= 读取模板（带本地持久化） ================= */
 function readTemplate(file) {
   const reader = new FileReader();
   reader.onload = e => {
@@ -387,9 +387,12 @@ function readTemplate(file) {
       state.tplInfoLine = infoLine;
       state.tplColumns = headerRow;
       
+      // 持久化到本地
+      localStorage.setItem('ebay_tpl', JSON.stringify({ info: infoLine, cols: headerRow }));
+      
       const tag = $('tplTag');
       tag.style.display = 'inline-flex';
-      tag.textContent = '✓ 已加载模板 (' + headerRow.length + ' 列)';
+      tag.textContent = '✓ 已加载并记住模板 (' + headerRow.length + ' 列)';
       
       if (state.results.length > 0) $('btnExportCsv').disabled = false;
     } catch(err) {
@@ -398,6 +401,22 @@ function readTemplate(file) {
     }
   };
   reader.readAsText(file, 'UTF-8');
+}
+
+// 启动时从本地读取模板
+function loadTemplateFromLocal() {
+  try {
+    const saved = localStorage.getItem('ebay_tpl');
+    if (saved) {
+      const data = JSON.parse(saved);
+      state.tplInfoLine = data.info;
+      state.tplColumns = data.cols;
+      const tag = $('tplTag');
+      tag.style.display = 'inline-flex';
+      tag.textContent = '✓ 已自动读取上次模板 (' + data.cols.length + ' 列)';
+      $('tplHint').textContent = '已记住上次模板。如果 eBay 官方模板更新，可重新上传覆盖。';
+    }
+  } catch(e) {}
 }
 
 function renderQueue(){
@@ -575,19 +594,28 @@ function runAudit(){
   try {
     for (const item of state.items){
       const verified = !!state.grabMap[item.asin]; 
-      const hits = matchRules(item);
-      const r1r2 = hits.filter(h => h.lv === 'R1' || h.lv === 'R2'); 
-      const r3 = hits.filter(h => h.lv === 'R3'); 
       
-      let status, catMatch = null, reason = '';
+      let status, catMatch = null, reason = '', r1r2 = [], r3 = [];
       
-      if (r1r2.length) status = 'rejected'; 
-      else if (!verified){ status = 'pending'; reason = '链接未抓取'; }
-      else if (r3.length){ status = 'pending'; reason = '命中 R3 待核实'; } 
-      else { 
-        catMatch = matchCategory(item); 
-        if (catMatch) status = 'passed'; 
-        else { status = 'pending'; reason = '无匹配 Category ID'; } 
+      if (!verified) {
+          // 核心修改点：如果未抓取，直接进入待核实，绝不淘汰！
+          status = 'pending';
+          reason = '未抓取链接，无法确认合规性';
+      } else {
+          // 只有抓取了，才进行 AI 审核
+          const hits = matchRules(item);
+          r1r2 = hits.filter(h => h.lv === 'R1' || h.lv === 'R2'); 
+          r3 = hits.filter(h => h.lv === 'R3'); 
+          
+          if (r1r2.length) {
+              status = 'rejected'; 
+          } else if (r3.length) {
+              status = 'pending'; reason = '命中 R3 待核实'; 
+          } else { 
+              catMatch = matchCategory(item); 
+              if (catMatch) status = 'passed'; 
+              else { status = 'pending'; reason = '无匹配 Category ID'; } 
+          }
       }
       
       if (status === 'passed'){
@@ -869,6 +897,7 @@ document.addEventListener('DOMContentLoaded', () => {
 /* ================= 初始化与事件绑定 ================= */
 (function init(){
   safe(loadCatMap, '类目映射加载');
+  safe(loadTemplateFromLocal, '加载本地模板记录');
   
   const input = $('fileGoods'); 
   const drop = $('dropGoods'); 
