@@ -3,12 +3,12 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>eBay 代采合规审核系统 · 终极稳定版</title>
+<title>eBay 代采合规审核系统 · 终极挂机版</title>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
   *{box-sizing:border-box}
-  :root{--ink:#0f172a;--muted:#64748b;--line:#e2e8f0;--bg:#f8fafc;--blue:#2563eb;--red:#dc2626;--amber:#d97706;--green:#16a34a;--violet:#7c3aed;--cyan:#0891b2}
+  :root{--ink:#0f172a;--muted:#64748b;--line:#e2e8f0;--bg:#f8fafc;--blue:#2563eb;--red:#dc2626;--amber:#d97706;--green:#16a34a;--violet:#7c3aed}
   body{margin:0;background:var(--bg);color:var(--ink);font-size:14px;line-height:1.6;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
   header{background:var(--ink);color:#fff;padding:22px 0}
   .wrap{max-width:1200px;margin:0 auto;padding:0 20px}
@@ -30,9 +30,8 @@
   .btn.primary{background:var(--blue);color:#fff}.btn.primary:hover{background:#1d4ed8}
   .btn.ghost{background:#fff;color:var(--ink);border:1px solid var(--line)}.btn.ghost:hover{background:#f1f5f9}
   .btn.green{background:var(--green);color:#fff}.btn.green:hover{background:#15803d}
+  .btn.violet{background:var(--violet);color:#fff}.btn.violet:hover{background:#6d28d9}
   .actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px}
-  textarea{width:100%;min-height:100px;border:1px solid var(--line);border-radius:8px;padding:12px;font-size:12px;resize:vertical;background:#fff;}
-  textarea:focus { outline: 2px solid var(--violet); border-color: transparent; }
   .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px}
   .stat{border:1px solid var(--line);border-radius:10px;padding:14px 16px;background:#fff}
   .stat .v{font-size:25px;font-weight:700;line-height:1.2}
@@ -66,7 +65,7 @@
 </head>
 <body>
 
-<div id="toast">✅ 已自动同步数据！</div>
+<div id="toast">✅ 已接收数据并打勾！</div>
 
 <header>
   <div class="wrap">
@@ -74,7 +73,7 @@
       eBay 代采合规审核系统
       <button id="btnAdmin" style="background:#fbbf24; color:#0f172a; font-weight:700; border:none; padding:8px 16px; border-radius:6px; cursor:pointer; font-size:13px;">管理员登录</button>
     </h1>
-    <p>代采专版 · 极速流水线版 · 请配合油猴脚本使用</p>
+    <p>代采专版 · 全自动挂机版 · 请配合油猴脚本使用</p>
   </div>
 </header>
 
@@ -104,20 +103,17 @@
   </section>
 
   <section class="card" id="queueCard" hidden>
-    <h2><span class="num">3</span>链接核验队列</h2>
-    <p class="hint" style="color:var(--red); font-weight:bold;">操作提示：用鼠标中键（滚轮按下）或按住 Ctrl 键点击蓝色的“打开”链接，可以瞬间在后台打开多个页面，不会被浏览器拦截。</p>
+    <h2><span class="num">3</span>链接核验队列（全自动接收）</h2>
     
     <div class="prog"><i id="progBar" style="width:0%"></i></div>
     <p class="hint" id="progText" style="margin:4px 0 12px">0 / 0 已核验</p>
+    
+    <div style="display:flex; gap:10px; margin-bottom:15px; align-items:center;">
+      <button class="btn violet" id="btnBatchOpen" onclick="openBatch(5)">🚀 一键挂机：批量打开 5 个链接</button>
+      <span style="font-size:12.5px; color:var(--muted);">打开后请停留在此页面，后台会自动接收数据并打勾，页面也会自动关闭。</span>
+    </div>
 
     <div id="queueBox"></div>
-    
-    <div class="grabzone" id="pasteZone">
-      <strong style="font-size:14px; color:var(--violet);">📥 数据吸附区</strong>
-      <p style="font-size:12.5px; color:#64748b; margin:4px 0 8px 0;">当后台的亚马逊页面自动关闭后，点一下下面的输入框，按 <b>Ctrl+V</b> 粘贴，数据会自动解析并打勾。</p>
-      <textarea id="pasteArea" placeholder="点这里，然后按 Ctrl+V 粘贴数据..."></textarea>
-      <p class="hint" id="pasteMsg" style="margin:8px 0 0; font-weight:bold;"></p>
-    </div>
   </section>
 
   <section class="card" id="runCard" hidden>
@@ -399,33 +395,49 @@ function renderQueue(){
   const rows = items.map(it => {
     const g = state.grabMap[it.asin]; 
     const status = g ? '<span class="tag ok">✓ 已抓取</span>' : '<span class="tag no">未抓取</span>';
-    // 把原生的 button 改成 a 标签，支持中键点击和 Ctrl+点击
     const openBtn = it.link ? `<a class="linkbtn" href="${esc(it.link)}" target="_blank">打开并抓取 ↗</a>` : '<span class="mono" style="color:#cbd5e1">无链接</span>';
     return `<tr><td class="mono">${it._row}</td><td class="mono">${esc(it.asin || '—')}</td><td style="max-width:360px">${esc((it.title || '').slice(0, 80))}</td><td>${status}</td><td>${openBtn}</td></tr>`;
   }).join('');
   $('queueBox').innerHTML = `<div class="tblbox" style="max-height:420px"><table><thead><tr><th>行</th><th>ASIN</th><th>表格标题</th><th>链接核验</th><th>操作</th></tr></thead><tbody>${rows}</tbody></table></div>`;
 }
 
+window.openLink = function(url) { window.open(url, '_blank'); };
+
+window.openBatch = function(count) {
+    const ungrabbed = state.items.filter(it => it.link && !state.grabMap[it.asin]);
+    if (!ungrabbed.length) { alert('所有链接都抓取完毕了！'); return; }
+    
+    const toOpen = ungrabbed.slice(0, count);
+    
+    // 同步连续打开
+    toOpen.forEach((it) => {
+        window.open(it.link, '_blank');
+    });
+    
+    const toast = $('toast'); 
+    toast.textContent = `已请求打开 ${toOpen.length} 个窗口，正在后台静默抓取...`;
+    toast.style.opacity = '1'; 
+    setTimeout(() => { toast.style.opacity = '0'; }, 3000);
+};
+
 function extractAsinFromUrl(url){ const m = String(url).match(/\/(?:dp|gp\/product)\/([A-Z0-9]{10})/); return m ? m[1] : ''; }
 
-function processPasteData(text){
-  if (!text || !text.includes('<<<EBAY_AUDIT>>>')) return false;
-  const parts = text.split('<<<EBAY_AUDIT>>>').filter(s => s.trim());
-  let ok = 0, fail = 0; const noMatch = [];
-  for (const part of parts){
-    try {
-      const obj = JSON.parse(part.trim()); if (!obj || (!obj.asin && !obj.url)){ fail++; continue; }
-      const key = obj.asin || extractAsinFromUrl(obj.url); if (!key){ fail++; continue; }
-      const item = state.items.find(it => it.asin === key); if (!item){ noMatch.push(key); fail++; continue; }
-      state.grabMap[key] = obj; ok++;
-    } catch(e){ fail++; }
-  }
-  const msg = [];
-  if (ok) msg.push('✅ 成功关联 ' + ok + ' 条'); if (noMatch.length) msg.push('⚠ 找不到 ASIN：' + noMatch.join(', ')); if (fail && !noMatch.length) msg.push('❌ ' + fail + ' 条格式错误');
-  if($('pasteMsg')) { $('pasteMsg').textContent = msg.join('　') || '未识别到内容'; $('pasteMsg').style.color = ok ? '#15803d' : '#dc2626'; }
-  if (ok){ renderQueue(); const toast = $('toast'); toast.style.opacity = '1'; setTimeout(() => toast.style.opacity = '0', 2000); }
-  return true;
-}
+// 核心：接收从油猴脚本发来的跨窗口数据
+window.addEventListener('message', function(event) {
+    if (event.data && event.data.type === 'EBAY_GRAB') {
+        const obj = event.data.data;
+        if(!obj || !obj.asin) return;
+        const item = state.items.find(it => it.asin === obj.asin);
+        if(item) {
+            state.grabMap[obj.asin] = obj;
+            renderQueue();
+            const toast = $('toast'); 
+            toast.textContent = `✅ 已接收 ASIN: ${obj.asin}`;
+            toast.style.opacity = '1'; 
+            setTimeout(() => { toast.style.opacity = '0'; }, 2000);
+        }
+    }
+});
 
 function matchRules(item){
   const g = state.grabMap[item.asin] || {};
@@ -882,19 +894,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }); 
   }
 
-  safe(() => {
-    const pa = $('pasteArea'); if (!pa) return;
-    pa.addEventListener('paste', e => { 
-        const t = (e.clipboardData || window.clipboardData).getData('text'); 
-        if (processPasteData(t)){ 
-            e.preventDefault(); 
-            pa.value = ''; // 粘贴后清空
-            pa.placeholder = "数据已解析！请在亚马逊页面点开下一个链接...";
-            setTimeout(() => pa.placeholder = "点这里，然后按 Ctrl+V 粘贴数据...", 3000);
-        } 
-    });
-  }, '粘贴区绑定');
-  
   safe(() => { const b = $('btnClear'); if (!b) return; b.addEventListener('click', () => { state.results = []; state.advices = []; $('results').hidden = true; }); }, '清空按钮');
   
   safe(() => { 
