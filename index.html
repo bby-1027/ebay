@@ -1,55 +1,921 @@
-// ==UserScript==
-// @name         Amazon 自动抓取极速版
-// @namespace    http://tampermonkey.net/
-// @version      2.0
-// @description  自动抓取亚马逊商品数据，极速响应
-// @author       You
-// @match        *://*.amazon.com/*
-// @grant        none
-// ==/UserScript==
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>eBay 代采合规审核系统 · 终极稳定版</title>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  *{box-sizing:border-box}
+  :root{--ink:#0f172a;--muted:#64748b;--line:#e2e8f0;--bg:#f8fafc;--blue:#2563eb;--red:#dc2626;--amber:#d97706;--green:#16a34a;--violet:#7c3aed;--cyan:#0891b2}
+  body{margin:0;background:var(--bg);color:var(--ink);font-size:14px;line-height:1.6;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+  header{background:var(--ink);color:#fff;padding:22px 0}
+  .wrap{max-width:1200px;margin:0 auto;padding:0 20px}
+  header h1{margin:0;font-size:19px;font-weight:600;display:flex;justify-content:space-between;align-items:center}
+  header p{margin:6px 0 0;font-size:12.5px;color:#94a3b8}
+  main{padding:24px 0 70px}
+  .card{background:#fff;border:1px solid var(--line);border-radius:12px;padding:20px 22px;margin-bottom:18px;box-shadow:0 1px 2px rgba(15,23,42,.04)}
+  .card h2{margin:0 0 12px;font-size:15px;font-weight:600;display:flex;align-items:center;gap:8px}
+  .card h2 .num{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:6px;background:#eff6ff;color:var(--blue);font-size:12px;font-weight:700}
+  .hint{color:var(--muted);font-size:12.5px;margin:-4px 0 12px}
+  
+  .drop{border:2px dashed #cbd5e1;border-radius:10px;padding:30px 20px;text-align:center;transition:.15s;background:#fcfdff}
+  .drop.over{border-color:var(--blue);background:#eff6ff}
+  .drop p { margin: 0 0 15px 0; font-weight: 600; color: #334155; }
+  .drop input[type="file"] { padding:10px 20px; background: #fff; border: 1px solid #cbd5e1; border-radius: 6px; cursor: pointer; font-family: inherit; font-size: 14px; }
+  .filetag{display:none; align-items:center; gap:8px; background:#ecfdf5; color:#047857; border:1px solid #a7f3d0; border-radius:8px; padding:10px 14px; font-size:13px; margin-top:15px;}
+  
+  .btn{border:none;border-radius:8px;padding:10px 18px;font-size:13.5px;font-weight:600;cursor:pointer;transition:.15s;font-family:inherit;text-decoration:none;display:inline-flex;align-items:center;gap:6px}
+  .btn.primary{background:var(--blue);color:#fff}.btn.primary:hover{background:#1d4ed8}
+  .btn.ghost{background:#fff;color:var(--ink);border:1px solid var(--line)}.btn.ghost:hover{background:#f1f5f9}
+  .btn.green{background:var(--green);color:#fff}.btn.green:hover{background:#15803d}
+  .actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px}
+  textarea{width:100%;min-height:100px;border:1px solid var(--line);border-radius:8px;padding:12px;font-size:12px;resize:vertical;background:#fff;}
+  textarea:focus { outline: 2px solid var(--violet); border-color: transparent; }
+  .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px}
+  .stat{border:1px solid var(--line);border-radius:10px;padding:14px 16px;background:#fff}
+  .stat .v{font-size:25px;font-weight:700;line-height:1.2}
+  .stat .l{font-size:12px;color:var(--muted);margin-top:2px}
+  .tblbox{overflow:auto;border:1px solid var(--line);border-radius:10px}
+  table{width:100%;border-collapse:collapse;font-size:12.5px}
+  th{background:#f1f5f9;text-align:left;padding:9px 12px;font-weight:600;white-space:nowrap;border-bottom:1px solid var(--line);position:sticky;top:0}
+  td{padding:9px 12px;border-bottom:1px solid #f1f5f9;vertical-align:top}
+  .tag{display:inline-block;padding:1px 7px;border-radius:5px;font-size:11px;font-weight:700}
+  .tag.R1{background:#fee2e2;color:#b91c1c}.tag.R2{background:#ffedd5;color:#c2410c}.tag.R3{background:#fef3c7;color:#a16207}
+  .tag.id{background:#e0e7ff;color:#3730a3;font-family:monospace}.tag.ok{background:#dcfce7;color:#15803d}.tag.no{background:#f1f5f9;color:#64748b}
+  .tag.Official{background:#fee2e2;color:#b91c1c}.tag.Business{background:#e0f2fe;color:#0284c7}
+  .mono{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11.5px;color:#475569}
+  .kw{background:#fef9c3;padding:0 3px;border-radius:3px}
+  .empty{text-align:center;padding:34px 20px;color:var(--muted);font-size:13px}
+  .banner{background:#fffbeb;border:1px solid #fde68a;border-radius:10px;padding:12px 16px;font-size:12.5px;color:#92400e;margin-bottom:18px}
+  .step{display:flex;gap:12px;margin-bottom:12px}
+  .step .n{flex:0 0 24px;height:24px;border-radius:50%;background:#eff6ff;color:var(--blue);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700}
+  .grabzone{border:2px dashed var(--violet);border-radius:10px;padding:16px;background:#faf5ff;margin-top:14px}
+  .prog{height:8px;background:#e2e8f0;border-radius:99px;overflow:hidden;margin:10px 0 4px}
+  .prog i{display:block;height:100%;background:var(--violet);border-radius:99px;transition:.25s}
+  .linkbtn{background:var(--blue); color:#fff; border:none; border-radius:6px; padding:4px 10px; font-size:12px; font-weight:bold; cursor:pointer; text-decoration:none; display:inline-block;}
+  .linkbtn:hover{background:#1d4ed8}
+  .err{background:#fef2f2;border:1px solid #fecaca;color:#b91c1c;border-radius:8px;padding:10px 14px;font-size:12.5px;margin-top:12px;display:none;}
+  #toast{position:fixed;top:20px;left:50%;transform:translateX(-50%);background:var(--green);color:#fff;padding:10px 20px;border-radius:8px;font-weight:600;opacity:0;transition:.3s;pointer-events:none;z-index:9999}
+  .modal{display:none;position:fixed;inset:0;background:rgba(15,23,42,.6);z-index:9999;align-items:center;justify-content:center}
+  .modal.show{display:flex}
+  .modal-content{background:#fff;border-radius:12px;padding:24px;width:90%;max-width:600px;max-height:80vh;overflow:auto}
+  [hidden]{display:none !important}
+</style>
+</head>
+<body>
 
-(function() {
-    'use strict';
+<div id="toast">✅ 已自动同步数据！</div>
+
+<header>
+  <div class="wrap">
+    <h1>
+      eBay 代采合规审核系统
+      <button id="btnAdmin" style="background:#fbbf24; color:#0f172a; font-weight:700; border:none; padding:8px 16px; border-radius:6px; cursor:pointer; font-size:13px;">管理员登录</button>
+    </h1>
+    <p>代采专版 · 极速流水线版 · 请配合油猴脚本使用</p>
+  </div>
+</header>
+
+<main class="wrap">
+  <div class="banner" id="dbStatusBanner">
+    <b>系统提示：</b>正在初始化环境...
+  </div>
+
+  <section class="card" id="uploadCard">
+    <h2><span class="num">1</span>上传卖家精灵商品表</h2>
+    <div class="drop" id="dropGoods">
+      <p>请选择商品数据 Excel，或拖入此区域</p>
+      <input type="file" id="fileGoods" accept=".xlsx,.xls,.csv">
+      <div id="goodsTag" class="filetag"></div>
+    </div>
+    <div id="goodsErr" class="err"></div>
+  </section>
+
+  <section class="card" id="tplCard">
+    <h2><span class="num">2</span>上传固定 eBay 模板</h2>
+    <p class="hint" id="tplHint">首次使用需上传。系统会记住你的模板列顺序，以后无需重复上传。</p>
+    <div class="drop" id="dropTpl" style="padding: 20px;">
+      <p>请选择 eBay 固定模板 CSV，或拖入此区域</p>
+      <input type="file" id="fileTpl" accept=".csv,.txt">
+      <div id="tplTag" class="filetag"></div>
+    </div>
+  </section>
+
+  <section class="card" id="queueCard" hidden>
+    <h2><span class="num">3</span>链接核验队列</h2>
+    <p class="hint" style="color:var(--red); font-weight:bold;">操作提示：用鼠标中键（滚轮按下）或按住 Ctrl 键点击蓝色的“打开”链接，可以瞬间在后台打开多个页面，不会被浏览器拦截。</p>
     
-    if (!location.href.match(/\/(?:dp|gp\/product)\/([A-Z0-9]{10})/)) return;
-    console.log("【油猴】开始监控页面加载...");
+    <div class="prog"><i id="progBar" style="width:0%"></i></div>
+    <p class="hint" id="progText" style="margin:4px 0 12px">0 / 0 已核验</p>
 
-    let checkCount = 0;
-    let timer = setInterval(() => {
-        checkCount++;
-        if (document.querySelector("#productTitle") || checkCount > 75) {
-            clearInterval(timer);
-            console.log("【油猴】页面已就绪，开始抓取...");
-            captureData();
-        }
-    }, 200);
+    <div id="queueBox"></div>
+    
+    <div class="grabzone" id="pasteZone">
+      <strong style="font-size:14px; color:var(--violet);">📥 数据吸附区</strong>
+      <p style="font-size:12.5px; color:#64748b; margin:4px 0 8px 0;">当后台的亚马逊页面自动关闭后，点一下下面的输入框，按 <b>Ctrl+V</b> 粘贴，数据会自动解析并打勾。</p>
+      <textarea id="pasteArea" placeholder="点这里，然后按 Ctrl+V 粘贴数据..."></textarea>
+      <p class="hint" id="pasteMsg" style="margin:8px 0 0; font-weight:bold;"></p>
+    </div>
+  </section>
 
-    function captureData() {
-        try {
-            var p=function(s){for(var i=0;i<s.length;i++){var e=document.querySelector(s[i]);if(e&&e.innerText&&e.innerText.trim())return e.innerText.trim()}return""};
-            var t=p(["#productTitle","#title","h1[data-testid='product-title']","h1"])||document.title;
-            var b=p(["#feature-bullets","#feature_bullets","[data-testid='feature-bullets']"]);
-            var d=p(["#productDescription","#aplus","#aplus_feature_div","[data-testid='product-description']"]);
-            var spec=p(["#productDetails_techSpec_section_1","#productDetails_detailBullets_sections1","#detailBullets_feature_div","#prodDetails"]);
-            var vary=p(["#twister","#twister_feature_div","#variation_feature_div"]);
-            var imgStr=""; var imgs=document.querySelectorAll("#altImages img, #landingImage"); for(var i=0;i<imgs.length;i++){imgStr+=(imgs[i].alt||"")+" "+(imgs[i].src||"")+" ";}
-            var comp=p(["#fitment_feature_div","#productDetails_techSpec_section_1"]);
-            var m=location.href.match(/\/(?:dp|gp\/product)\/([A-Z0-9]{10})/);
-            
-            var rawText = [t, b, d, spec].join(" \n ").replace(/[\r\n]+/g, " ");
-            var o={asin:m?m[1]:"",url:location.href,title:t,raw:rawText,vary:vary,img:imgStr,comp:comp,ts:Date.now()};
-            var str="<<<EBAY_AUDIT>>>"+JSON.stringify(o);
-            
-            navigator.clipboard.writeText(str).then(() => {
-                console.log("【油猴】✅ 数据已复制！");
-            });
+  <section class="card" id="runCard" hidden>
+    <h2><span class="num">4</span>执行综合审核</h2>
+    <div class="actions" style="margin-top:0">
+      <button class="btn primary" id="btnRun" type="button">开始审核并保存记录</button>
+      <button class="btn ghost" id="btnClear" type="button">清空结果</button>
+    </div>
+  </section>
 
-            document.body.innerHTML = "<div style='text-align:center; margin-top:100px; font-family:sans-serif;'><h1 style='color:#16a34a;'>✅ 数据已自动抓取！</h1><p style='color:#666;'>窗口即将关闭...</p></div>";
-            
-            setTimeout(function(){ window.close(); }, 300);
-            
-        } catch(e) {
-            console.error("【油猴】抓取错误:", e);
-        }
+  <div id="results" hidden>
+    <section class="card"><h2><span class="num">✓</span>审核总结</h2><div class="stats" id="stats"></div></section>
+    
+    <section class="card"><h2><span class="num">!</span>淘汰商品（官方禁止 / 本业务不经营）</h2><div id="rejBox"></div></section>
+    <section class="card"><h2><span class="num">?</span>待核实（R3 / 链接未核验 / 无类目）</h2><div id="pendBox"></div></section>
+    <section class="card"><h2><span class="num">+</span>优化建议</h2><div id="advBox"></div></section>
+    
+    <section class="card">
+      <h2><span class="num">↓</span>最终 CSV</h2>
+      <p class="hint" id="csvHint"></p>
+      <div id="passBox"></div>
+      <div class="actions">
+        <button class="btn green" id="btnExportCsv" type="button">下载候选商品 CSV</button>
+      </div>
+    </section>
+  </div>
+</main>
+
+<!-- 管理员弹窗 -->
+<div class="modal" id="adminModal">
+  <div class="modal-content">
+    <h2 style="margin-top:0; border-bottom:1px solid #e2e8f0; padding-bottom:10px;">管理员控制台</h2>
+    
+    <div id="loginView">
+      <p class="hint" style="margin-bottom:15px">仅供内部管理员登录查看数据。</p>
+      <input type="text" id="adminEmail" placeholder="请输入管理员账号" style="width:100%;padding:10px;margin-bottom:10px;border:1px solid var(--line);border-radius:8px">
+      <input type="password" id="adminPass" placeholder="请输入密码" style="width:100%;padding:10px;margin-bottom:10px;border:1px solid var(--line);border-radius:8px">
+      <div class="actions">
+        <button class="btn primary" id="btnLogin">登录</button>
+        <button class="btn ghost" id="btnCloseModal">关闭</button>
+      </div>
+      <p id="loginMsg" style="color:var(--red);font-size:12px;margin-top:10px"></p>
+    </div>
+
+    <div id="historyView" hidden>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px">
+        <span id="adminName" style="font-weight:600;color:var(--blue)">已登录管理员</span>
+        <button class="btn ghost sm" id="btnLogout">退出登录</button>
+      </div>
+      <div class="tblbox" style="max-height:400px">
+        <table>
+          <thead><tr><th>时间</th><th>批次号</th><th>总数</th><th>拦截</th><th>通过</th></tr></thead>
+          <tbody id="historyBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ====================================================
+   ⚠️ 必填配置区
+   ==================================================== */
+const supabaseUrl = ''; 
+const supabaseKey = ''; 
+let sbClient = null;
+const ADMIN_USER = 'admin';
+const ADMIN_PASS = '888888';
+
+try {
+  if (supabaseUrl && supabaseUrl.includes('supabase.co') && supabaseKey.length > 20) {
+    sbClient = window.supabase.createClient(supabaseUrl, supabaseKey);
+    document.getElementById('dbStatusBanner').innerHTML = '<b>云端已连接：</b>审核记录将自动保存。';
+    document.getElementById('dbStatusBanner').style.background = '#ecfdf5';
+    document.getElementById('dbStatusBanner').style.color = '#047857';
+    document.getElementById('dbStatusBanner').style.borderColor = '#a7f3d0';
+  } else {
+    throw new Error("未填写配置");
+  }
+} catch (e) {
+  document.getElementById('dbStatusBanner').innerHTML = '<b>本地模式运行中：</b>由于未配置云端密钥，审核记录将保存在本地浏览器。';
+}
+
+/* ====================================================
+   规则库
+   ==================================================== */
+const RULES = [
+  {id:'A01',lv:'R1',type:'Official',name:'二氯甲烷/脱漆剂',kw:['dichloromethane','methylene chloride','二氯甲烷','paint stripper','脱漆剂','headlight restoration']},
+  {id:'A04',lv:'R1',type:'Official',name:'警用/应急警示灯',kw:['police light','police siren','emergency light','warning light bar','strobe','警灯','警用','应急照明']},
+  {id:'A06',lv:'R1',type:'Official',name:'安全气囊',kw:['airbag','air bag','安全气囊','inflator module']},
+  {id:'A08',lv:'R1',type:'Official',name:'排放作弊/调校',kw:['dpf delete','egr delete','def delete','tuner','tuning','off-road use only','not legal for street','bypass kit']},
+  {id:'A14',lv:'R1',type:'Official',name:'信号屏蔽器',kw:['jammer','signal blocker','gps blocker','屏蔽器']},
+  {id:'A15',lv:'R1',type:'Official',name:'隐蔽摄像头',kw:['hidden camera','spy camera','nanny cam','偷拍']},
+  {id:'D01',lv:'R1',type:'Official',name:'仿冒品/侵权',kw:['replica','knockoff','counterfeit','fake','仿冒']},
+  {id:'D03',lv:'R1',type:'Official',name:'武器/管制刀具',kw:['taser','stun gun','brass knuckle','switchblade','电击器','指虎']},
+  {id:'DEC01',lv:'R1',type:'Official',name:'原产地声明(FTC违规)',kw:['made in usa','american made']},
+  {id:'DEC02',lv:'R1',type:'Official',name:'医疗/治疗功效声明',kw:['cures','treats','prevents disease','therapeutic','medical grade']},
+
+  {id:'F01',lv:'R1',type:'Business',name:'儿童产品认证 (CPC)',kw:['cpc certified','cpsia','children toy','kids toy','baby toy','infant','toddler','儿童玩具','婴儿']},
+  {id:'F02',lv:'R1',type:'Business',name:'医疗/化妆品认证 (FDA)',kw:['fda approved','fda registered','medical device','cosmetic','skincare','supplement','vitamin','医疗器械','化妆品','保健品','处方药','cpap']},
+  {id:'F03',lv:'R1',type:'Business',name:'农药/杀菌认证 (EPA)',kw:['epa registered','pesticide','insecticide','herbicide','disinfectant','sanitizer','杀虫剂','除草剂','消毒液','杀菌']},
+  {id:'F04',lv:'R1',type:'Business',name:'无线电/排放认证 (FCC/EPA)',kw:['fcc id','carb compliant','catalytic converter','carburetor','fuel tank','催化转换器','化油器','bluetooth','wi-fi','wifi','wireless transmitter','drone']},
+  {id:'F05',lv:'R1',type:'Business',name:'品牌知识产权授权',kw:['disney','marvel','pokemon','apple','iphone','samsung','nike','adidas','anime character']},
+
+  {id:'E01',lv:'R1',type:'Business',name:'易碎/玻璃/陶瓷',kw:['glass','ceramic','porcelain','crystal','fragile','glassware','玻璃','陶瓷','易碎','水晶']},
+  {id:'E02',lv:'R1',type:'Business',name:'电池/带电产品',kw:['battery','lithium','lipo','aaa battery','aa battery','rechargeable','电池','锂电池','充电']},
+  {id:'E03',lv:'R1',type:'Business',name:'液体/喷雾/膏体',kw:['liquid','spray','aerosol','perfume','oil','lotion','液体','喷雾','香水','精油','乳液']},
+  {id:'E04',lv:'R1',type:'Business',name:'定制品/刻字/印图',kw:['custom made','customized','personalized','engraved','monogram','made to order','定制','定做','刻字','印字','专属']},
+
+  {id:'S01',lv:'R1',type:'Business',name:'安全关键/防护/救生',kw:['life jacket','life vest','helmet','safety harness','respirator','救生衣','头盔','安全带','防毒面具']},
+  {id:'S02',lv:'R1',type:'Business',name:'承重/高压/燃气',kw:['weight capacity','load bearing','propane','gas regulator','high pressure','承重','高压','燃气']},
+  {id:'S03',lv:'R1',type:'Business',name:'复杂安装/需布线',kw:['wiring kit','hardwired','installation kit','需布线','复杂安装']}
+];
+
+const HARD_BLOCK = new Set(['A01','A04','A06','A08','A14','A15','D01','D03','DEC01','DEC02','F01','F02','F03','F04','F05','E01','E02','E03','E04','S01','S02','S03']);
+
+const DEFAULT_CAT_MAP = [
+  {id:'33567',name:'Brakes > Pads & Shoes',kw:['brake pad','brake shoe','刹车片']},
+  {id:'178919',name:'Brakes & Suspension',kw:['brake rotor','brake disc','suspension','control arm','ball joint','tie rod','shock absorber','刹车盘','悬挂','摆臂']},
+  {id:'43983',name:'Wheels, Tires',kw:['wheel hub','wheel bearing','hub unit','wheel','tire','轮毂','轴承','轮胎']},
+  {id:'43980',name:'Lighting',kw:['headlight','tail light','fog light','车灯','大灯','尾灯']},
+  {id:'178921',name:'Wiper Blades',kw:['wiper blade','windshield wiper','雨刮片','雨刷']},
+  {id:'11844',name:'Home & Garden > Storage',kw:['storage box','desk organizer','抽屉分隔','收纳']}
+];
+
+const DEFAULT_COLUMNS = ['Action','Category','Title','Description','Condition ID','Quantity','Format','StartPrice','SKU','UPC'];
+const DEFAULT_INFO = '#INFO,Version=0.0.2,Template=eBay-draft-listing-template';
+
+const state = { items: [], grabMap: {}, results: [], advices: [], tplInfoLine: null, tplColumns: null, catMap: [] };
+const $ = id => document.getElementById(id);
+const esc = s => String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+function norm(v){ return String(v == null ? '' : v).trim(); }
+function low(v){ return norm(v).toLowerCase(); }
+function csvCell(v){ const s = v == null ? '' : String(v); return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g,'""') + '"' : s; }
+function parseCSV(text){
+  const rows = []; let row = [], cell = '', inQ = false; text = text.replace(/^\uFEFF/,'');
+  for (let i = 0; i < text.length; i++){
+    const c = text[i];
+    if (inQ){ if (c === '"'){ if (text[i+1] === '"'){ cell += '"'; i++; } else inQ = false; } else cell += c; }
+    else { if (c === '"') inQ = true; else if (c === ','){ row.push(cell); cell = ''; } else if (c === '\n'){ row.push(cell); rows.push(row); row = []; cell = ''; } else if (c !== '\r') cell += c; }
+  }
+  if (cell !== '' || row.length){ row.push(cell); rows.push(row); }
+  return rows.filter(r => r.length && !(r.length === 1 && r[0] === ''));
+}
+function showErr(msg){ const box = $('goodsErr'); if (box){ box.style.display = 'block'; box.textContent = msg; } }
+
+const FIELD_ALIASES = {
+  title:['title','标题','商品标题','产品标题','product title','product name','商品名称'], asin:['asin','asin码','父asin'],
+  brand:['brand','品牌'], model:['model','型号','model number','part number','mpn'],
+  sku:['sku','seller sku','卖家sku','msku'], category:['category','类目','类目路径','分类'],
+  desc:['description','描述','商品描述','产品描述','detail','卖点'],
+  link:['link','url','链接','商品链接','详情页','detail page','product url','产品链接','商品地址'],
+  price:['price','价格','售价','buy box price'], condition:['condition','成色','状态']
+};
+function detectField(colName){
+  const c = low(colName); if (!c) return null;
+  for (const f in FIELD_ALIASES) for (const a of FIELD_ALIASES[f]) if (c === a || c.includes(a)) return f;
+  return null;
+}
+
+/* ================= 核心文件读取 ================= */
+function readGoods(file){
+  showErr('');
+  const tag = $('goodsTag');
+  tag.style.display = 'inline-flex';
+  tag.textContent = '正在读取: ' + file.name + ' ...';
+
+  state.grabMap = {};
+  state.results = [];
+  state.advices = [];
+  $('results').hidden = true;
+  $('progBar').style.width = '0%';
+  $('progText').textContent = '0 / 0 已核验';
+
+  const ext = file.name.split('.').pop().toLowerCase();
+  if ((ext === 'xlsx' || ext === 'xls') && typeof XLSX === 'undefined'){ 
+    showErr('Excel 解析库未加载！请检查网络，或将文件另存为 .csv 格式后再上传。'); 
+    tag.style.display = 'none';
+    return; 
+  }
+  
+  const reader = new FileReader();
+  reader.onerror = () => { showErr('读取文件失败'); tag.style.display = 'none'; };
+  reader.onload = e => {
+    try {
+      if (ext === 'csv') ingestGoods(parseCSV(e.target.result), file.name);
+      else { const wb = XLSX.read(new Uint8Array(e.target.result), {type:'array'}); const ws = wb.Sheets[wb.SheetNames[0]]; ingestGoods(XLSX.utils.sheet_to_json(ws, {header:1, defval:'', raw:false}), file.name); }
+    } catch(err){ 
+      showErr('解析失败：' + err.message); 
+      tag.style.display = 'none';
     }
+  };
+  if (ext === 'csv') reader.readAsText(file, 'UTF-8'); else reader.readAsArrayBuffer(file);
+}
+
+function ingestGoods(rows, name){
+  if (!rows || !rows.length){ showErr('文件内容为空'); $('goodsTag').style.display = 'none'; return; }
+  let headerIdx = -1;
+  for (let i = 0; i < Math.min(rows.length, 15); i++){ const j = rows[i].map(low).join('|'); if (j.includes('asin') || j.includes('标题') || j.includes('title')){ headerIdx = i; break; } }
+  if (headerIdx === -1) headerIdx = 0;
+  const header = rows[headerIdx].map(norm); const fmap = {};
+  header.forEach((c, i) => { const f = detectField(c); if (f && fmap[f] == null) fmap[f] = i; });
+  if (fmap.title == null && fmap.asin == null){ showErr('未识别到标题/ASIN列'); $('goodsTag').style.display = 'none'; return; }
+
+  const dataRows = rows.slice(headerIdx + 1).filter(r => r.some(c => norm(c) !== ''));
+  const items = dataRows.map((r, idx) => {
+    const g = f => (fmap[f] != null ? norm(r[fmap[f]]) : '');
+    return { _row: headerIdx + 2 + idx, title: g('title'), asin: g('asin'), brand: g('brand'), model: g('model'), sku: g('sku'), category: g('category'), desc: g('desc'), link: g('link'), price: g('price'), condition: g('condition') };
+  }).filter(it => it.title || it.asin || it.sku);
+  
+  if (!items.length){ showErr('无有效数据'); $('goodsTag').style.display = 'none'; return; }
+
+  state.items = items;
+  const hasLink = items.some(it => it.link);
+  const tag = $('goodsTag'); tag.style.display = 'inline-flex'; 
+  tag.textContent = '✓ ' + name + ' (' + items.length + ' 个 SKU)';
+  
+  if(!hasLink) showErr('⚠ 未在表格中识别到详情页链接列');
+
+  $('queueCard').hidden = false; $('runCard').hidden = false;
+  renderQueue();
+}
+
+/* ================= 读取模板（带本地持久化） ================= */
+function readTemplate(file) {
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      const rows = parseCSV(e.target.result);
+      let infoLine = null, headerRow = null;
+      for (const row of rows) {
+        const first = norm(row[0]);
+        if (first.startsWith('#')) { 
+            if (!infoLine) infoLine = row.map(csvCell).join(',');
+        } else { 
+            headerRow = row.map(norm); 
+            break; 
+        }
+      }
+      if (!headerRow || !headerRow.length) throw new Error('未能识别模板表头');
+      
+      state.tplInfoLine = infoLine;
+      state.tplColumns = headerRow;
+      
+      localStorage.setItem('ebay_tpl', JSON.stringify({ info: infoLine, cols: headerRow }));
+      
+      const tag = $('tplTag');
+      tag.style.display = 'inline-flex';
+      tag.textContent = '✓ 已加载并记住模板 (' + headerRow.length + ' 列)';
+      
+      if (state.results.length > 0) $('btnExportCsv').disabled = false;
+    } catch(err) {
+      alert('模板解析失败：' + err.message);
+      $('btnExportCsv').disabled = true;
+    }
+  };
+  reader.readAsText(file, 'UTF-8');
+}
+
+function loadTemplateFromLocal() {
+  try {
+    const saved = localStorage.getItem('ebay_tpl');
+    if (saved) {
+      const data = JSON.parse(saved);
+      state.tplInfoLine = data.info;
+      state.tplColumns = data.cols;
+      const tag = $('tplTag');
+      tag.style.display = 'inline-flex';
+      tag.textContent = '✓ 已自动读取上次模板 (' + data.cols.length + ' 列)';
+      $('tplHint').textContent = '已记住上次模板。如果 eBay 官方模板更新，可重新上传覆盖。';
+    }
+  } catch(e) {}
+}
+
+function renderQueue(){
+  const items = state.items; const done = items.filter(it => state.grabMap[it.asin]).length;
+  $('progBar').style.width = items.length ? (done / items.length * 100) + '%' : '0%';
+  $('progText').textContent = done + ' / ' + items.length + ' 已核验';
+  const rows = items.map(it => {
+    const g = state.grabMap[it.asin]; 
+    const status = g ? '<span class="tag ok">✓ 已抓取</span>' : '<span class="tag no">未抓取</span>';
+    // 把原生的 button 改成 a 标签，支持中键点击和 Ctrl+点击
+    const openBtn = it.link ? `<a class="linkbtn" href="${esc(it.link)}" target="_blank">打开并抓取 ↗</a>` : '<span class="mono" style="color:#cbd5e1">无链接</span>';
+    return `<tr><td class="mono">${it._row}</td><td class="mono">${esc(it.asin || '—')}</td><td style="max-width:360px">${esc((it.title || '').slice(0, 80))}</td><td>${status}</td><td>${openBtn}</td></tr>`;
+  }).join('');
+  $('queueBox').innerHTML = `<div class="tblbox" style="max-height:420px"><table><thead><tr><th>行</th><th>ASIN</th><th>表格标题</th><th>链接核验</th><th>操作</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+}
+
+function extractAsinFromUrl(url){ const m = String(url).match(/\/(?:dp|gp\/product)\/([A-Z0-9]{10})/); return m ? m[1] : ''; }
+
+function processPasteData(text){
+  if (!text || !text.includes('<<<EBAY_AUDIT>>>')) return false;
+  const parts = text.split('<<<EBAY_AUDIT>>>').filter(s => s.trim());
+  let ok = 0, fail = 0; const noMatch = [];
+  for (const part of parts){
+    try {
+      const obj = JSON.parse(part.trim()); if (!obj || (!obj.asin && !obj.url)){ fail++; continue; }
+      const key = obj.asin || extractAsinFromUrl(obj.url); if (!key){ fail++; continue; }
+      const item = state.items.find(it => it.asin === key); if (!item){ noMatch.push(key); fail++; continue; }
+      state.grabMap[key] = obj; ok++;
+    } catch(e){ fail++; }
+  }
+  const msg = [];
+  if (ok) msg.push('✅ 成功关联 ' + ok + ' 条'); if (noMatch.length) msg.push('⚠ 找不到 ASIN：' + noMatch.join(', ')); if (fail && !noMatch.length) msg.push('❌ ' + fail + ' 条格式错误');
+  if($('pasteMsg')) { $('pasteMsg').textContent = msg.join('　') || '未识别到内容'; $('pasteMsg').style.color = ok ? '#15803d' : '#dc2626'; }
+  if (ok){ renderQueue(); const toast = $('toast'); toast.style.opacity = '1'; setTimeout(() => toast.style.opacity = '0', 2000); }
+  return true;
+}
+
+function matchRules(item){
+  const g = state.grabMap[item.asin] || {};
+  const rawText = [item.title, item.desc, item.category, item.model, g.title, g.raw].filter(Boolean).join(' \n ').toLowerCase();
+  const segments = rawText.split(/[.,;\n()\[\]]+/).map(s => s.trim()).filter(Boolean);
+  
+  const hits = [];
+
+  if (g.vary && /battery|glass|lithium|custom|engrave/i.test(g.vary)) {
+      hits.push({rule:{id:'VAR01',lv:'R1',type:'Business',name:'变体命中高风险品'}, kw:'变体选项', evidence: g.vary.slice(0, 50)});
+  }
+
+  if (g.img && (g.img.includes('amazon') || g.img.includes('watermark') || g.img.includes('logo'))) {
+      hits.push({rule:{id:'IMG01',lv:'R1',type:'Business',name:'图片带有平台标识/水印'}, kw:'图片特征', evidence: g.img.slice(0, 50)});
+  }
+
+  if (/automotive|motors|parts/i.test(item.category || '') && (!g.comp || g.comp.length < 10)) {
+      hits.push({rule:{id:'FIT01',lv:'R3',type:'Official',name:'兼容性列表缺失'}, kw:'配件数据', evidence:'汽配类目缺少Fitment数据'});
+  }
+
+  const bigBrands = ['apple', 'samsung', 'sony', 'nike', 'adidas', 'disney', 'marvel', 'lego'];
+  for (const brand of bigBrands) {
+      if (new RegExp(`\\b${brand}\\b`, 'i').test(rawText)) {
+          if (!new RegExp(`(for|fits|compatible with)\\s+${brand}`, 'i').test(rawText)) {
+              hits.push({rule:{id:'V01',lv:'R3',type:'Official',name:'品牌兼容前缀缺失'}, kw:brand, evidence:'滥用品牌词'});
+          }
+      }
+  }
+
+  for (const r of RULES){
+    let hitKw = null;
+    let isHit = false;
+    let evidence = '';
+
+    for (const seg of segments){
+      for (const k of r.kw){
+        if (/^[\x00-\xff]+$/.test(k)) {
+          const regex = new RegExp(`\\b${k}\\b`, 'i');
+          if (regex.test(seg)) { hitKw = k; isHit = true; evidence = seg; break; }
+        } else {
+          if (seg.includes(k)) { hitKw = k; isHit = true; evidence = seg; break; }
+        }
+      }
+      if (isHit) break;
+    }
+    
+    if (isHit){
+      let exempted = false;
+
+      if (r.id === 'A04') {
+        if (segments.some(seg => {
+            const hasSafeColor = ['green', 'amber', 'yellow', 'white'].some(c => new RegExp(`\\b${c}\\b`, 'i').test(seg));
+            const hasPolice = /police|law enforcement|fire department|emergency vehicle/i.test(seg);
+            return hasSafeColor && !hasPolice;
+        })) exempted = true;
+      }
+      if (r.id === 'A06') {
+        const suspensionKeywords = ['suspension', 'spring', 'shock', 'strut'];
+        if (suspensionKeywords.some(k => evidence.includes(k))) exempted = true;
+      }
+      if (r.id === 'E02') {
+        const mechExceptions = ['battery tray', 'battery terminal', 'battery cable', 'battery hold down', 'battery box', 'battery bracket', 'battery cover', 'batteries required: no'];
+        if (mechExceptions.some(ex => evidence.includes(ex))) exempted = true;
+      }
+      if (r.id === 'E03') {
+        const mechExceptions = ['oil filter', 'oil pan', 'oil seal', 'oil pump', 'oil cap', 'oil dipstick', 'coil', 'soil', 'oil cooler', 'liquid level sensor', 'liquid cooling', 'gas strut', 'gas shock', 'gas spring', 'form: solid'];
+        if (mechExceptions.some(ex => evidence.includes(ex))) exempted = true;
+      }
+      if (r.id === 'E01') {
+        const safeGlass = ['fiberglass', 'windshield', 'wiper', 'glass cleaner', 'tempered glass screen', 'sunglasses', 'reading glasses', 'glass lens'];
+        const hasSafeWord = safeGlass.some(ex => evidence.includes(ex));
+        const fullTitleAndCat = (item.title + " " + (item.category||"") + " " + (g.title||"")).toLowerCase();
+        const isAutoPart = /automotive|motors|wiper|brake|suspension|headlight|tail light/i.test(fullTitleAndCat);
+        if (hasSafeWord || isAutoPart) exempted = true;
+      }
+
+      if (r.id === 'E04') {
+        if (evidence.includes('custom fit') || evidence.includes('customized: no')) exempted = true;
+      }
+      if (r.id === 'F02') {
+        const safeNeedles = ['needle bearing', 'needle nose', 'needle valve', 'pine needle', 'needle roller'];
+        if (safeNeedles.some(ex => evidence.includes(ex))) exempted = true;
+      }
+
+      if (!exempted){
+        const lv = HARD_BLOCK.has(r.id) ? 'R1' : r.lv; 
+        hits.push({rule: r, kw: hitKw, lv, evidence: evidence.slice(0, 100)});
+      }
+    }
+  }
+  return hits;
+}
+
+function matchCategory(item){
+  const g = state.grabMap[item.asin] || {}; 
+  const text = [item.title, g.title].filter(Boolean).join(' ').toLowerCase();
+  for (const m of state.catMap) for (const k of m.kw) if (text.includes(String(k).toLowerCase())) return m;
+  return null;
+}
+function stripBrand(title, brand){
+  if (!brand) return title;
+  const re = new RegExp(brand.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+  return title.replace(re, '').replace(/\s+/g, ' ').trim();
+}
+function cleanDesc(desc){ 
+  if (!desc) return ''; 
+  return desc.replace(/amazon/ig, " ").replace(/prime/ig, " ").replace(/asin[:\s]*[a-z0-9]{10}/ig, " ")
+             .split(/\r?\n/).filter(l => !/^\s*brand\s*[:：]/i.test(l)).join('\n').trim(); 
+}
+function buildSku(item){
+  const a = item.asin || '', m = item.model || ''; if (a && m) return a + '-' + m; if (a) return a; if (item.sku) return item.sku; return m || '';
+}
+
+function runAudit(){
+  const results = [], advices = [];
+  
+  try {
+    for (const item of state.items){
+      const verified = !!state.grabMap[item.asin]; 
+      
+      let status, catMatch = null, reason = '', r1r2 = [], r3 = [];
+      
+      if (!verified) {
+          status = 'pending';
+          reason = '未抓取链接，无法确认合规性';
+      } else {
+          const hits = matchRules(item);
+          r1r2 = hits.filter(h => h.lv === 'R1' || h.lv === 'R2'); 
+          r3 = hits.filter(h => h.lv === 'R3'); 
+          
+          if (r1r2.length) {
+              status = 'rejected'; 
+          } else if (r3.length) {
+              status = 'pending'; reason = '命中 R3 待核实'; 
+          } else { 
+              catMatch = matchCategory(item); 
+              if (catMatch) status = 'passed'; 
+              else { status = 'pending'; reason = '无匹配 Category ID'; } 
+          }
+      }
+      
+      if (status === 'passed'){
+        if ((item.title || '').length > 80) advices.push({asin: item.asin, msg: '标题超80字符'});
+        if (!item.model) advices.push({asin: item.asin, msg: '缺型号'});
+        if (!item.desc) advices.push({asin: item.asin, msg: '缺 Description'});
+        if (!item.brand) advices.push({asin: item.asin, msg: '缺 Brand'});
+        if (item.brand && low(item.title).includes(low(item.brand))) advices.push({asin: item.asin, msg: '已去品牌词'});
+        if (!item.price) advices.push({asin: item.asin, msg: '缺 StartPrice'});
+      }
+      results.push({item, status, r1r2, r3, catMatch, verified, reason});
+    }
+    state.results = results; 
+    state.advices = advices; 
+  } catch (error) {
+    console.error("审核过程发生严重错误:", error);
+    alert("审核引擎发生错误：" + error.message + "\n将尝试渲染已处理的结果。");
+  } finally {
+    renderResults();
+  }
+}
+
+function renderResults(){
+  try {
+    const rs = state.results || [];
+    const total = rs.length;
+    const rej = rs.filter(r => r.status === 'rejected').length; 
+    const pend = rs.filter(r => r.status === 'pending').length; 
+    const pass = rs.filter(r => r.status === 'passed').length;
+    
+    $('results').hidden = false;
+    $('stats').innerHTML = `
+      <div class="stat"><div class="v">${total}</div><div class="l">审核总数</div></div>
+      <div class="stat"><div class="v" style="color:var(--red)">${rej}</div><div class="l">直接淘汰</div></div>
+      <div class="stat"><div class="v" style="color:var(--amber)">${pend}</div><div class="l">待核实</div></div>
+      <div class="stat"><div class="v" style="color:var(--green)">${pass}</div><div class="l">可上架</div></div>`;
+    
+    const rejList = rs.filter(r => r.status === 'rejected');
+    $('rejBox').innerHTML = rejList.length ? `<div class="tblbox"><table><thead><tr><th>行</th><th>SKU / ASIN</th><th>淘汰类型</th><th>命中规则</th><th>等级</th><th>判定依据</th><th>标题</th></tr></thead><tbody>${rejList.map(r => {
+      const lv = r.r1r2.some(h => h.lv === 'R1') ? 'R1' : 'R2';
+      const typeTag = r.r1r2[0].rule.type === 'Official' ? 'Official' : 'Business';
+      const typeName = typeTag === 'Official' ? '官方禁止' : '业务不经营';
+      
+      const basis = r.r1r2.map(h => {
+          let prefix = h.rule.id.charAt(0);
+          let style = 'font-weight:bold;';
+          if(prefix==='E') { style += 'color:#be185d;'; }
+          else if(prefix==='F') { style += 'color:#c026d3;'; }
+          else if(prefix==='S') { style += 'color:#ea580c;'; }
+          return `<span style="${style}">【${h.rule.id}】${h.rule.name} → 命中「<span class="kw">${esc(h.kw)}</span>」<br><span style="font-weight:normal;color:#64748b;">依据: ${esc(h.evidence)}...</span></span>`;
+      }).join('<br>');
+      
+      return `<tr><td class="mono">${r.item._row}</td><td class="mono">${esc(buildSku(r.item))}</td><td><span class="tag ${typeTag}">${typeName}</span></td><td>${r.r1r2.map(h => `<span class="tag ${h.rule.id.charAt(0)}">${h.rule.id}</span>`).join(' ')}</td><td><span class="tag ${lv}">${lv}</span></td><td style="max-width:360px">${basis}</td><td style="max-width:260px">${esc((r.item.title || '').slice(0, 80))}</td></tr>`;
+    }).join('')}</tbody></table></div>` : '<div class="empty">没有淘汰商品</div>';
+    
+    const pendList = rs.filter(r => r.status === 'pending');
+    $('pendBox').innerHTML = pendList.length ? `<div class="tblbox"><table><thead><tr><th>行</th><th>SKU / ASIN</th><th>原因</th><th>详情</th><th>标题</th></tr></thead><tbody>${pendList.map(r => {
+      const detail = r.r3.length ? r.r3.map(h => `${h.rule.name} → 命中「<span class="kw">${esc(h.kw)}</span>」<br><span style="color:#64748b;font-size:12px">${h.evidence ? '依据: ' + esc(h.evidence) : ''}</span>`).join('<br>') : esc(r.reason || '—');
+      return `<tr><td class="mono">${r.item._row}</td><td class="mono">${esc(buildSku(r.item))}</td><td>${esc(r.reason)}</td><td style="max-width:340px">${detail}</td><td style="max-width:240px">${esc((r.item.title || '').slice(0, 70))}</td></tr>`;
+    }).join('')}</tbody></table></div>` : '<div class="empty">没有待核实商品</div>';
+    
+    const adv = state.advices || [];
+    $('advBox').innerHTML = adv.length ? `<ul style="margin:0;padding-left:20px">${adv.slice(0, 300).map(a => `<li style="margin-bottom:6px"><span class="mono">${esc(a.asin || '—')}</span>　${esc(a.msg)}</li>`).join('')}</ul>` : '<div class="empty">暂无建议</div>';
+    
+    const passList = rs.filter(r => r.status === 'passed');
+    $('passBox').innerHTML = passList.length ? `<div class="tblbox"><table><thead><tr><th>行</th><th>SKU</th><th>Title（已清洗平台痕迹并去品牌）</th><th>Category ID</th><th>类目</th><th>数量</th></tr></thead><tbody>${passList.map(r => `<tr><td class="mono">${r.item._row}</td><td class="mono">${esc(buildSku(r.item))}</td><td style="max-width:380px">${esc(stripBrand(r.item.title, r.item.brand))}</td><td class="mono">${esc(r.catMatch.id)}</td><td style="font-size:11.5px;color:#64748b">${esc(r.catMatch.name)}</td><td class="mono">2</td></tr>`).join('')}</tbody></table></div>` : '<div class="empty">没有可写入商品</div>';
+    
+    $('csvHint').textContent = passList.length ? `共 ${passList.length} 个商品将写入 CSV。` : '当前无可上架商品。请检查【待核实】列表，确保已抓取链接并完成分类。';
+    
+    $('btnExportCsv').disabled = false; 
+  } catch (renderError) {
+    console.error("渲染审核结果时发生错误:", renderError);
+    alert("结果渲染出错，请查看控制台。");
+  }
+}
+
+function fieldForColumn(colName){
+  const c = low(colName);
+  if (c === 'action') return 'action'; 
+  if (c.includes('category')) return 'category'; 
+  if (c.includes('title')) return 'title'; 
+  if (c.includes('description')) return 'desc'; 
+  if (c.includes('condition')) return 'condition'; 
+  if (c.includes('quantity')) return 'quantity'; 
+  if (c === 'format') return 'format'; 
+  if (c.includes('price')) return 'price'; 
+  if (c.includes('sku')) return 'sku'; 
+  if (c.includes('upc') || c.includes('ean') || c.includes('isbn')) return 'upc';
+  return null;
+}
+
+function buildCSV(){
+  if (!state.tplColumns || state.tplColumns.length === 0) {
+    alert('⚠️ 无法导出：请先上传 eBay 模板！系统已强制要求模板校验。');
+    return null;
+  }
+
+  const cols = state.tplColumns; 
+  const info = state.tplInfoLine || DEFAULT_INFO; 
+  const lines = [info, cols.map(csvCell).join(',')];
+  
+  const passList = state.results.filter(r => r.status === 'passed');
+  for (const r of passList){
+    const it = r.item; const g = state.grabMap[it.asin] || {}; 
+    const descSrc = cleanDesc(g.raw) || 'Please see product details.';
+    
+    const vals = { 
+        action: 'Draft', 
+        category: r.catMatch.id, 
+        title: stripBrand(it.title, it.brand), 
+        desc: descSrc, 
+        condition: 'NEW', 
+        quantity: '2', 
+        format: 'FixedPrice', 
+        price: it.price || '', 
+        sku: buildSku(it), 
+        upc: '' 
+    };
+    
+    lines.push(cols.map(c => { 
+        const f = fieldForColumn(c); 
+        return csvCell(f ? vals[f] : ''); 
+    }).join(','));
+  }
+  return lines.join('\r\n');
+}
+
+function download(filename, content){
+  if(content === null) return;
+  const blob = new Blob([content], {type:'text/csv;charset=utf-8'}); 
+  const url = URL.createObjectURL(blob); 
+  const a = document.createElement('a'); 
+  a.href = url; 
+  a.download = filename; 
+  document.body.appendChild(a); 
+  a.click(); 
+  document.body.removeChild(a); 
+  setTimeout(() => URL.revokeObjectURL(url), 1500);
+}
+
+function loadCatMap(){ let raw = null; try { raw = localStorage.getItem('ebay_cat_map'); } catch(e){} if (raw){ try { state.catMap = JSON.parse(raw); return; } catch(e){} } state.catMap = JSON.parse(JSON.stringify(DEFAULT_CAT_MAP)); }
+function safe(fn, label){ try { fn(); } catch(err){ console.error('[' + label + '] 初始化失败：', err); } }
+
+/* ================= 日志保存与管理员控制 ================= */
+async function saveAuditLog(total, rej, pass) {
+  const batchId = 'BAT-' + new Date().getTime().toString().slice(-6);
+  const logData = {
+      user_email: '员工',
+      total_items: total, 
+      rejected_items: rej, 
+      passed_items: pass,
+      created_at: new Date().toISOString()
+  };
+
+  let cloudSuccess = false;
+  if (sbClient) {
+    try {
+      const { error } = await sbClient.from('audit_logs').insert(logData);
+      if (error) throw error;
+      cloudSuccess = true;
+    } catch (e) { 
+      console.error('云端记录异常:', e); 
+      alert('❌ 写入云端数据库失败！原因：' + e.message + '\n\n请检查 Supabase 数据库是否执行了建表 SQL 并开启了 RLS 权限。\n系统已自动保存到本地浏览器。');
+    }
+  }
+  
+  try {
+      let localLogs = JSON.parse(localStorage.getItem('local_audit_logs') || '[]');
+      localLogs.unshift({ ...logData, batch_id: batchId }); 
+      if (localLogs.length > 50) localLogs.pop(); 
+      localStorage.setItem('local_audit_logs', JSON.stringify(localLogs));
+      if (!sbClient) alert('提示：当前未连接云端，记录已保存在本地浏览器中。');
+  } catch (e) { console.error("本地存储失败", e); }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  const modal = document.getElementById('adminModal');
+  const loginView = document.getElementById('loginView');
+  const historyView = document.getElementById('historyView');
+  
+  document.getElementById('btnAdmin').onclick = () => {
+    modal.classList.add('show');
+    loginView.hidden = false; 
+    historyView.hidden = true; 
+    document.getElementById('loginMsg').innerText = '';
+  };
+  
+  document.getElementById('btnCloseModal').onclick = () => modal.classList.remove('show');
+
+  document.getElementById('btnLogin').onclick = async () => {
+    const user = document.getElementById('adminEmail').value;
+    const pass = document.getElementById('adminPass').value;
+    
+    if (user === ADMIN_USER && pass === ADMIN_PASS) {
+        loginView.hidden = true; 
+        historyView.hidden = false;
+        
+        let displayData = [];
+        let cloudError = null;
+
+        if (sbClient) {
+            try {
+                const { data, error } = await sbClient.from('audit_logs').select('*').order('created_at', { ascending: false }).limit(100);
+                if (error) throw error;
+                if (data) displayData = data;
+            } catch (err) {
+                cloudError = err.message;
+                console.error("云端读取失败:", err);
+            }
+        }
+        
+        if (displayData.length === 0) {
+            try { displayData = JSON.parse(localStorage.getItem('local_audit_logs') || '[]'); } catch (e) {}
+        }
+
+        if (cloudError) {
+             document.getElementById('historyBody').innerHTML = `<tr><td colspan="5" style="text-align:center;color:var(--red);font-size:12px;">❌ 云端读取失败：${cloudError}<br>请检查 Supabase 的表权限（RLS）。<br><br>以下为本地缓存记录：</td></tr>` +
+             displayData.map(d => `
+              <tr>
+                <td>${new Date(d.created_at).toLocaleString()}</td>
+                <td><span class="tag id">${d.batch_id || '旧记录'}</span></td>
+                <td>${d.total_items}</td>
+                <td style="color:var(--red)">${d.rejected_items}</td>
+                <td style="color:var(--green)">${d.passed_items}</td>
+              </tr>
+            `).join('');
+        } else if (displayData.length === 0) {
+            document.getElementById('historyBody').innerHTML = `<tr><td colspan="5" style="text-align:center;color:var(--muted)">暂无审核记录。请先执行一次审核。</td></tr>`;
+        } else {
+            document.getElementById('historyBody').innerHTML = displayData.map(d => `
+              <tr>
+                <td>${new Date(d.created_at).toLocaleString()}</td>
+                <td><span class="tag id">${d.batch_id || '旧记录'}</span></td>
+                <td>${d.total_items}</td>
+                <td style="color:var(--red)">${d.rejected_items}</td>
+                <td style="color:var(--green)">${d.passed_items}</td>
+              </tr>
+            `).join('');
+        }
+    } else {
+        document.getElementById('loginMsg').innerText = '账号或密码错误！';
+    }
+  };
+  
+  document.getElementById('btnLogout').onclick = () => { 
+      modal.classList.remove('show'); 
+      document.getElementById('adminEmail').value = '';
+      document.getElementById('adminPass').value = '';
+  };
+
+  const originalRunBtn = document.getElementById('btnRun');
+  const newRunBtn = originalRunBtn.cloneNode(true);
+  originalRunBtn.parentNode.replaceChild(newRunBtn, originalRunBtn);
+  newRunBtn.onclick = () => {
+    if (!state.items.length){ alert('请先上传商品表'); return; }
+    
+    runAudit(); 
+    $('results').scrollIntoView({behavior:'smooth'});
+    
+    setTimeout(() => {
+      try {
+        const rs = state.results;
+        if(rs && rs.length > 0) {
+          const rej = rs.filter(r => r.status === 'rejected').length;
+          const pass = rs.filter(r => r.status === 'passed').length;
+          saveAuditLog(rs.length, rej, pass);
+        }
+      } catch (e) {
+        console.error("保存日志失败，但页面已正常显示结果。", e);
+      }
+    }, 500);
+  };
+});
+
+/* ================= 初始化与事件绑定 ================= */
+(function init(){
+  safe(loadCatMap, '类目映射加载');
+  safe(loadTemplateFromLocal, '加载本地模板记录');
+  
+  const input = $('fileGoods'); 
+  const drop = $('dropGoods'); 
+  if (input) {
+    input.addEventListener('change', e => { 
+      const f = e.target.files && e.target.files[0]; 
+      if (f) readGoods(f); 
+      input.value = ''; 
+    });
+  }
+  if (drop && input) { 
+    drop.addEventListener('dragover', e => { e.preventDefault(); e.stopPropagation(); drop.classList.add('over'); }); 
+    drop.addEventListener('dragleave', e => { e.preventDefault(); e.stopPropagation(); drop.classList.remove('over'); }); 
+    drop.addEventListener('drop', e => { 
+      e.preventDefault(); e.stopPropagation(); drop.classList.remove('over'); 
+      const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]; 
+      if (f) { try { input.files = e.dataTransfer.files; } catch(err) {} readGoods(f); }
+    }); 
+  }
+
+  const inputTpl = $('fileTpl');
+  const dropTpl = $('dropTpl');
+  if (inputTpl) {
+    inputTpl.addEventListener('change', e => {
+      const f = e.target.files && e.target.files[0];
+      if (f) readTemplate(f);
+      inputTpl.value = '';
+    });
+  }
+  if (dropTpl && inputTpl) {
+    dropTpl.addEventListener('dragover', e => { e.preventDefault(); e.stopPropagation(); dropTpl.classList.add('over'); }); 
+    dropTpl.addEventListener('dragleave', e => { e.preventDefault(); e.stopPropagation(); dropTpl.classList.remove('over'); }); 
+    dropTpl.addEventListener('drop', e => { 
+      e.preventDefault(); e.stopPropagation(); dropTpl.classList.remove('over'); 
+      const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]; 
+      if (f) { try { inputTpl.files = e.dataTransfer.files; } catch(err) {} readTemplate(f); }
+    }); 
+  }
+
+  safe(() => {
+    const pa = $('pasteArea'); if (!pa) return;
+    pa.addEventListener('paste', e => { 
+        const t = (e.clipboardData || window.clipboardData).getData('text'); 
+        if (processPasteData(t)){ 
+            e.preventDefault(); 
+            pa.value = ''; // 粘贴后清空
+            pa.placeholder = "数据已解析！请在亚马逊页面点开下一个链接...";
+            setTimeout(() => pa.placeholder = "点这里，然后按 Ctrl+V 粘贴数据...", 3000);
+        } 
+    });
+  }, '粘贴区绑定');
+  
+  safe(() => { const b = $('btnClear'); if (!b) return; b.addEventListener('click', () => { state.results = []; state.advices = []; $('results').hidden = true; }); }, '清空按钮');
+  
+  safe(() => { 
+    const b = $('btnExportCsv'); if (!b) return; 
+    b.addEventListener('click', () => { 
+      if (!state.tplColumns) { alert('请先上传模板！'); return; }
+      
+      const passList = state.results.filter(r => r.status === 'passed');
+      if(passList.length === 0) {
+        alert('⚠️ 无法下载：当前没有【可上架】的商品！\n\n可能原因：\n1. 所有商品都被淘汰了（请查看淘汰列表）\n2. 商品未抓取链接，进入了待核实列表\n\n请确保商品已抓取且未违规。');
+        return;
+      }
+      
+      const csv = buildCSV(); 
+      if(csv !== null) {
+          const stamp = new Date().toISOString().slice(0, 10); 
+          download('eBay-draft-listing-' + stamp + '.csv', csv); 
+      }
+    }); 
+  }, 'CSV 导出');
 })();
+</script>
+</body>
+</html>
