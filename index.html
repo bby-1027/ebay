@@ -126,11 +126,9 @@
 
   <div id="results" hidden>
     <section class="card"><h2><span class="num">✓</span>审核总结</h2><div class="stats" id="stats"></div></section>
-    
     <section class="card"><h2><span class="num">!</span>淘汰商品（官方禁止 / 本业务不经营）</h2><div id="rejBox"></div></section>
     <section class="card"><h2><span class="num">?</span>待核实（R3 / 链接未核验 / 无类目）</h2><div id="pendBox"></div></section>
     <section class="card"><h2><span class="num">+</span>优化建议</h2><div id="advBox"></div></section>
-    
     <section class="card">
       <h2><span class="num">↓</span>最终 CSV</h2>
       <p class="hint" id="csvHint"></p>
@@ -146,7 +144,6 @@
 <div class="modal" id="adminModal">
   <div class="modal-content">
     <h2 style="margin-top:0; border-bottom:1px solid #e2e8f0; padding-bottom:10px;">管理员控制台</h2>
-    
     <div id="loginView">
       <p class="hint" style="margin-bottom:15px">仅供内部管理员登录查看数据。</p>
       <input type="text" id="adminEmail" placeholder="请输入管理员账号" style="width:100%;padding:10px;margin-bottom:10px;border:1px solid var(--line);border-radius:8px">
@@ -157,7 +154,6 @@
       </div>
       <p id="loginMsg" style="color:var(--red);font-size:12px;margin-top:10px"></p>
     </div>
-
     <div id="historyView" hidden>
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px">
         <span id="adminName" style="font-weight:600;color:var(--blue)">已登录管理员</span>
@@ -211,18 +207,15 @@ const RULES = [
   {id:'D03',lv:'R1',type:'Official',name:'武器/管制刀具',kw:['taser','stun gun','brass knuckle','switchblade','电击器','指虎']},
   {id:'DEC01',lv:'R1',type:'Official',name:'原产地声明(FTC违规)',kw:['made in usa','american made']},
   {id:'DEC02',lv:'R1',type:'Official',name:'医疗/治疗功效声明',kw:['cures','treats','prevents disease','therapeutic','medical grade']},
-
   {id:'F01',lv:'R1',type:'Business',name:'儿童产品认证 (CPC)',kw:['cpc certified','cpsia','children toy','kids toy','baby toy','infant','toddler','儿童玩具','婴儿']},
   {id:'F02',lv:'R1',type:'Business',name:'医疗/化妆品认证 (FDA)',kw:['fda approved','fda registered','medical device','cosmetic','skincare','supplement','vitamin','医疗器械','化妆品','保健品','处方药','cpap']},
   {id:'F03',lv:'R1',type:'Business',name:'农药/杀菌认证 (EPA)',kw:['epa registered','pesticide','insecticide','herbicide','disinfectant','sanitizer','杀虫剂','除草剂','消毒液','杀菌']},
   {id:'F04',lv:'R1',type:'Business',name:'无线电/排放认证 (FCC/EPA)',kw:['fcc id','carb compliant','catalytic converter','carburetor','fuel tank','催化转换器','化油器','bluetooth','wi-fi','wifi','wireless transmitter','drone']},
   {id:'F05',lv:'R1',type:'Business',name:'品牌知识产权授权',kw:['disney','marvel','pokemon','apple','iphone','samsung','nike','adidas','anime character']},
-
   {id:'E01',lv:'R1',type:'Business',name:'易碎/玻璃/陶瓷',kw:['glass','ceramic','porcelain','crystal','fragile','glassware','玻璃','陶瓷','易碎','水晶']},
   {id:'E02',lv:'R1',type:'Business',name:'电池/带电产品',kw:['battery','lithium','lipo','aaa battery','aa battery','rechargeable','电池','锂电池','充电']},
   {id:'E03',lv:'R1',type:'Business',name:'液体/喷雾/膏体',kw:['liquid','spray','aerosol','perfume','oil','lotion','液体','喷雾','香水','精油','乳液']},
   {id:'E04',lv:'R1',type:'Business',name:'定制品/刻字/印图',kw:['custom made','customized','personalized','engraved','monogram','made to order','定制','定做','刻字','印字','专属']},
-
   {id:'S01',lv:'R1',type:'Business',name:'安全关键/防护/救生',kw:['life jacket','life vest','helmet','safety harness','respirator','救生衣','头盔','安全带','防毒面具']},
   {id:'S02',lv:'R1',type:'Business',name:'承重/高压/燃气',kw:['weight capacity','load bearing','propane','gas regulator','high pressure','承重','高压','燃气']},
   {id:'S03',lv:'R1',type:'Business',name:'复杂安装/需布线',kw:['wiring kit','hardwired','installation kit','需布线','复杂安装']}
@@ -409,7 +402,6 @@ window.openBatch = function(count) {
     
     const toOpen = ungrabbed.slice(0, count);
     
-    // 同步连续打开
     toOpen.forEach((it) => {
         window.open(it.link, '_blank');
     });
