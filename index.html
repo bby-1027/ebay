@@ -199,7 +199,7 @@ try {
     throw new Error("未填写配置");
   }
 } catch (e) {
-  document.getElementById('dbStatusBanner').innerHTML = '<b>本地模式运行中：</b>由于未配置云端密钥，审核记录将<b>不会</b>保存到服务器。';
+  document.getElementById('dbStatusBanner').innerHTML = '<b>本地模式运行中：</b>由于未配置云端密钥，审核记录将保存在本地浏览器中。';
 }
 
 /* ====================================================
@@ -252,7 +252,7 @@ const GRAB_SCRIPT = '(function(){' +
 'var t=p(["#productTitle","#title","h1[data-testid=\'product-title\']","h1"])||document.title;' +
 'var b=p(["#feature-bullets","#feature_bullets","[data-testid=\'feature-bullets\']"]);' +
 'var d=p(["#productDescription","#aplus","#aplus_feature_div","[data-testid=\'product-description\']"]);' +
-// 核心升级：强制抓取商品参数表（兼容性、材质、是否带电等）
+// 强制抓取商品参数表（兼容性、材质、是否带电等）
 'var spec=p(["#productDetails_techSpec_section_1","#productDetails_detailBullets_sections1","#detailBullets_feature_div","#prodDetails"]);' +
 'var m=location.href.match(/\\/(?:dp|gp\\/product)\\/([A-Z0-9]{10})/);' +
 'var cleanText=function(str){' +
@@ -681,10 +681,30 @@ function safe(fn, label){ try { fn(); } catch(err){ console.error('[' + label + 
 
 /* ================= 云端保存 & 管理员逻辑 ================= */
 async function saveAuditToCloud(total, rej, pass) {
-  if (!sbClient) return;
+  const logData = {
+      user_email: '员工', 
+      total_items: total, 
+      rejected_items: rej, 
+      passed_items: pass,
+      created_at: new Date().toISOString()
+  };
+
+  // 1. 尝试保存到云端
+  if (sbClient) {
+      try {
+        await sbClient.from('audit_logs').insert(logData);
+      } catch (e) { 
+        console.error('云端连接异常:', e); 
+      }
+  }
+
+  // 2. 同时永远保存到本地浏览器，作为兜底
   try {
-    await sbClient.from('audit_logs').insert({ user_email: '员工', total_items: total, rejected_items: rej, passed_items: pass });
-  } catch (e) { console.error('云端连接异常:', e); }
+      let localLogs = JSON.parse(localStorage.getItem('local_audit_logs') || '[]');
+      localLogs.unshift(logData); // 放在最前面
+      if (localLogs.length > 50) localLogs.pop(); // 最多存50条
+      localStorage.setItem('local_audit_logs', JSON.stringify(localLogs));
+  } catch (e) { console.error('本地存储异常:', e); }
 }
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -709,26 +729,32 @@ document.addEventListener('DOMContentLoaded', () => {
         loginView.hidden = true; 
         historyView.hidden = false;
         
-        if (!sbClient) {
-            document.getElementById('historyBody').innerHTML = `<tr><td colspan="5" style="text-align:center;color:var(--muted)">当前为本地模式，未连接云端数据库。</td></tr>`;
-            return;
+        let displayData = [];
+
+        // 如果配置了 Supabase，优先从云端拉取
+        if (sbClient) {
+            try {
+                const { data, error } = await sbClient.from('audit_logs').select('*').order('created_at', { ascending: false }).limit(50);
+                if (error) throw error; // 触发 catch
+                if (data) displayData = data;
+            } catch (err) {
+                console.error("云端读取失败，降级到本地读取:", err);
+            }
         }
         
-        try {
-            const { data, error } = await sbClient.from('audit_logs').select('*').order('created_at', { ascending: false }).limit(50);
-            if (error) throw error; // 捕捉具体错误
-            
-            if (!data || data.length === 0) {
-                document.getElementById('historyBody').innerHTML = `<tr><td colspan="5" style="text-align:center;color:var(--muted)">暂无审核记录。</td></tr>`;
-            } else {
-                document.getElementById('historyBody').innerHTML = data.map(d => `
-                  <tr><td>${new Date(d.created_at).toLocaleString()}</td><td>${d.user_email}</td><td>${d.total_items}</td><td style="color:var(--red)">${d.rejected_items}</td><td style="color:var(--green)">${d.passed_items}</td></tr>
-                `).join('');
-            }
-        } catch (err) {
-            console.error(err);
-            // 显示具体的报错信息，方便排错
-            document.getElementById('historyBody').innerHTML = `<tr><td colspan="5" style="text-align:center;color:var(--red);font-size:12px;">读取失败，请检查 Supabase URL/Key。错误详情：${esc(err.message)}</td></tr>`;
+        // 如果云端没有数据，或者云端读取失败，则使用本地记录兜底
+        if (displayData.length === 0) {
+            try {
+                displayData = JSON.parse(localStorage.getItem('local_audit_logs') || '[]');
+            } catch (e) { console.error(e); }
+        }
+
+        if (displayData.length === 0) {
+            document.getElementById('historyBody').innerHTML = `<tr><td colspan="5" style="text-align:center;color:var(--muted)">暂无审核记录。请先执行一次审核。</td></tr>`;
+        } else {
+            document.getElementById('historyBody').innerHTML = displayData.map(d => `
+              <tr><td>${new Date(d.created_at).toLocaleString()}</td><td>${d.user_email}</td><td>${d.total_items}</td><td style="color:var(--red)">${d.rejected_items}</td><td style="color:var(--green)">${d.passed_items}</td></tr>
+            `).join('');
         }
     } else {
         document.getElementById('loginMsg').innerText = '账号或密码错误！';
