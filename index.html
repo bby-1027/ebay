@@ -290,6 +290,14 @@ function readGoods(file){
   tag.style.display = 'inline-flex';
   tag.textContent = '正在读取: ' + file.name + ' ...';
 
+  // 强制清空上次的抓取记录和结果
+  state.grabMap = {};
+  state.results = [];
+  state.advices = [];
+  $('results').hidden = true;
+  $('progBar').style.width = '0%';
+  $('progText').textContent = '0 / 0 已核验';
+
   const ext = file.name.split('.').pop().toLowerCase();
   if ((ext === 'xlsx' || ext === 'xls') && typeof XLSX === 'undefined'){ 
     showErr('Excel 解析库未加载！请检查网络，或将文件另存为 .csv 格式后再上传。'); 
@@ -328,7 +336,7 @@ function ingestGoods(rows, name){
   
   if (!items.length){ showErr('无有效数据'); $('goodsTag').style.display = 'none'; return; }
 
-  state.items = items; state.grabMap = {};
+  state.items = items;
   const hasLink = items.some(it => it.link);
   const tag = $('goodsTag'); tag.style.display = 'inline-flex'; 
   tag.textContent = '✓ ' + name + ' (' + items.length + ' 个 SKU)';
@@ -402,7 +410,7 @@ function renderQueue(){
   $('queueBox').innerHTML = `<div class="tblbox" style="max-height:420px"><table><thead><tr><th>行</th><th>ASIN</th><th>表格标题</th><th>链接核验</th><th>操作</th></tr></thead><tbody>${rows}</tbody></table></div>`;
 }
 
-window.openLink = function(url) { window.open(url, '_blank', 'noopener,noreferrer'); };
+window.openLink = function(url) { window.open(url, '_blank'); };
 
 window.openBatch = function() {
     const ungrabbed = state.items.filter(it => it.link && !state.grabMap[it.asin]);
@@ -411,10 +419,9 @@ window.openBatch = function() {
     const count = Math.min(3, ungrabbed.length);
     const toOpen = ungrabbed.slice(0, count);
     
-    // 缓释挂机模式：每隔 2 秒打开一个
     toOpen.forEach((it, index) => {
         setTimeout(() => {
-            window.open(it.link, '_blank', 'noopener,noreferrer');
+            window.open(it.link, '_blank');
         }, index * 2000);
     });
     
