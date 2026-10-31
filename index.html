@@ -111,15 +111,18 @@ async function start() {
       body: JSON.stringify({ asins: asins, batch_name: batchName })
     });
     
-    if (!submitRes.ok) throw new Error('提交失败: ' + submitRes.status);
+    if (!submitRes.ok) {
+       const errTxt = await submitRes.text();
+       throw new Error('提交失败: ' + submitRes.status + ' - ' + errTxt.slice(0,50));
+    }
     
-    // 2. 轮询进度，获取 batch_id
+    // 2. 轮询进度
     let isCompleted = false;
     let pollAttempts = 0;
     let finalBatchId = null;
 
-    while (!isCompleted && pollAttempts < 240) {
-      await new Promise(r => setTimeout(r, 5000));
+    while (!isCompleted && pollAttempts < 600) { 
+      await new Promise(r => setTimeout(r, 2000)); // 提速：2秒轮询一次
       pollAttempts++;
       
       const statusRes = await fetch(`${WORKER_URL}/api/batches/${batchName}/status`, {
@@ -132,7 +135,6 @@ async function start() {
       const total = statusData.total || asins.length;
       const stateStr = (statusData.status || '').toLowerCase();
       
-      // 尝试抓取 batch_id (根据各种可能的字段名)
       finalBatchId = statusData.id || statusData.batch_id || statusData.batchId;
 
       app.task = { text: `采集进行中... (${currentDone}/${total})`, percent: Math.min(90, (currentDone / total) * 90) };
@@ -141,31 +143,31 @@ async function start() {
       if (['completed', 'failed', 'done', 'finished'].includes(stateStr)) isCompleted = true;
     }
 
-    if (!isCompleted) throw new Error('轮询超时。');
+    if (!isCompleted) throw new Error('轮询超时，请稍后重试。');
 
     // 3. 取回结果 (使用不需要 Token 的 results 接口)
     app.task = { text: `正在拉取完整商品资料...`, percent: 90 };
     render();
 
-    // 如果我们没拿到 batch_id，就直接用新的批次名去查（部分接口支持）
     const queryId = finalBatchId || batchName;
     const recordsRes = await fetch(`${WORKER_URL}/api/results?batch_id=${queryId}&limit=1000`, {
       headers: { 'X-Workbench-Token': TOKEN }
     });
     
-    if (!recordsRes.ok) throw new Error('拉取结果失败: ' + recordsRes.status);
+    if (!recordsRes.ok) {
+      const errorText = await recordsRes.text();
+      throw new Error(`拉取结果失败: ${recordsRes.status} - ${errorText.slice(0, 100)}`);
+    }
     
     const recordsData = await recordsRes.json();
-    // 采集系统的返回格式可能是 { records: [...] } 或直接是数组 [...] 或 { data: [...] }
     const allRecords = Array.isArray(recordsData) ? recordsData : (recordsData.records || recordsData.data || []);
 
     // 4. 将数据分配回网页
     for (const p of targets) {
-      // 寻找包含该 ASIN 的记录
       const match = allRecords.find(r => r.asin === p.id || r.sku === p.id);
       
       if (match) {
-        p.collected = match; // 直接把找到的这条记录当作数据源
+        p.collected = match; 
         p.revision++;
         p.audit = null;
         p.copy = null;
