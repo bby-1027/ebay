@@ -178,8 +178,12 @@ dialog::backdrop{background:#1c332c66}.dialoghead{padding:16px 24px;border-botto
 
 <script>
 'use strict';
+
+// ==========================================
+// 【请在这里填写你的配置】
 const WORKER_URL = 'https://scraper-proxy.1172743763.workers.dev';
-const TOKEN = 'ebay1031'; // 请替换为真实密码
+const TOKEN = 'ebay1031'; // 替换为你真实的 WORKBENCH_TOKEN
+// ==========================================
 
 // ========== 状态管理 ==========
 let app = {
@@ -251,7 +255,6 @@ async function saveData() {
     
     if (res.status === 409) {
       if (confirm("保存冲突：有其他人刚刚修改了数据，你的修改可能会覆盖别人的内容。\n\n点击“确定”强制覆盖，或点击“取消”拉取最新数据。")) {
-        // 强制覆盖：把版本号设为0，或者获取最新版本号再提交
         const latest = await fetch(`${WORKER_URL}/api/data`, { headers: { 'X-Workbench-Token': TOKEN } }).then(r=>r.json());
         app.serverVersion = latest.version;
         return saveData();
@@ -273,7 +276,6 @@ async function saveData() {
 
 // ========== 初始化与渲染 ==========
 function init() {
-  // 加载本地导出偏好
   const prefsStr = localStorage.getItem('ebay_export_prefs');
   if (prefsStr) {
     try { exportPrefs = JSON.parse(prefsStr); } catch (e) {}
@@ -449,7 +451,6 @@ $('goodsFile').onchange = async (e) => {
     
     if (rows.length < 2) throw new Error('表格无有效数据。');
     
-    // 严格校验 B 列及以后不能有数据
     for (let i = 1; i < rows.length; i++) {
       const row = rows[i];
       // 检查 B 列(索引1)及之后是否有非空值
@@ -474,7 +475,7 @@ $('goodsFile').onchange = async (e) => {
     $('importError').style.color = '#a53d38';
     pendingFileAsins = [];
     updateImportSummary();
-    e.target.value = ''; // 清空 file input
+    e.target.value = ''; 
   }
 };
 
@@ -707,7 +708,6 @@ function exportBatch(batchId, type) {
     const items = batch.items.filter(i => i.reviewStatus === 'passed' && i.copyStatus === 'completed');
     if (items.length === 0) return toast('该批次没有可导出的通过商品。');
     
-    // 动态生成表头
     const headers = ['SKU'];
     if (exportPrefs.link) headers.push('亚马逊链接');
     if (exportPrefs.title) headers.push('清理后的标题');
@@ -728,7 +728,6 @@ function exportBatch(batchId, type) {
     const items = batch.items.filter(i => i.collectStatus === 'error' || i.reviewStatus === 'error' || i.copyStatus === 'error');
     if (items.length === 0) return toast('该批次没有失败记录。');
     
-    // 失败清单固定字段，不受设置影响
     const rows = [['SKU', '亚马逊链接', '失败环节', '失败原因']];
     items.forEach(i => {
       let step = i.collectStatus === 'error' ? '采集' : (i.reviewStatus === 'error' ? '审核' : '文案');
