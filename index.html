@@ -48,7 +48,10 @@ function exportRows(items){return [['SKU','亚马逊链接','清理后的标题'
 function csv(rows){return '\ufeff'+rows.map(row=>row.map(v=>{let s=text(v);if(/^[\s]*[=+\-@]/.test(s))s="'"+s;return '"'+s.replace(/"/g,'""')+'"';}).join(',')).join('\r\n');}
 function copyIssues(item,copy){const issues=[],brand=text(fields(item).brand).trim();for(const key of ['title','bullets','description']){const value=text(copy[key]);if(!meaningful(value))issues.push('标题、五点和长描述均需填写');if(/amazon|亚马逊|\bprime\b/i.test(value))issues.push('仍含亚马逊或 Prime 信息');if(meaningful(brand)&&value.toLocaleLowerCase().includes(brand.toLocaleLowerCase()))issues.push('仍含当前商品品牌：'+brand);}return [...new Set(issues)];}
 function validateBackup(data){if(data?.schema!=='ebay-review-workspace'||data.version!==2||!Array.isArray(data.items)||data.items.length>50000)throw Error('不是本版工作台备份。');const ids=new Set();for(const p of data.items){if(!p||!asin(p.id)||p.id!==asin(p.id)||ids.has(p.id)||!p.source||typeof p.source!=='object'||Array.isArray(p.source)||!Array.isArray(p.history)||!Number.isInteger(p.revision)||p.revision<0||!Object.hasOwn(LABELS,p.status))throw Error('备份商品结构有误，未恢复。');ids.add(p.id);for(const k of ['collected','edits','audit','copy'])if(p[k]!=null&&(typeof p[k]!=='object'||Array.isArray(p[k])))throw Error('备份字段有误，未恢复。');}return data;}
-const app={items:[],filter:'all',query:'',limit:50,active:null,mode:'paste',fileRows:null,busy:false,services:{},task:null};
+
+// 将采集服务设为已接入，AI审核暂时为未接入
+const app={items:[],filter:'all',query:'',limit:50,active:null,mode:'paste',fileRows:null,busy:false,services:{collect:true,audit:false,clean:false},task:null};
+
 const $=id=>document.getElementById(id);
 let toastTimer;
 function toast(msg){$('toast').textContent=msg;$('toast').style.display='block';clearTimeout(toastTimer);toastTimer=setTimeout(()=>{$('toast').style.display='none';},4800);}
@@ -57,7 +60,7 @@ function matches(p){let ok=app.filter==='all'||(app.filter==='pending'?['pending
 function badge(p){const cls=['collecting','auditing','cleaning'].includes(p.status)?'running':p.status;return '<span class="badge '+cls+'">'+LABELS[p.status]+'</span>';}
 function render(){const eligible=app.items.filter(exportable).length;$('totalCount').textContent=app.items.length;$('verifyCount').textContent=app.items.filter(p=>p.status==='verify').length;$('passedCount').textContent=app.items.filter(p=>p.status==='passed').length;$('exportCount').textContent=eligible;
  const list=app.items.filter(matches);$('filters').innerHTML=Object.entries(GROUPS).map(([k,v])=>'<button data-filter="'+k+'" class="'+(app.filter===k?'active':'')+'" aria-pressed="'+(app.filter===k)+'">'+v+'</button>').join('');$('rows').innerHTML=list.slice(0,app.limit).map(p=>{const f=fields(p);return '<tr><td class="code">'+p.id+'</td><td class="title">'+esc(meaningful(f.title)?f.title:'尚未采集标题')+(p.status==='passed'&&!exportable(p)?'<br><small>文案待完成</small>':'')+'</td><td>'+badge(p)+'</td><td class="reason">'+esc(p.reason||(['pending','ready'].includes(p.status)?'等待处理':'—'))+'</td><td><a href="'+productUrl(p.id)+'" target="_blank" rel="noopener noreferrer">查看商品 ↗</a></td><td><button class="linkbtn" data-detail="'+p.id+'">查看 / 处理</button></td></tr>';}).join('');$('empty').hidden=list.length>0;if(app.items.length&&!list.length){$('empty').innerHTML='<strong>没有符合筛选条件的商品</strong><p>试试其他状态或搜索词。</p>';}else if(!app.items.length){$('empty').innerHTML='<div class="symbol">＋</div><strong>从导入第一批商品开始</strong><p>粘贴 SKU，或上传第一列为 SKU 的表格。<br>第一行为标题，商品从 A2 开始读取。</p><button data-import>导入商品</button>';}
- $('listCount').textContent='显示 '+Math.min(app.limit,list.length)+' / '+list.length+' 个商品';$('moreRows').classList.toggle('hidden',list.length<=app.limit);$('startBtn').disabled=app.busy;$('importBtn').disabled=app.busy;$('exportBtn').disabled=eligible===0;$('collectorStatus').textContent=app.services.collect?'已接入':'未接入';$('aiStatus').textContent=app.services.audit&&app.services.clean?'已接入':'未完整接入';$('serviceNotice').textContent=app.services.audit&&app.services.clean?'审核依据原始资料；图片未经过 AI 审核。需要图片判断或缺少依据的商品应进入待核验。':'采集与 AI 服务尚未完整接入。当前可以导入资料、查看商品、人工核验和导出；点击“开始处理”不会生成模拟结论。';if(app.task){$('task').classList.add('visible');$('taskText').textContent=app.task.text;$('taskBar').style.width=app.task.percent+'%';}}
+ $('listCount').textContent='显示 '+Math.min(app.limit,list.length)+' / '+list.length+' 个商品';$('moreRows').classList.toggle('hidden',list.length<=app.limit);$('startBtn').disabled=app.busy;$('importBtn').disabled=app.busy;$('exportBtn').disabled=eligible===0;$('collectorStatus').textContent=app.services.collect?'已接入':'未接入';$('aiStatus').textContent=app.services.audit&&app.services.clean?'已接入':'未完整接入';$('serviceNotice').textContent='采集服务已接入。文字审核与文案处理尚未接入。当前可以导入商品、一键采集资料、人工核验和导出。';if(app.task){$('task').classList.add('visible');$('taskText').textContent=app.task.text;$('taskBar').style.width=app.task.percent+'%';}}
 function openImport(){app.mode='paste';$('importError').textContent='';switchTab('paste');$('importDialog').showModal();}
 function switchTab(mode){app.mode=mode;for(const k of ['paste','file']){$(k+'Pane').classList.toggle('hidden',mode!==k);$(k+'Tab').classList.toggle('active',mode===k);}}
 function mergeImport(incoming){const seen=new Set(app.items.map(p=>p.id));let added=0,duplicates=0;for(const p of incoming){if(seen.has(p.id)){duplicates++;continue;}seen.add(p.id);history(p,'导入商品');app.items.push(p);added++;}persist();app.filter='all';app.limit=50;render();return {added,duplicates};}
@@ -76,11 +79,177 @@ function ensureSavedSource(){if(dirty('sourceForm',SOURCE_IDS)){toast('商品资
 function saveSource(e){e.preventDefault();const p=current();if(app.busy)return toast('处理中暂不能修改资料。');const names=['title','brand','category','model','bullets','description','variants','compatibility','images'],updates={};names.forEach((k,i)=>updates[k]=$(SOURCE_IDS[i]).value);if(!dirty('sourceForm',SOURCE_IDS))return toast('商品资料没有变化。');if(!confirm('保存会使本商品已有结论和清理文案失效，回到待核验。确认保存？'))return;p.edits={...(p.edits||{}),...updates};p.revision++;p.audit=null;p.copy=null;p.status='verify';p.reason='资料已修改，需要重新审核或人工核验。';history(p,'修改商品资料',$('editReason').value);persist();render();renderDetail();toast('资料已保存，原始记录保留。');}
 function saveReview(e){e.preventDefault();const p=current();if(app.busy)return toast('处理中暂不能修改结论。');if(!ensureSavedSource())return;const decision=$('decision').value;if(decision==='passed'&&!['title','bullets','description'].every(k=>meaningful(fields(p)[k])))return toast('标题、五点或长描述缺失，请先补充并保存资料。');p.audit={actor:'human',revision:p.revision,decision,reason:$('reviewReason').value,evidence:$('reviewEvidence').value,risks:[$('reviewRisks').value].filter(Boolean),at:new Date().toISOString()};p.status=decision;p.reason=p.audit.reason;if(decision!=='passed')p.copy=null;history(p,'人工核验：'+LABELS[decision],p.reason);persist();render();renderDetail();toast('人工结论已记录。');}
 function saveCopy(e){e.preventDefault();const p=current();if(app.busy)return toast('处理中暂不能修改文案。');if(!ensureSavedSource())return;if(p.status!=='passed'||p.audit?.revision!==p.revision)return toast('请先完成当前资料版本的审核。');const c={title:$('copyTitle').value.trim(),bullets:$('copyBullets').value.trim(),description:$('copyDescription').value.trim()};const issues=copyIssues(p,c);if(issues.length)return toast(issues.join('；'));p.copy={...c,actor:'human',revision:p.revision,confirmed:true,at:new Date().toISOString()};history(p,'确认导出文案');persist();render();renderDetail();toast('文案已确认，可导出。');}
-async function start(){if(app.busy)return;if(!app.items.length)return openImport();const targets=app.items.filter(p=>['pending','ready','error'].includes(p.status));if(!targets.length)return toast('没有待处理商品；待核验商品请在详情中处理。');if(!app.services.audit||!app.services.clean||targets.some(p=>needsCollection(p)&&!app.services.collect))return toast('所需采集或 AI 服务未接入。当前可导入资料并人工核验。');app.busy=true;let done=0,failed=0;try{for(const p of targets){try{if(needsCollection(p)){p.status='collecting';app.task={text:'正在采集 '+p.id+' · '+done+' / '+targets.length,percent:done/targets.length*100};render();const received=await app.services.collect({sku:p.id,asin:p.id});if(!received||asin(received.asin||received.sku)!==p.id||!received.success||!received.data)throw Error('采集结果失败或 SKU 不匹配');p.collected=received.data;p.revision++;p.audit=null;p.copy=null;history(p,'采集资料成功');}
- p.status='auditing';app.task={text:'正在审核 '+p.id+' · '+done+' / '+targets.length,percent:done/targets.length*100};render();const f=fields(p);if(!['title','bullets','description'].every(k=>meaningful(f[k]))){p.status='verify';p.reason='标题、五点或长描述缺失，需要补充资料。';history(p,'资料不足，转待核验');continue;}const a=await app.services.audit({sku:p.id,revision:p.revision,fields:f,original:p.raw,imageAudit:false});if(!a||!['passed','verify','excluded'].includes(a.decision)||!meaningful(a.reason)||!meaningful(a.evidence))throw Error('审核结果缺少有效结论、理由或依据');p.audit={...guardedAudit(a),actor:'ai',revision:p.revision,at:new Date().toISOString()};p.status=p.audit.decision;p.reason=p.audit.reason;p.copy=null;history(p,'AI 审核：'+LABELS[p.status],p.reason);
- if(p.status==='passed'){p.status='cleaning';render();const c=await app.services.clean({sku:p.id,revision:p.revision,fields:f,audit:p.audit});const issues=c?copyIssues(p,c):['文案处理无有效结果'];if(issues.length){p.status='verify';p.reason='文案需复核：'+issues.join('；');}else{p.copy={title:c.title,bullets:c.bullets,description:c.description,actor:'ai',revision:p.revision,confirmed:c.factsPreserved===true,at:new Date().toISOString()};p.status=c.factsPreserved===true?'passed':'verify';if(p.status==='verify')p.reason='AI 未确认文案事实完整性，需要人工核验。';}history(p,'文案处理结束',p.reason);}
- }catch(e){p.status='error';p.copy=null;p.reason='处理失败：'+text(e.message);history(p,'处理失败',p.reason);failed++;}finally{done++;persist();app.task={text:'本次已处理 '+done+' / '+targets.length+' · 失败 '+failed+' 个',percent:done/targets.length*100};render();}}
- }finally{app.busy=false;persist();render();toast('本次处理结束，请查看结果。');}}
+
+// ============== 重写后的采集对接流程 ==============
+async function start() {
+  if (app.busy) return;
+  if (!app.items.length) return openImport();
+
+  // 挑选出需要采集的商品 (目前包含还没采集的 pending/ready/error)
+  const targets = app.items.filter(p => needsCollection(p) && ['pending', 'ready', 'error'].includes(p.status));
+
+  if (!targets.length) return toast('没有需要采集的商品。请检查列表状态。');
+
+  // ==========================================
+  // 【请在这里填写你的配置】
+  const WORKER_URL = 'https://scraper-proxy.1172743763.workers.dev/scraper';
+  const TOKEN = 'ebay1031'; // 替换为你在 Cloudflare 设置的 WORKBENCH_TOKEN
+  // ==========================================
+
+  app.busy = true;
+  let done = 0;
+  let failed = 0;
+
+  try {
+    targets.forEach(p => {
+      p.status = 'collecting';
+      p.reason = '正在提交采集任务...';
+    });
+    render();
+
+    const asins = targets.map(p => p.id);
+    const batchName = `wb_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+
+    app.task = { text: `正在向采集服务提交 ${asins.length} 个商品...`, percent: 0 };
+    render();
+
+    // 1. 提交采集任务
+    let submitSuccess = false;
+    try {
+      const submitRes = await fetch(`${WORKER_URL}/api/batches`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Workbench-Token': TOKEN },
+        body: JSON.stringify({ asins: asins, batch_name: batchName })
+      });
+      
+      if (submitRes.ok) {
+        submitSuccess = true;
+      } else if (submitRes.status === 409) {
+        throw new Error('提交的批次名冲突，请重新点击开始处理。');
+      } else {
+        const errData = await submitRes.json().catch(()=>({}));
+        throw new Error('提交失败: ' + (errData.detail || submitRes.status));
+      }
+    } catch (e) {
+      if (e.name === 'TypeError' || e.message.includes('fetch') || e.message.includes('NetworkError')) {
+        app.task = { text: `提交超时，正在尝试找回批次...`, percent: 5 };
+        render();
+        // 尝试找回批次
+        const checkRes = await fetch(`${WORKER_URL}/api/batches/${batchName}/status`, {
+          headers: { 'X-Workbench-Token': TOKEN }
+        });
+        if (checkRes.status === 200) {
+          toast('已找回刚提交的采集批次，继续追踪。');
+          submitSuccess = true;
+        } else {
+          throw new Error('提交请求失败且服务端未创建该批次，请重试。');
+        }
+      } else {
+        throw e;
+      }
+    }
+
+    if (!submitSuccess) throw new Error('无法确认任务是否提交成功。');
+
+    // 2. 轮询进度
+    let isCompleted = false;
+    let pollAttempts = 0;
+    const maxAttempts = 240; // 最长等待20分钟 (5s一次)
+
+    while (!isCompleted && pollAttempts < maxAttempts) {
+      await new Promise(r => setTimeout(r, 5000)); // 5秒轮询
+      pollAttempts++;
+      
+      const statusRes = await fetch(`${WORKER_URL}/api/batches/${batchName}/status`, {
+        headers: { 'X-Workbench-Token': TOKEN }
+      });
+      if (!statusRes.ok) continue; // 单次网络波动忽略
+      
+      const statusData = await statusRes.json();
+      const currentDone = statusData.done || statusData.completed || statusData.finished || 0;
+      const total = statusData.total || asins.length;
+      const stateStr = (statusData.status || '').toLowerCase();
+      
+      app.task = { text: `采集进行中... (${currentDone}/${total})`, percent: Math.min(90, (currentDone / total) * 90) };
+      render();
+
+      if (['completed', 'failed', 'done', 'finished'].includes(stateStr)) {
+        isCompleted = true;
+      }
+    }
+
+    if (!isCompleted) throw new Error('轮询超时，请稍后在采集后台查看。');
+
+    // 3. 分页取回结果
+    app.task = { text: `采集完成，正在拉取完整商品资料...`, percent: 90 };
+    render();
+
+    let allRecords = [];
+    let nextSeq = 0;
+    let hasMore = true;
+    let fetchAttempts = 0;
+
+    while (hasMore && fetchAttempts < 100) {
+      fetchAttempts++;
+      const recordsRes = await fetch(`${WORKER_URL}/api/export/batch/${batchName}/records?limit=500&cursor=${nextSeq}`, {
+        headers: { 'X-Workbench-Token': TOKEN }
+      });
+      if (!recordsRes.ok) throw new Error('拉取结果失败: ' + recordsRes.status);
+      
+      const recordsData = await recordsRes.json();
+      
+      if (recordsData.records && Array.isArray(recordsData.records)) {
+        allRecords.push(...recordsData.records);
+      }
+
+      if (recordsData.has_more && recordsData.next_cursor) {
+        nextSeq = recordsData.next_cursor;
+      } else {
+        hasMore = false;
+      }
+    }
+
+    // 4. 将拉取的数据写入网页
+    for (const p of targets) {
+      const pRecords = allRecords.filter(r => r.asin === p.id || r.sku === p.id);
+      const lastRecord = pRecords[pRecords.length - 1];
+
+      if (lastRecord && (lastRecord.outcome === 'success' || lastRecord.status === 'success')) {
+        p.collected = lastRecord.data || lastRecord.raw || lastRecord;
+        p.revision++;
+        p.audit = null;
+        p.copy = null;
+        p.status = 'verify'; // 因为没有接 AI 审核，这里直接转为待核验
+        p.reason = '资料采集成功，等待人工核验。';
+        history(p, '采集资料成功');
+        done++;
+      } else {
+        const errorMsg = lastRecord?.error_detail || lastRecord?.message || '未采集到有效数据';
+        p.status = 'error';
+        p.reason = '采集失败：' + errorMsg;
+        history(p, '采集失败', errorMsg);
+        failed++;
+      }
+    }
+
+  } catch (e) {
+    toast('处理中断: ' + e.message);
+    targets.forEach(p => {
+      if (p.status === 'collecting') {
+        p.status = 'error';
+        p.reason = '采集异常: ' + e.message;
+        history(p, '采集异常', e.message);
+      }
+    });
+  } finally {
+    app.busy = false;
+    app.task = { text: `本批次采集结束。成功 ${done} 个，失败 ${failed} 个。`, percent: 100 };
+    persist();
+    render();
+  }
+}
+// ==============================================
+
 function download(content,name,type){const url=URL.createObjectURL(new Blob([content],{type})),a=document.createElement('a');a.href=url;a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),30000);}
 function openExport(){const n=app.items.filter(exportable).length;if(!n)return toast('尚无审核通过且文案已确认的商品。');$('exportSummary').textContent='本次可导出 '+n+' 个商品。';$('exportXlsx').disabled=!window.XLSX;$('exportDialog').showModal();}
 function exportFile(format){const rows=exportRows(app.items);if(rows.length<=1)return toast('没有可导出商品。');const name='通过商品_'+new Date().toISOString().slice(0,10);if(format==='csv')download(csv(rows),name+'.csv','text/csv;charset=utf-8');else{if(!window.XLSX)return toast('Excel 组件未加载，可先使用 CSV。');const ws=XLSX.utils.aoa_to_sheet(rows);ws['!cols']=[{wch:15},{wch:45},{wch:60},{wch:85},{wch:100}];const book=XLSX.utils.book_new();XLSX.utils.book_append_sheet(book,ws,'通过商品');XLSX.writeFile(book,name+'.xlsx');}toast('已发起导出 '+(rows.length-1)+' 个商品。');}
