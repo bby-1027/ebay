@@ -116,36 +116,45 @@ async function start() {
        throw new Error('提交失败: ' + submitRes.status + ' - ' + errTxt.slice(0,50));
     }
     
-    // 2. 轮询进度
+    // 2. 轮询进度，获取 batch_id
     let isCompleted = false;
     let pollAttempts = 0;
     let finalBatchId = null;
+    let lastStatusText = "";
 
     while (!isCompleted && pollAttempts < 600) { 
-      await new Promise(r => setTimeout(r, 2000)); // 提速：2秒轮询一次
+      await new Promise(r => setTimeout(r, 2000)); 
       pollAttempts++;
       
-      const statusRes = await fetch(`${WORKER_URL}/api/batches/${batchName}/status`, {
-        headers: { 'X-Workbench-Token': TOKEN }
-      });
-      if (!statusRes.ok) continue; 
-      
-      const statusData = await statusRes.json();
-      const currentDone = statusData.done || statusData.completed || statusData.finished || 0;
-      const total = statusData.total || asins.length;
-      const stateStr = (statusData.status || '').toLowerCase();
-      
-      finalBatchId = statusData.id || statusData.batch_id || statusData.batchId;
+      try {
+        const statusRes = await fetch(`${WORKER_URL}/api/batches/${batchName}/status`, {
+          headers: { 'X-Workbench-Token': TOKEN }
+        });
+        if (!statusRes.ok) continue; 
+        
+        const statusData = await statusRes.json();
+        lastStatusText = JSON.stringify(statusData); // 记录最后一次返回的内容
+        
+        const currentDone = statusData.done ?? statusData.completed ?? statusData.processed ?? statusData.success ?? 0;
+        const total = statusData.total ?? asins.length;
+        
+        finalBatchId = statusData.id || statusData.batch_id || statusData.batchId || finalBatchId;
 
-      app.task = { text: `采集进行中... (${currentDone}/${total})`, percent: Math.min(90, (currentDone / total) * 90) };
-      render();
+        app.task = { text: `采集进行中... (${currentDone}/${total})`, percent: Math.min(90, (currentDone / total) * 90) };
+        render();
 
-      if (['completed', 'failed', 'done', 'finished'].includes(stateStr)) isCompleted = true;
+        const stateStr = String(statusData.status || '').toLowerCase();
+        if (currentDone >= total || stateStr.includes('complete') || stateStr.includes('done') || statusData.is_done === true) {
+          isCompleted = true;
+        }
+      } catch (e) {
+        console.warn("轮询单次出错", e);
+      }
     }
 
-    if (!isCompleted) throw new Error('轮询超时，请稍后重试。');
+    if (!isCompleted) throw new Error(`轮询超时！最后一次服务器返回: ${lastStatusText}`);
 
-    // 3. 取回结果 (使用不需要 Token 的 results 接口)
+    // 3. 取回结果
     app.task = { text: `正在拉取完整商品资料...`, percent: 90 };
     render();
 
@@ -156,22 +165,33 @@ async function start() {
     
     if (!recordsRes.ok) {
       const errorText = await recordsRes.text();
-      throw new Error(`拉取结果失败: ${recordsRes.status} - ${errorText.slice(0, 100)}`);
+      throw new Error(`拉取结果失败(状态码${recordsRes.status}): ${errorText.slice(0, 150)}`);
     }
     
     const recordsData = await recordsRes.json();
-    const allRecords = Array.isArray(recordsData) ? recordsData : (recordsData.records || recordsData.data || []);
+    
+    let allRecords = [];
+    if (Array.isArray(recordsData)) {
+      allRecords = recordsData;
+    } else if (recordsData.data || recordsData.records || recordsData.items || recordsData.results) {
+      allRecords = recordsData.data || recordsData.records || recordsData.items || recordsData.results;
+    } else {
+      throw new Error(`返回数据格式不认识: ${JSON.stringify(recordsData).slice(0, 100)}`);
+    }
 
     // 4. 将数据分配回网页
     for (const p of targets) {
-      const match = allRecords.find(r => r.asin === p.id || r.sku === p.id);
+      const match = allRecords.find(r => {
+        const recAsin = (r.asin || r.ASIN || r.sku || r.SKU || r.product_asin || '').toUpperCase();
+        return recAsin === p.id;
+      });
       
       if (match) {
         p.collected = match; 
         p.revision++;
         p.audit = null;
         p.copy = null;
-        p.status = 'verify'; // 没有接 AI 审核，转为待核验
+        p.status = 'verify'; 
         p.reason = '资料采集成功，等待人工核验。';
         history(p, '采集资料成功');
         done++;
