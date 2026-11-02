@@ -213,19 +213,22 @@ function toast(msg) {
   clearTimeout(el.timer); el.timer = setTimeout(() => el.style.display = 'none', 4000);
 }
 
-// 自适应解析采集系统返回的字段
+// 自适应解析采集系统返回的字段（智能解包与中英兼容）
 function normalizeCollectedData(raw) {
+  // 如果数据嵌套在 data 或 product 中，先解开
+  const target = raw.data || raw.product || raw.item || raw;
+  
   return {
-    title: raw.title || raw['商品标题'] || raw['标题'] || '',
-    brand: raw.brand || raw['品牌'] || '',
-    bullets: raw.bullets || raw['五点描述'] || raw['卖点'] || raw.bullet_points || '',
-    description: raw.description || raw['长描述'] || raw['商品描述'] || '',
-    images: raw.images || raw['商品图片'] || raw['图片链接'] || raw.imageurls || '',
-    category: raw.category || raw['商品类型'] || raw['类目路径'] || '',
-    model: raw.model || raw['产品型号'] || '',
-    variants: raw.variants || raw['变体属性'] || '',
-    condition: raw.condition || raw['品相'] || raw['成色'] || '',
-    stockStatus: raw.stockStatus || raw['库存状态'] || '',
+    title: target.title || target['商品标题'] || target['标题'] || '',
+    brand: target.brand || target['品牌'] || '',
+    bullets: target.bullets || target['五点描述'] || target['卖点'] || target.bullet_points || target['五点'] || '',
+    description: target.description || target['长描述'] || target['商品描述'] || target['描述'] || '',
+    images: target.images || target['商品图片'] || target['图片链接'] || target.imageurls || '',
+    category: target.category || target['商品类型'] || target['类目路径'] || '',
+    model: target.model || target['产品型号'] || '',
+    variants: target.variants || target['变体属性'] || '',
+    condition: target.condition || target['品相'] || target['成色'] || '',
+    stockStatus: target.stockStatus || target['库存状态'] || '',
     _raw: raw
   };
 }
@@ -550,9 +553,12 @@ async function runCollection(batch, targets) {
       body: JSON.stringify({ asins, batch_name: batchName })
     });
     if (!res.ok) throw new Error('提交任务失败: ' + res.status);
+    
+    // 提交后立即捕获可能的 batch_id
+    const submitData = await res.json().catch(()=>({}));
+    let extractedBatchId = submitData.id || submitData.batch_id || submitData.batchId || submitData.detail?.batch_id || submitData.detail?.id;
 
     let isCompleted = false;
-    let finalBatchId = null;
     let poll = 0;
     
     while (!isCompleted && poll < 300) {
@@ -563,7 +569,11 @@ async function runCollection(batch, targets) {
       const data = await stRes.json();
       const done = data.done ?? data.completed ?? data.processed ?? 0;
       const total = data.total ?? asins.length;
-      finalBatchId = data.id || data.batch_id || data.batchId || finalBatchId;
+      
+      // 从轮询中捕获 batch_id
+      if (!extractedBatchId) {
+        extractedBatchId = data.id || data.batch_id || data.batchId || data.detail?.batch_id || data.detail?.id;
+      }
       
       targets.forEach(t => { t.reason = `采集进度: ${done}/${total}`; });
       renderItems();
@@ -574,13 +584,25 @@ async function runCollection(batch, targets) {
 
     if (!isCompleted) throw new Error('轮询超时，采集未完成');
 
-    const recordsRes = await fetch(`${WORKER_URL}/api/results?batch_id=${finalBatchId || batchName}&limit=1000`, { headers: { 'X-Workbench-Token': TOKEN } });
-    if (!recordsRes.ok) throw new Error('获取数据失败');
+    const queryId = extractedBatchId || batchName;
+    const recordsRes = await fetch(`${WORKER_URL}/api/results?batch_id=${queryId}&limit=1000`, { headers: { 'X-Workbench-Token': TOKEN } });
+    if (!recordsRes.ok) throw new Error('获取数据失败: ' + recordsRes.status);
+    
     const recordsData = await recordsRes.json();
-    let allRecords = Array.isArray(recordsData) ? recordsData : (recordsData.data || recordsData.records || recordsData.results || []);
+    
+    // 智能提取数组：兼容 {data: [...]}, {records: [...]}, {items: [...]} 等
+    let allRecords = [];
+    if (Array.isArray(recordsData)) allRecords = recordsData;
+    else allRecords = recordsData.data || recordsData.records || recordsData.items || recordsData.results || [];
+
+    if (allRecords.length === 0) {
+       throw new Error('接口返回数据为空，响应: ' + JSON.stringify(recordsData).slice(0, 50));
+    }
 
     targets.forEach(t => {
-      const match = allRecords.find(r => (r.asin || r.ASIN || r.sku || r.SKU || r.product_asin || r['ASIN (商品ID)'] || '').toUpperCase() === t.asin);
+      // 暴力匹配：只要这条记录的 JSON 文本里包含该 ASIN，就认为匹配成功
+      const match = allRecords.find(r => JSON.stringify(r).includes(t.asin));
+      
       if (match) {
         t.collected = normalizeCollectedData(match);
         t.collectStatus = 'collected';
@@ -589,7 +611,7 @@ async function runCollection(batch, targets) {
         t.history.push({ time: new Date().toISOString(), action: '采集成功' });
       } else {
         t.collectStatus = 'error';
-        t.reason = '未返回有效数据';
+        t.reason = '返回的数据中找不到该 ASIN';
       }
     });
     
