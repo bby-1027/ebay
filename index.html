@@ -40,7 +40,6 @@ dialog::backdrop{background:#1c332c66}.dialoghead{padding:16px 24px;border-botto
   </div>
 </header>
 <main>
-  <!-- 视图1：批次首页 -->
   <div id="homeView">
     <div class="actions" style="justify-content:space-between;margin-bottom:20px">
       <h2>批次列表</h2>
@@ -56,13 +55,11 @@ dialog::backdrop{background:#1c332c66}.dialoghead{padding:16px 24px;border-botto
     </div>
   </div>
 
-  <!-- 视图2：SKU 明细 -->
   <div id="itemsView" class="hidden">
     <div class="actions" style="margin-bottom:20px">
       <button id="backHomeBtn">← 返回批次列表</button>
       <h2 id="currentBatchName" style="margin:0"></h2>
     </div>
-    
     <div class="card">
       <div class="toolbar">
         <div class="batch-bar">
@@ -85,7 +82,6 @@ dialog::backdrop{background:#1c332c66}.dialoghead{padding:16px 24px;border-botto
         </div>
       </div>
       
-      <!-- 选中操作栏 -->
       <div id="selectionBar" class="toolbar hidden" style="background:#eaf2ed;border-bottom:1px solid #c3e6d3">
         <div>已选择 <strong id="selCount">0</strong> 个商品</div>
         <div style="display:flex;gap:10px">
@@ -113,7 +109,6 @@ dialog::backdrop{background:#1c332c66}.dialoghead{padding:16px 24px;border-botto
   </div>
 </main>
 
-<!-- 导入弹窗 (统一窗口) -->
 <dialog id="importDialog">
   <div class="dialoghead"><h3>导入新批次</h3><button class="close" data-close>×</button></div>
   <div class="dialogbody">
@@ -121,24 +116,18 @@ dialog::backdrop{background:#1c332c66}.dialoghead{padding:16px 24px;border-botto
       <label>批次名称（可选）</label>
       <input type="text" id="inputBatchName" style="width:100%;padding:10px;border:1px solid var(--line);border-radius:6px" placeholder="不填则自动按日期生成">
     </div>
-    
     <div style="margin-bottom:10px;font-weight:500">SKU 列表</div>
     <textarea id="skuInput" style="width:100%;height:150px;border:1px solid var(--line);border-radius:6px;padding:10px;font-family:monospace;margin-bottom:15px" placeholder="每行一个亚马逊 ASIN..."></textarea>
-    
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:15px">
       <span style="color:var(--muted)">或</span>
       <input type="file" id="goodsFile" accept=".xlsx,.xls,.csv" style="font-size:13px">
     </div>
-    
-    <div id="importSummary" style="background:#f0f4f1;padding:10px;border-radius:6px;font-size:13px;margin-bottom:15px">
-      待导入数量：0 个
-    </div>
+    <div id="importSummary" style="background:#f0f4f1;padding:10px;border-radius:6px;font-size:13px;margin-bottom:15px">待导入数量：0 个</div>
     <div id="importError" style="color:#a53d38;font-size:13px;margin-top:10px"></div>
   </div>
   <div class="dialogfoot"><button data-close>取消</button><button id="btnConfirmImport" class="primary">确认导入</button></div>
 </dialog>
 
-<!-- 商品详情弹窗 -->
 <dialog id="detailDialog">
   <div class="dialoghead">
     <div><h3 id="dtTitle" style="margin-bottom:4px">商品详情</h3><span id="dtStatus" class="badge b-gray"></span></div>
@@ -148,7 +137,6 @@ dialog::backdrop{background:#1c332c66}.dialoghead{padding:16px 24px;border-botto
   <div class="dialogfoot" id="dtFooter"></div>
 </dialog>
 
-<!-- 设置弹窗 -->
 <dialog id="settingsDialog" style="width:400px">
   <div class="dialoghead"><h3>设置</h3><button class="close" data-close>×</button></div>
   <div class="dialogbody">
@@ -165,7 +153,6 @@ dialog::backdrop{background:#1c332c66}.dialoghead{padding:16px 24px;border-botto
   <div class="dialogfoot"><button class="primary" data-close>保存</button></div>
 </dialog>
 
-<!-- 批量排除原因弹窗 -->
 <dialog id="excludeDialog">
   <div class="dialoghead"><h3>批量排除所选商品</h3><button class="close" data-close>×</button></div>
   <div class="dialogbody">
@@ -181,14 +168,9 @@ dialog::backdrop{background:#1c332c66}.dialoghead{padding:16px 24px;border-botto
 
 <script>
 'use strict';
-
-// ==========================================
-// 【请在这里填写你的配置】
 const WORKER_URL = 'https://scraper-proxy.1172743763.workers.dev';
-const TOKEN = 'ebay1031'; // 替换为你真实的 WORKBENCH_TOKEN
-// ==========================================
+const TOKEN = 'ebay1031'; // 确保这是你的真实密码！
 
-// ========== 状态管理 ==========
 let app = {
   serverVersion: 0,
   batches: [],
@@ -199,38 +181,29 @@ let app = {
   selectedItemIds: new Set(),
   detailItemId: null
 };
+let exportPrefs = { link: true, title: true, bullets: true, desc: true };
 
-let exportPrefs = {
-  link: true, title: true, bullets: true, desc: true
-};
-
-// ========== 工具函数 ==========
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const text = v => Array.isArray(v) ? v.map(text).join('\n') : (v && typeof v === 'object' ? JSON.stringify(v, null, 2) : String(v ?? ''));
 const meaningful = v => !['', 'n/a', 'na', 'null', 'none', '未提供'].includes(text(v).trim().toLowerCase());
 function asin(v) { const s = text(v).trim().toUpperCase(); return /^[A-Z0-9]{10}$/.test(s) ? s : null; }
-
 function toast(msg) {
   const el = $('toast'); el.textContent = msg; el.style.display = 'block';
   clearTimeout(el.timer); el.timer = setTimeout(() => el.style.display = 'none', 4000);
 }
 
-// 自适应解析采集系统返回的字段
 function normalizeCollectedData(raw) {
   const target = raw.data || raw.product || raw.item || raw;
   let descValue = target.description || target['长描述'] || target['商品描述'] || target['描述'] || '';
-  
   if (!descValue) {
     for (const key in target) {
       const lowerKey = key.toLowerCase();
       if ((lowerKey.includes('desc') || key.includes('描述')) && typeof target[key] === 'string' && target[key].length > 10) {
-        descValue = target[key];
-        break;
+        descValue = target[key]; break;
       }
     }
   }
-
   return {
     title: target.title || target['商品标题'] || target['标题'] || '',
     brand: target.brand || target['品牌'] || '',
@@ -246,7 +219,6 @@ function normalizeCollectedData(raw) {
   };
 }
 
-// ========== 网络请求：读写数据 ==========
 async function fetchData() {
   try {
     const res = await fetch(`${WORKER_URL}/api/data`, { headers: { 'X-Workbench-Token': TOKEN } });
@@ -255,9 +227,7 @@ async function fetchData() {
     app.serverVersion = data.version || 0;
     app.batches = data.batches || [];
     render();
-  } catch (e) {
-    toast(e.message);
-  }
+  } catch (e) { toast(e.message); }
 }
 
 async function saveData() {
@@ -268,52 +238,37 @@ async function saveData() {
       headers: { 'Content-Type': 'application/json', 'X-Workbench-Token': TOKEN },
       body: JSON.stringify(payload)
     });
-    
     if (res.status === 409) {
       if (confirm("保存冲突：有其他人刚刚修改了数据，你的修改可能会覆盖别人的内容。\n\n点击“确定”强制覆盖，或点击“取消”拉取最新数据。")) {
         const latest = await fetch(`${WORKER_URL}/api/data`, { headers: { 'X-Workbench-Token': TOKEN } }).then(r=>r.json());
         app.serverVersion = latest.version;
         return saveData();
-      } else {
-        fetchData();
-        return false;
-      }
+      } else { fetchData(); return false; }
     }
-    
     if (!res.ok) throw new Error('保存失败: ' + res.status);
     const result = await res.json();
     app.serverVersion = result.version;
     return true;
-  } catch (e) {
-    toast(e.message);
-    return false;
-  }
+  } catch (e) { toast(e.message); return false; }
 }
 
-// ========== 初始化与渲染 ==========
 function init() {
   const prefsStr = localStorage.getItem('ebay_export_prefs');
-  if (prefsStr) {
-    try { exportPrefs = JSON.parse(prefsStr); } catch (e) {}
-  }
+  if (prefsStr) { try { exportPrefs = JSON.parse(prefsStr); } catch (e) {} }
   $('expLink').checked = exportPrefs.link;
   $('expTitle').checked = exportPrefs.title;
   $('expBullets').checked = exportPrefs.bullets;
   $('expDesc').checked = exportPrefs.desc;
-
   fetchData();
 }
 
 function renderHome() {
   $('homeView').classList.remove('hidden');
   $('itemsView').classList.add('hidden');
-  
   const sorted = [...app.batches].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-  
   $('batchRows').innerHTML = sorted.map(b => {
     const total = b.items.length;
     let verify = 0, failed = 0, exportable = 0, running = false, completed = 0;
-    
     b.items.forEach(i => {
       if (['collecting', 'auditing', 'cleaning'].includes(i.collectStatus) || ['auditing', 'cleaning'].includes(i.reviewStatus) || i.copyStatus === 'cleaning') running = true;
       if (i.reviewStatus === 'verify' || i.copyStatus === 'verify') verify++;
@@ -321,12 +276,10 @@ function renderHome() {
       if (i.reviewStatus === 'passed' && i.copyStatus === 'completed') exportable++;
       if (i.reviewStatus === 'passed' || i.reviewStatus === 'excluded' || i.collectStatus === 'error') completed++;
     });
-
     let bStatus = '未开始'; let bCls = 'b-gray';
     if (running) { bStatus = '处理中'; bCls = 'b-run'; }
     else if (verify > 0 || failed > 0 || (completed < total)) { bStatus = '待处理'; bCls = 'b-warn'; }
     else if (total > 0) { bStatus = '已完成'; bCls = 'b-pass'; }
-    
     return `<tr>
       <td><strong>${esc(b.name)}</strong><br><small style="color:var(--muted)">${new Date(b.createdAt).toLocaleString()}</small></td>
       <td>${total}</td>
@@ -346,11 +299,9 @@ function renderHome() {
 function renderItems() {
   const batch = app.batches.find(b => b.id === app.currentBatchId);
   if (!batch) return goHome();
-
   $('homeView').classList.add('hidden');
   $('itemsView').classList.remove('hidden');
   $('currentBatchName').textContent = batch.name;
-
   const filtered = batch.items.filter(i => {
     const fTitle = (i.collected?.title || i.source?.title || '').toLowerCase();
     const matchSearch = !app.searchQuery || i.asin.includes(app.searchQuery.toUpperCase()) || fTitle.includes(app.searchQuery.toLowerCase());
@@ -364,11 +315,9 @@ function renderItems() {
     else if (app.filterStatus === 'copy_verify') matchStatus = i.copyStatus === 'verify';
     return matchSearch && matchStatus;
   });
-
   const validSelected = new Set();
   filtered.forEach(i => { if (app.selectedItemIds.has(i.itemId)) validSelected.add(i.itemId); });
   app.selectedItemIds = validSelected;
-  
   $('selCount').textContent = app.selectedItemIds.size;
   $('selectionBar').classList.toggle('hidden', app.selectedItemIds.size === 0);
   $('selectAll').checked = filtered.length > 0 && filtered.every(i => app.selectedItemIds.has(i.itemId));
@@ -376,12 +325,10 @@ function renderItems() {
   $('itemRows').innerHTML = filtered.map(i => {
     const isSelected = app.selectedItemIds.has(i.itemId);
     const title = i.collected?.title || i.source?.title || '尚未采集标题';
-    
     let cTag = `<span class="badge b-gray">待采集</span>`;
     if (i.collectStatus === 'collecting') cTag = `<span class="badge b-run">采集中</span>`;
     if (i.collectStatus === 'collected') cTag = `<span class="badge b-pass">已采集</span>`;
     if (i.collectStatus === 'error') cTag = `<span class="badge b-err">采集失败</span>`;
-
     let rTag = `<span class="badge b-gray">-</span>`;
     if (i.reviewStatus === 'pending') rTag = `<span class="badge b-gray">待审核</span>`;
     if (i.reviewStatus === 'auditing') rTag = `<span class="badge b-run">审核中...</span>`;
@@ -389,7 +336,6 @@ function renderItems() {
     if (i.reviewStatus === 'passed') rTag = `<span class="badge b-pass">已通过</span>`;
     if (i.reviewStatus === 'error') rTag = `<span class="badge b-err">审核失败</span>`;
     if (i.reviewStatus === 'excluded') rTag = `<span class="badge b-err" style="background:#f0f2f0;color:#748079;border-color:#e2e5e2">已排除</span>`;
-    
     if (i.reviewStatus === 'passed') {
       if (i.copyStatus === 'pending') rTag += ` <span class="badge b-gray">文案待处理</span>`;
       if (i.copyStatus === 'cleaning') rTag += ` <span class="badge b-run">文案处理中</span>`;
@@ -397,7 +343,6 @@ function renderItems() {
       if (i.copyStatus === 'verify') rTag += ` <span class="badge b-warn">文案待核验</span>`;
       if (i.copyStatus === 'error') rTag += ` <span class="badge b-err">文案失败</span>`;
     }
-
     return `<tr>
       <td class="checkbox-cell"><input type="checkbox" class="item-check" data-id="${i.itemId}" ${isSelected ? 'checked' : ''}></td>
       <td style="font-family:monospace">${i.asin}</td>
@@ -408,237 +353,87 @@ function renderItems() {
       <td><button class="linkbtn" onclick="openDetail('${i.itemId}')">查看详情</button></td>
     </tr>`;
   }).join('');
-
-  if (filtered.length === 0) {
-    $('itemRows').innerHTML = '<tr><td colspan="7" style="text-align:center;padding:40px;color:var(--muted)">没有符合条件的商品。</td></tr>';
-  }
+  if (filtered.length === 0) $('itemRows').innerHTML = '<tr><td colspan="7" style="text-align:center;padding:40px;color:var(--muted)">没有符合条件的商品。</td></tr>';
 }
 
-function render() {
-  if (app.view === 'home') renderHome();
-  else renderItems();
-}
+function render() { if (app.view === 'home') renderHome(); else renderItems(); }
+function enterBatch(id) { app.currentBatchId = id; app.view = 'items'; app.selectedItemIds.clear(); app.searchQuery = ''; app.filterStatus = 'all'; $('searchInput').value = ''; $('filterStatus').value = 'all'; render(); }
+function goHome() { app.view = 'home'; app.currentBatchId = null; render(); }
+window.enterBatch = enterBatch; window.openDetail = openDetail;
 
-function enterBatch(id) {
-  app.currentBatchId = id;
-  app.view = 'items';
-  app.selectedItemIds.clear();
-  app.searchQuery = '';
-  app.filterStatus = 'all';
-  $('searchInput').value = '';
-  $('filterStatus').value = 'all';
-  render();
-}
-function goHome() {
-  app.view = 'home';
-  app.currentBatchId = null;
-  render();
-}
-window.enterBatch = enterBatch;
-window.openDetail = openDetail;
-
-// ========== 动作：导入 ==========
 let pendingFileAsins = [];
-
-$('importBtn').onclick = () => {
-  $('inputBatchName').value = '';
-  $('skuInput').value = '';
-  $('goodsFile').value = '';
-  $('importError').textContent = '';
-  pendingFileAsins = [];
-  updateImportSummary();
-  $('importDialog').showModal();
-};
-
-function updateImportSummary() {
-  const textAsins = $('skuInput').value.split(/[\s,;，；]+/).map(v => asin(v)).filter(Boolean);
-  const uniqueAsins = new Set([...textAsins, ...pendingFileAsins]);
-  $('importSummary').innerHTML = `待导入数量：<strong style="color:var(--green);font-size:16px">${uniqueAsins.size}</strong> 个（同批次自动去重）`;
-}
+$('importBtn').onclick = () => { $('inputBatchName').value = ''; $('skuInput').value = ''; $('goodsFile').value = ''; $('importError').textContent = ''; pendingFileAsins = []; updateImportSummary(); $('importDialog').showModal(); };
+function updateImportSummary() { const textAsins = $('skuInput').value.split(/[\s,;，；]+/).map(v => asin(v)).filter(Boolean); const uniqueAsins = new Set([...textAsins, ...pendingFileAsins]); $('importSummary').innerHTML = `待导入数量：<strong style="color:var(--green);font-size:16px">${uniqueAsins.size}</strong> 个（同批次自动去重）`; }
 $('skuInput').oninput = updateImportSummary;
 
 $('goodsFile').onchange = async (e) => {
-  const file = e.target.files[0];
-  if (!file) return;
-  $('importError').textContent = '读取中...';
+  const file = e.target.files[0]; if (!file) return; $('importError').textContent = '读取中...';
   try {
-    const b = await file.arrayBuffer();
-    const wb = XLSX.read(b, {type:'array'});
-    const sheet = wb.Sheets[wb.SheetNames[0]];
-    const rows = XLSX.utils.sheet_to_json(sheet, {header:1, defval:''});
-    
+    const b = await file.arrayBuffer(); const wb = XLSX.read(b, {type:'array'}); const sheet = wb.Sheets[wb.SheetNames[0]]; const rows = XLSX.utils.sheet_to_json(sheet, {header:1, defval:''});
     if (rows.length < 2) throw new Error('表格无有效数据。');
-    
-    for (let i = 1; i < rows.length; i++) {
-      const row = rows[i];
-      const hasExtraData = row.slice(1).some(cell => String(cell).trim() !== '');
-      if (hasExtraData) {
-        throw new Error(`仅支持 A 列 SKU，请清空其余列 (第 ${i+1} 行存在额外数据)`);
-      }
-    }
-
-    const extracted = [];
-    for (let i = 1; i < rows.length; i++) {
-      const a = asin(rows[i][0]);
-      if (a) extracted.push(a);
-    }
-    
-    pendingFileAsins = extracted;
-    $('importError').textContent = `已读取 ${extracted.length} 个有效 SKU。`;
-    $('importError').style.color = 'var(--green)';
-    updateImportSummary();
-  } catch (err) {
-    $('importError').textContent = err.message;
-    $('importError').style.color = '#a53d38';
-    pendingFileAsins = [];
-    updateImportSummary();
-    e.target.value = ''; 
-  }
+    for (let i = 1; i < rows.length; i++) { const row = rows[i]; const hasExtraData = row.slice(1).some(cell => String(cell).trim() !== ''); if (hasExtraData) throw new Error(`仅支持 A 列 SKU，请清空其余列 (第 ${i+1} 行存在额外数据)`); }
+    const extracted = []; for (let i = 1; i < rows.length; i++) { const a = asin(rows[i][0]); if (a) extracted.push(a); }
+    pendingFileAsins = extracted; $('importError').textContent = `已读取 ${extracted.length} 个有效 SKU。`; $('importError').style.color = 'var(--green)'; updateImportSummary();
+  } catch (err) { $('importError').textContent = err.message; $('importError').style.color = '#a53d38'; pendingFileAsins = []; updateImportSummary(); e.target.value = ''; }
 };
 
 $('btnConfirmImport').onclick = async () => {
   const textAsins = $('skuInput').value.split(/[\s,;，；]+/).map(v => asin(v)).filter(Boolean);
   const allAsins = [...new Set([...textAsins, ...pendingFileAsins])];
-  
   if (allAsins.length === 0) return $('importError').textContent = '未提供有效 ASIN。';
-
   const bName = $('inputBatchName').value.trim() || '批次_' + new Date().toLocaleDateString().replace(/\//g,'');
-  
-  const items = allAsins.map(a => ({
-    itemId: 'itm_' + Math.random().toString(36).slice(2, 9) + Date.now().toString(36),
-    asin: a,
-    source: {},
-    collected: null,
-    edits: null,
-    collectStatus: 'pending',
-    reviewStatus: 'pending',
-    copyStatus: 'pending',
-    reason: '',
-    reviewReason: '',
-    copyReason: '',
-    audit: null,
-    copy: null,
-    history: []
-  }));
-
-  app.batches.push({
-    id: 'b_' + Date.now(),
-    name: bName,
-    createdAt: new Date().toISOString(),
-    items
-  });
-  
-  $('btnConfirmImport').disabled = true;
-  $('btnConfirmImport').textContent = '保存中...';
+  const items = allAsins.map(a => ({ itemId: 'itm_' + Math.random().toString(36).slice(2, 9) + Date.now().toString(36), asin: a, source: {}, collected: null, edits: null, collectStatus: 'pending', reviewStatus: 'pending', copyStatus: 'pending', reason: '', reviewReason: '', copyReason: '', audit: null, copy: null, history: [] }));
+  app.batches.push({ id: 'b_' + Date.now(), name: bName, createdAt: new Date().toISOString(), items });
+  $('btnConfirmImport').disabled = true; $('btnConfirmImport').textContent = '保存中...';
   const ok = await saveData();
-  $('btnConfirmImport').disabled = false;
-  $('btnConfirmImport').textContent = '确认导入';
-
-  if (ok) {
-    $('importDialog').close();
-    renderHome();
-    toast(`成功建立批次，导入 ${items.length} 个商品。`);
-  }
+  $('btnConfirmImport').disabled = false; $('btnConfirmImport').textContent = '确认导入';
+  if (ok) { $('importDialog').close(); renderHome(); toast(`成功建立批次，导入 ${items.length} 个商品。`); }
 };
 
-// ========== 动作：采集与轮询 ==========
 $('btnBatchCollect').onclick = async () => {
   const batch = app.batches.find(b => b.id === app.currentBatchId);
   let targets = batch.items.filter(i => i.collectStatus === 'pending' || i.collectStatus === 'error');
-  
   if (app.selectedItemIds.size > 0) targets = targets.filter(i => app.selectedItemIds.has(i.itemId));
   if (targets.length === 0) return toast('没有符合条件的待采集商品。');
-
   await runCollection(batch, targets);
 };
 
 async function runCollection(batch, targets) {
   const asins = targets.map(t => t.asin);
-  targets.forEach(t => { t.collectStatus = 'collecting'; t.reason = '排队中...'; });
-  renderItems();
-  
+  targets.forEach(t => { t.collectStatus = 'collecting'; t.reason = '排队中...'; }); renderItems();
   const batchName = `wb_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
   toast(`正在提交 ${asins.length} 个商品...`);
-
   try {
-    const res = await fetch(`${WORKER_URL}/api/batches`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Workbench-Token': TOKEN },
-      body: JSON.stringify({ asins, batch_name: batchName })
-    });
+    const res = await fetch(`${WORKER_URL}/api/batches`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Workbench-Token': TOKEN }, body: JSON.stringify({ asins, batch_name: batchName }) });
     if (!res.ok) throw new Error('提交任务失败: ' + res.status);
-    
     const submitData = await res.json().catch(()=>({}));
     let extractedBatchId = submitData.id || submitData.batch_id || submitData.batchId || submitData.detail?.batch_id || submitData.detail?.id;
-
-    let isCompleted = false;
-    let poll = 0;
-    
+    let isCompleted = false; let poll = 0;
     while (!isCompleted && poll < 300) {
-      await new Promise(r => setTimeout(r, 2000));
-      poll++;
-      const stRes = await fetch(`${WORKER_URL}/api/batches/${batchName}/status`, { headers: { 'X-Workbench-Token': TOKEN } });
-      if (!stRes.ok) continue;
-      const data = await stRes.json();
-      const done = data.done ?? data.completed ?? data.processed ?? 0;
-      const total = data.total ?? asins.length;
-      
-      if (!extractedBatchId) {
-        extractedBatchId = data.id || data.batch_id || data.batchId || data.detail?.batch_id || data.detail?.id;
-      }
-      
-      targets.forEach(t => { t.reason = `采集进度: ${done}/${total}`; });
-      renderItems();
-
-      const stateStr = String(data.status || '').toLowerCase();
-      if (done >= total || stateStr.includes('complete') || stateStr.includes('done') || data.is_done === true) isCompleted = true;
+      await new Promise(r => setTimeout(r, 2000)); poll++;
+      const stRes = await fetch(`${WORKER_URL}/api/batches/${batchName}/status`, { headers: { 'X-Workbench-Token': TOKEN } }); if (!stRes.ok) continue;
+      const data = await stRes.json(); const done = data.done ?? data.completed ?? data.processed ?? 0; const total = data.total ?? asins.length;
+      if (!extractedBatchId) extractedBatchId = data.id || data.batch_id || data.batchId || data.detail?.batch_id || data.detail?.id;
+      targets.forEach(t => { t.reason = `采集进度: ${done}/${total}`; }); renderItems();
+      const stateStr = String(data.status || '').toLowerCase(); if (done >= total || stateStr.includes('complete') || stateStr.includes('done') || data.is_done === true) isCompleted = true;
     }
-
     if (!isCompleted) throw new Error('轮询超时，采集未完成');
-
     const queryId = extractedBatchId || batchName;
-    const recordsRes = await fetch(`${WORKER_URL}/api/results?batch_id=${queryId}&limit=1000`, { headers: { 'X-Workbench-Token': TOKEN } });
-    if (!recordsRes.ok) throw new Error('获取数据失败: ' + recordsRes.status);
-    
+    const recordsRes = await fetch(`${WORKER_URL}/api/results?batch_id=${queryId}&limit=1000`, { headers: { 'X-Workbench-Token': TOKEN } }); if (!recordsRes.ok) throw new Error('获取数据失败: ' + recordsRes.status);
     const recordsData = await recordsRes.json();
-    
-    let allRecords = [];
-    if (Array.isArray(recordsData)) allRecords = recordsData;
-    else allRecords = recordsData.data || recordsData.records || recordsData.items || recordsData.results || [];
-
-    if (allRecords.length === 0) {
-       throw new Error('接口返回数据为空，响应: ' + JSON.stringify(recordsData).slice(0, 50));
-    }
-
+    let allRecords = Array.isArray(recordsData) ? recordsData : (recordsData.data || recordsData.records || recordsData.items || recordsData.results || []);
+    if (allRecords.length === 0) throw new Error('接口返回数据为空，响应: ' + JSON.stringify(recordsData).slice(0, 50));
     targets.forEach(t => {
       const match = allRecords.find(r => JSON.stringify(r).includes(t.asin));
-      
-      if (match) {
-        t.collected = normalizeCollectedData(match);
-        t.collectStatus = 'collected';
-        t.reviewStatus = 'pending';
-        t.reason = '采集成功';
-        t.history.push({ time: new Date().toISOString(), action: '采集成功' });
-      } else {
-        t.collectStatus = 'error';
-        t.reason = '返回的数据中找不到该 ASIN';
-      }
+      if (match) { t.collected = normalizeCollectedData(match); t.collectStatus = 'collected'; t.reviewStatus = 'pending'; t.reason = '采集成功'; t.history.push({ time: new Date().toISOString(), action: '采集成功' }); }
+      else { t.collectStatus = 'error'; t.reason = '返回的数据中找不到该 ASIN'; }
     });
-    
-    await saveData();
-    toast('采集执行完毕');
-    renderItems();
+    await saveData(); toast('采集执行完毕'); renderItems();
   } catch (e) {
-    targets.forEach(t => {
-      if (t.collectStatus === 'collecting') { t.collectStatus = 'error'; t.reason = e.message; }
-    });
-    await saveData();
-    renderItems();
-    toast('采集出错: ' + e.message);
+    targets.forEach(t => { if (t.collectStatus === 'collecting') { t.collectStatus = 'error'; t.reason = e.message; } }); await saveData(); renderItems(); toast('采集出错: ' + e.message);
   }
 }
 
-// ========== 动作：重试失败 ==========
 $('btnBatchRetry').onclick = async () => {
   const batch = app.batches.find(b => b.id === app.currentBatchId);
   let targets = batch.items.filter(i => i.collectStatus === 'error');
@@ -647,355 +442,125 @@ $('btnBatchRetry').onclick = async () => {
   await runCollection(batch, targets);
 };
 
-// ========== 动作：勾选逻辑 ==========
-function syncSelectionState() {
-  const checks = document.querySelectorAll('.item-check:checked');
-  app.selectedItemIds.clear();
-  checks.forEach(c => app.selectedItemIds.add(c.dataset.id));
-  $('selCount').textContent = app.selectedItemIds.size;
-  $('selectionBar').classList.toggle('hidden', app.selectedItemIds.size === 0);
-}
-
+function syncSelectionState() { const checks = document.querySelectorAll('.item-check:checked'); app.selectedItemIds.clear(); checks.forEach(c => app.selectedItemIds.add(c.dataset.id)); $('selCount').textContent = app.selectedItemIds.size; $('selectionBar').classList.toggle('hidden', app.selectedItemIds.size === 0); }
 document.addEventListener('change', e => { if (e.target.classList.contains('item-check')) syncSelectionState(); });
-
-$('selectAll').onchange = (e) => {
-  const isChecked = e.target.checked;
-  document.querySelectorAll('.item-check').forEach(c => {
-    if (c.closest('tr').style.display !== 'none') c.checked = isChecked;
-  });
-  syncSelectionState();
-};
-
-$('btnSelCancel').onclick = () => {
-  document.querySelectorAll('.item-check').forEach(c => c.checked = false);
-  syncSelectionState();
-};
-
-$('btnSelectAllFiltered').onclick = () => {
-  document.querySelectorAll('.item-check').forEach(c => c.checked = true);
-  syncSelectionState();
-  toast(`已选中当前页 ${app.selectedItemIds.size} 个商品。`);
-};
-
+$('selectAll').onchange = (e) => { const isChecked = e.target.checked; document.querySelectorAll('.item-check').forEach(c => { if (c.closest('tr').style.display !== 'none') c.checked = isChecked; }); syncSelectionState(); };
+$('btnSelCancel').onclick = () => { document.querySelectorAll('.item-check').forEach(c => c.checked = false); syncSelectionState(); };
+$('btnSelectAllFiltered').onclick = () => { document.querySelectorAll('.item-check').forEach(c => c.checked = true); syncSelectionState(); toast(`已选中当前页 ${app.selectedItemIds.size} 个商品。`); };
 $('searchInput').oninput = (e) => { app.searchQuery = e.target.value; app.selectedItemIds.clear(); renderItems(); };
 $('filterStatus').onchange = (e) => { app.filterStatus = e.target.value; app.selectedItemIds.clear(); renderItems(); };
 
-// ========== 动作：批量排除与通过 ==========
-$('btnBatchExclude').onclick = $('btnSelExclude').onclick = () => {
-  if (app.selectedItemIds.size === 0) return toast('请先勾选商品。');
-  $('excludeReason').value = '';
-  $('excludeDialog').showModal();
-};
-
+$('btnBatchExclude').onclick = $('btnSelExclude').onclick = () => { if (app.selectedItemIds.size === 0) return toast('请先勾选商品。'); $('excludeReason').value = ''; $('excludeDialog').showModal(); };
 $('btnConfirmExclude').onclick = async () => {
-  const reason = $('excludeReason').value.trim();
-  if (!reason) return toast('请填写排除原因。');
-  
-  const batch = app.batches.find(b => b.id === app.currentBatchId);
-  let count = 0;
-  batch.items.forEach(i => {
-    if (app.selectedItemIds.has(i.itemId) && i.reviewStatus !== 'excluded' && i.reviewStatus !== 'passed') {
-      i.reviewStatus = 'excluded';
-      i.reason = reason;
-      i.history.push({ time: new Date().toISOString(), action: '人工排除', detail: reason });
-      count++;
-    }
-  });
-  
-  $('btnConfirmExclude').disabled = true;
-  await saveData();
-  $('btnConfirmExclude').disabled = false;
-  
-  $('excludeDialog').close();
-  app.selectedItemIds.clear();
-  renderItems();
-  toast(`已批量排除 ${count} 个商品。`);
+  const reason = $('excludeReason').value.trim(); if (!reason) return toast('请填写排除原因。');
+  const batch = app.batches.find(b => b.id === app.currentBatchId); let count = 0;
+  batch.items.forEach(i => { if (app.selectedItemIds.has(i.itemId) && i.reviewStatus !== 'excluded' && i.reviewStatus !== 'passed') { i.reviewStatus = 'excluded'; i.reason = reason; i.history.push({ time: new Date().toISOString(), action: '人工排除', detail: reason }); count++; } });
+  $('btnConfirmExclude').disabled = true; await saveData(); $('btnConfirmExclude').disabled = false; $('excludeDialog').close(); app.selectedItemIds.clear(); renderItems(); toast(`已批量排除 ${count} 个商品。`);
 };
-
 $('btnSelPass').onclick = async () => {
-  const batch = app.batches.find(b => b.id === app.currentBatchId);
-  let count = 0;
-  batch.items.forEach(i => {
-    if (app.selectedItemIds.has(i.itemId) && i.reviewStatus === 'verify') {
-      i.reviewStatus = 'passed';
-      i.reason = '人工批量确认通过';
-      i.audit = { decision: 'passed', reason: i.reason, time: new Date().toISOString() };
-      i.history.push({ time: new Date().toISOString(), action: '批量通过', detail: '人工批量确认' });
-      i.copyStatus = 'completed'; 
-      count++;
-    }
-  });
-  await saveData();
-  app.selectedItemIds.clear();
-  renderItems();
-  toast(`成功批量通过 ${count} 个商品。`);
+  const batch = app.batches.find(b => b.id === app.currentBatchId); let count = 0;
+  batch.items.forEach(i => { if (app.selectedItemIds.has(i.itemId) && i.reviewStatus === 'verify') { i.reviewStatus = 'passed'; i.reason = '人工批量确认通过'; i.audit = { decision: 'passed', reason: i.reason, time: new Date().toISOString() }; i.history.push({ time: new Date().toISOString(), action: '批量通过', detail: '人工批量确认' }); i.copyStatus = 'completed'; count++; } });
+  await saveData(); app.selectedItemIds.clear(); renderItems(); toast(`成功批量通过 ${count} 个商品。`);
 };
 
-// ========== 动作：导出 ==========
 function exportBatch(batchId, type) {
-  const batch = app.batches.find(b => b.id === batchId);
-  if (!batch) return;
-  
+  const batch = app.batches.find(b => b.id === batchId); if (!batch) return;
   if (type === 'passed') {
-    const items = batch.items.filter(i => i.reviewStatus === 'passed' && i.copyStatus === 'completed');
-    if (items.length === 0) return toast('该批次没有可导出的通过商品。');
-    
-    const headers = ['SKU'];
-    if (exportPrefs.link) headers.push('亚马逊链接');
-    if (exportPrefs.title) headers.push('清理后的标题');
-    if (exportPrefs.bullets) headers.push('清理后的五点描述');
-    if (exportPrefs.desc) headers.push('清理后的长描述');
-    
-    const rows = [headers];
-    items.forEach(i => {
-      const row = [i.asin];
-      if (exportPrefs.link) row.push('https://www.amazon.com/dp/' + i.asin);
-      if (exportPrefs.title) row.push(i.copy?.title || i.collected?.title || '');
-      if (exportPrefs.bullets) row.push(i.copy?.bullets || i.collected?.bullets || '');
-      if (exportPrefs.desc) row.push(i.copy?.description || i.collected?.description || '');
-      rows.push(row);
-    });
+    const items = batch.items.filter(i => i.reviewStatus === 'passed' && i.copyStatus === 'completed'); if (items.length === 0) return toast('该批次没有可导出的通过商品。');
+    const headers = ['SKU']; if (exportPrefs.link) headers.push('亚马逊链接'); if (exportPrefs.title) headers.push('清理后的标题'); if (exportPrefs.bullets) headers.push('清理后的五点描述'); if (exportPrefs.desc) headers.push('清理后的长描述');
+    const rows = [headers]; items.forEach(i => { const row = [i.asin]; if (exportPrefs.link) row.push('https://www.amazon.com/dp/' + i.asin); if (exportPrefs.title) row.push(i.copy?.title || i.collected?.title || ''); if (exportPrefs.bullets) row.push(i.copy?.bullets || i.collected?.bullets || ''); if (exportPrefs.desc) row.push(i.copy?.description || i.collected?.description || ''); rows.push(row); });
     downloadCSV(rows, `批次通过商品_${batch.name}.csv`);
   } else {
-    const items = batch.items.filter(i => i.collectStatus === 'error' || i.reviewStatus === 'error' || i.copyStatus === 'error');
-    if (items.length === 0) return toast('该批次没有失败记录。');
-    
-    const rows = [['SKU', '亚马逊链接', '失败环节', '失败原因']];
-    items.forEach(i => {
-      let step = i.collectStatus === 'error' ? '采集' : (i.reviewStatus === 'error' ? '审核' : '文案');
-      rows.push([i.asin, 'https://www.amazon.com/dp/' + i.asin, step, i.reason]);
-    });
+    const items = batch.items.filter(i => i.collectStatus === 'error' || i.reviewStatus === 'error' || i.copyStatus === 'error'); if (items.length === 0) return toast('该批次没有失败记录。');
+    const rows = [['SKU', '亚马逊链接', '失败环节', '失败原因']]; items.forEach(i => { let step = i.collectStatus === 'error' ? '采集' : (i.reviewStatus === 'error' ? '审核' : '文案'); rows.push([i.asin, 'https://www.amazon.com/dp/' + i.asin, step, i.reason]); });
     downloadCSV(rows, `批次失败清单_${batch.name}.csv`);
   }
 }
-
-function downloadCSV(rows, filename) {
-  const csvContent = '\ufeff' + rows.map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n');
-  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url; a.download = filename;
-  a.click();
-  URL.revokeObjectURL(url);
-}
+function downloadCSV(rows, filename) { const csvContent = '\ufeff' + rows.map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n'); const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = filename; a.click(); URL.revokeObjectURL(url); }
 window.exportBatch = exportBatch;
 
-// ========== 动作：商品详情 ==========
 function openDetail(itemId) {
   app.detailItemId = itemId;
   const batch = app.batches.find(b => b.id === app.currentBatchId);
   const item = batch.items.find(i => i.itemId === itemId);
   if (!item) return;
-
   $('dtTitle').textContent = item.asin + ' · 商品详情';
-  
   let bText = '待处理', bCls = 'b-gray';
   if (item.reviewStatus === 'passed') { bText = '已通过'; bCls = 'b-pass'; }
   if (item.reviewStatus === 'excluded') { bText = '已排除'; bCls = 'b-err'; }
   if (item.reviewStatus === 'verify') { bText = '待核验'; bCls = 'b-warn'; }
   if (item.reviewStatus === 'error') { bText = '审核失败'; bCls = 'b-err'; }
   if (item.reviewStatus === 'auditing') { bText = '审核中'; bCls = 'b-run'; }
-  $('dtStatus').textContent = bText;
-  $('dtStatus').className = `badge ${bCls}`;
-
+  $('dtStatus').textContent = bText; $('dtStatus').className = `badge ${bCls}`;
   const title = item.collected?.title || item.source?.title || '未提供';
   const bullets = item.collected?.bullets || item.source?.bullets || '未提供';
   const desc = item.collected?.description || item.source?.description || '未提供';
   
-  let html = `
-    <div class="detail-grid">
-      <div>
-        <div class="section-box">
-          <h4>商品资料</h4>
-          <div class="field"><div class="label">标题</div><div class="text">${esc(title)}</div></div>
-          <div class="field"><div class="label">五点描述</div><div class="text">${esc(bullets)}</div></div>
-          <div class="field"><div class="label">长描述</div><div class="text">${esc(desc)}</div></div>
-        </div>
-      </div>
-      <div>
-  `;
-
+  let html = `<div class="detail-grid"><div><div class="section-box"><h4>商品资料</h4><div class="field"><div class="label">标题</div><div class="text">${esc(title)}</div></div><div class="field"><div class="label">五点描述</div><div class="text">${esc(bullets)}</div></div><div class="field"><div class="label">长描述</div><div class="text">${esc(desc)}</div></div></div></div><div>`;
+  
   if (item.reviewStatus === 'pending') {
-    html += `<div class="section-box">
-      <h4>AI 审核</h4>
-      <p class="muted" style="margin-bottom:12px">当前商品已采集完成，可以发起审核。</p>
-      <button class="primary" onclick="triggerAudit('${item.itemId}')">开始 AI 审核</button>
-    </div>`;
+    html += `<div class="section-box"><h4>AI 审核</h4><p class="muted" style="margin-bottom:12px">当前商品已采集完成，可以发起审核。</p><button class="primary" onclick="triggerAudit('${item.itemId}')">开始 AI 审核</button></div>`;
   } else if (item.reviewStatus === 'auditing') {
-    html += `<div class="section-box" style="background:#f0f4f1">
-      <h4>审核中...</h4>
-      <p class="muted">系统正在请求 AI 接口，请稍候（约需 10-30 秒）。</p>
-    </div>`;
+    html += `<div class="section-box" style="background:#f0f4f1"><h4>审核中...</h4><p class="muted">系统正在请求 AI 接口，请稍候（约需 10-30 秒）。</p></div>`;
   } else if (item.reviewStatus === 'error') {
-    html += `<div class="section-box" style="background:#fceceb;border-color:#f2cac7">
-      <h4>审核调用失败</h4>
-      <p style="color:#a34f48;font-weight:500">${esc(item.reason || '接口错误')}</p>
-      <p class="muted" style="margin-top:10px;font-size:12px">注意：这是接口失败，不代表商品被排除。请检查网络或重试。</p>
-      <button class="primary" style="margin-top:12px" onclick="triggerAudit('${item.itemId}')">重试</button>
-    </div>`;
+    html += `<div class="section-box" style="background:#fceceb;border-color:#f2cac7"><h4>审核调用失败</h4><p style="color:#a34f48;font-weight:500">${esc(item.reason || '接口错误')}</p><p class="muted" style="margin-top:10px;font-size:12px">注意：这是接口失败，不代表商品被排除。请检查网络或重试。</p><button class="primary" style="margin-top:12px" onclick="triggerAudit('${item.itemId}')">重试</button></div>`;
   } else if (item.reviewStatus === 'passed' || item.reviewStatus === 'verify' || item.reviewStatus === 'excluded') {
     const a = item.audit || {};
     let resultCls = item.reviewStatus === 'passed' ? 'b-pass' : (item.reviewStatus === 'verify' ? 'b-warn' : 'b-err');
     let resultText = item.reviewStatus === 'passed' ? '通过' : (item.reviewStatus === 'verify' ? '待核验' : '排除');
 
     let policyHtml = '<div class="field"><div class="label">政策依据</div><div style="font-size:12px;color:var(--muted)">';
-    if (a.policy_version) {
-      policyHtml += `快照版本: ${a.policy_version}<br>`;
-    } else {
-      policyHtml += `⚠️ 旧版静态摘要 / 版本未记录<br>`;
-    }
-
-    if (a.cited_policy_id && a.cited_policy_id !== 'none') {
-      policyHtml += `<strong>引用条款 ID: ${a.cited_policy_id}</strong><br>`;
-      policyHtml += `原文依据: "${a.applicable_clause}"<br>`;
-      policyHtml += `适用原因: ${a.applicable_reason}`;
-    } else {
-      policyHtml += `模型未提供具体条款引用`;
-    }
+    if (a.policy_version) { policyHtml += `快照版本: ${a.policy_version}<br>`; } else { policyHtml += `⚠️ 旧版静态摘要 / 版本未记录<br>`; }
+    if (a.cited_policy_id && a.cited_policy_id !== 'none') { policyHtml += `<strong>引用条款 ID: ${a.cited_policy_id}</strong><br>原文依据: "${a.applicable_clause}"<br>适用原因: ${a.applicable_reason}`; } else { policyHtml += `模型未提供具体条款引用`; }
     policyHtml += '</div></div>';
 
-    html += `<div class="section-box">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-        <h4 style="margin:0">AI 审核结论</h4>
-        <span class="badge ${resultCls}">${resultText}</span>
-      </div>
-      <div class="field"><div class="label">具体理由</div><div class="text">${esc(a.reason || '-')}</div></div>
-      <div class="field"><div class="label">原文依据</div><div class="text">${esc(a.evidence || '-')}</div></div>
-      ${a.risk_category && a.risk_category.length > 0 ? `<div class="field"><div class="label">风险分类</div><div>${a.risk_category.join(', ')}</div></div>` : ''}
-      ${a.conflicts && a.conflicts.length > 0 ? `<div class="field"><div class="label" style="color:#a34f48">发现冲突</div><div style="color:#a34f48;font-weight:500">${a.conflicts.join('<br>')}</div></div>` : ''}
-      ${a.manual_questions && a.manual_questions.length > 0 ? `<div class="field"><div class="label">待人工确认</div><div style="color:#966314">${a.manual_questions.join('<br>')}</div></div>` : ''}
-      ${a.missing_info && a.missing_info.length > 0 ? `<div class="field"><div class="label">缺失信息</div><div>${a.missing_info.join('<br>')}</div></div>` : ''}
-      ${policyHtml}
-    </div>`;
+    html += `<div class="section-box"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px"><h4 style="margin:0">AI 审核结论</h4><span class="badge ${resultCls}">${resultText}</span></div><div class="field"><div class="label">具体理由</div><div class="text">${esc(a.reason || '-')}</div></div><div class="field"><div class="label">原文依据</div><div class="text">${esc(a.product_evidence || a.evidence || '-')}</div></div>${a.conflicts && a.conflicts.length > 0 ? `<div class="field"><div class="label" style="color:#a34f48">发现冲突</div><div style="color:#a34f48;font-weight:500">${a.conflicts.join('<br>')}</div></div>` : ''}${a.manual_questions && a.manual_questions.length > 0 ? `<div class="field"><div class="label">待人工确认</div><div style="color:#966314">${a.manual_questions.join('<br>')}</div></div>` : ''}${a.missing_info && a.missing_info.length > 0 ? `<div class="field"><div class="label">缺失信息</div><div>${a.missing_info.join('<br>')}</div></div>` : ''}${policyHtml}</div>`;
   }
 
   html += `</div></div>`;
   $('dtBody').innerHTML = html;
-
   let footerHtml = `<button data-close>关闭</button>`;
   $('dtFooter').innerHTML = footerHtml;
   $('detailDialog').showModal();
 }
 
-// ========== 动作：AI 审核真实调用 ==========
 async function triggerAudit(itemId) {
-  const batch = app.batches.find(b => b.id === app.currentBatchId);
-  const item = batch.items.find(i => i.itemId === itemId);
-  if (!item) return;
-
+  const batch = app.batches.find(b => b.id === app.currentBatchId); const item = batch.items.find(i => i.itemId === itemId); if (!item) return;
   const snapshotStr = JSON.stringify(item.collected || {});
-
-  item.reviewStatus = 'auditing';
-  item.reason = '正在请求 AI 审核...';
-  await saveData();
-  renderItems();
-  openDetail(itemId); 
-
-  let allFields = {};
-  const sourceObj = item.collected || item.source || {};
-  if (sourceObj._raw) {
-     allFields = { ...sourceObj._raw };
-  } else {
-     allFields = { ...sourceObj };
-  }
-  
+  item.reviewStatus = 'auditing'; item.reason = '正在请求 AI 审核...'; await saveData(); renderItems(); openDetail(itemId);
+  let allFields = {}; const sourceObj = item.collected || item.source || {}; if (sourceObj._raw) { allFields = { ...sourceObj._raw }; } else { allFields = { ...sourceObj }; }
   try {
-    const res = await fetch(`${WORKER_URL}/api/audit`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Workbench-Token': TOKEN },
-      body: JSON.stringify({
-        batchId: app.currentBatchId,
-        itemId: item.itemId,
-        asin: item.asin,
-        fields: allFields
-      })
-    });
-
+    const res = await fetch(`${WORKER_URL}/api/audit`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Workbench-Token': TOKEN }, body: JSON.stringify({ batchId: app.currentBatchId, itemId: item.itemId, asin: item.asin, fields: allFields }) });
     const data = await res.json();
-
     const currentItem = app.batches.find(b => b.id === app.currentBatchId).items.find(i => i.itemId === itemId);
-    if (JSON.stringify(currentItem.collected || {}) !== snapshotStr) {
-      toast('商品资料在审核期间已变更，本次审核结果作废，请重新审核。');
-      currentItem.reviewStatus = 'pending';
-      await saveData();
-      renderItems();
-      openDetail(itemId);
-      return;
-    }
-
-    if (data.error) {
-      currentItem.reviewStatus = 'error';
-      currentItem.reason = `AI 接口失败: ${data.detail || data.error}`;
-    } else if (data.success && data.audit) {
-      currentItem.audit = data.audit;
-      currentItem.reviewStatus = data.audit.decision;
-      currentItem.reason = data.audit.reason;
-    } else {
-      currentItem.reviewStatus = 'error';
-      currentItem.reason = '未知的返回格式';
-    }
-
-    await saveData();
-    renderItems();
-    openDetail(itemId);
-
+    if (JSON.stringify(currentItem.collected || {}) !== snapshotStr) { toast('商品资料在审核期间已变更，本次审核结果作废，请重新审核。'); currentItem.reviewStatus = 'pending'; await saveData(); renderItems(); openDetail(itemId); return; }
+    if (data.error) { currentItem.reviewStatus = 'error'; currentItem.reason = `AI 接口失败: ${data.detail || data.error}`; }
+    else if (data.success && data.audit) { currentItem.audit = data.audit; currentItem.reviewStatus = data.audit.decision; currentItem.reason = data.audit.reason; }
+    else { currentItem.reviewStatus = 'error'; currentItem.reason = '未知的返回格式'; }
+    await saveData(); renderItems(); openDetail(itemId);
   } catch (e) {
-    const currentItem = app.batches.find(b => b.id === app.currentBatchId).items.find(i => i.itemId === itemId);
-    currentItem.reviewStatus = 'error';
-    currentItem.reason = `网络错误: ${e.message}`;
-    await saveData();
-    renderItems();
-    openDetail(itemId);
+    const currentItem = app.batches.find(b => b.id === app.currentBatchId).items.find(i => i.itemId === itemId); currentItem.reviewStatus = 'error'; currentItem.reason = `网络错误: ${e.message}`; await saveData(); renderItems(); openDetail(itemId);
   }
 }
 window.triggerAudit = triggerAudit;
 
-// ========== 动作：手动同步政策 ==========
-// ========== 动作：手动同步政策 ==========
 $('btnSyncPolicies').onclick = async () => {
   if (!confirm("确定要从 eBay 官方抓取最新政策正文并保存快照吗？\n这可能需要 10-20 秒。")) return;
-  
-  const btn = $('btnSyncPolicies');
-  btn.disabled = true;
-  btn.textContent = '同步中...';
-  
+  const btn = $('btnSyncPolicies'); btn.disabled = true; btn.textContent = '同步中...';
   try {
-    const res = await fetch(`${WORKER_URL}/api/sync_policies`, {
-      method: 'POST',
-      headers: { 'X-Workbench-Token': TOKEN }
-    });
+    const res = await fetch(`${WORKER_URL}/api/sync_policies`, { method: 'POST', headers: { 'X-Workbench-Token': TOKEN } });
     const data = await res.json();
-    
-    if (data.success) {
-      alert(`✅ 同步成功！\n启用版本: ${data.version}\n成功抓取: ${data.success_count}/${data.total}\n\n详细结果:\n` + data.details.map(d => `${d.success ? '✅' : '❌'} ${d.url.split('id=')[1] || d.url} ${d.error ? '('+d.error+')' : ''}`).join('\n'));
-      fetchData(); // 刷新数据
-    } else {
-      alert(`❌ 同步失败/未保存\n\n原因:\n` + data.details.map(d => `${d.success ? '✅' : '❌'} ${d.url.split('id=')[1] || d.url} ${d.error ? '('+d.error+')' : ''}`).join('\n'));
-    }
-  } catch (e) {
-    alert('网络请求失败: ' + e.message);
-  } finally {
-    btn.disabled = false;
-    btn.textContent = '同步政策';
-  }
+    if (data.success) { alert(`✅ 同步成功！\n启用版本: ${data.version}\n成功抓取: ${data.success_count}/${data.total}\n\n详细结果:\n` + data.details.map(d => `${d.success ? '✅' : '❌'} ${d.url.split('id=')[1] || d.url} ${d.error ? '('+d.error+')' : ''}`).join('\n')); fetchData(); }
+    else { alert(`❌ 同步失败/未保存\n\n原因:\n` + data.details.map(d => `${d.success ? '✅' : '❌'} ${d.url.split('id=')[1] || d.url} ${d.error ? '('+d.error+')' : ''}`).join('\n')); }
+  } catch (e) { alert('网络请求失败: ' + e.message); } finally { btn.disabled = false; btn.textContent = '同步政策'; }
 };
 
-// ========== 初始化与事件绑定 ==========
 $('btnSettings').onclick = () => $('settingsDialog').showModal();
-$('settingsDialog').querySelector('.primary').onclick = () => {
-  exportPrefs = {
-    link: $('expLink').checked,
-    title: $('expTitle').checked,
-    bullets: $('expBullets').checked,
-    desc: $('expDesc').checked
-  };
-  localStorage.setItem('ebay_export_prefs', JSON.stringify(exportPrefs));
-};
-
+$('settingsDialog').querySelector('.primary').onclick = () => { exportPrefs = { link: $('expLink').checked, title: $('expTitle').checked, bullets: $('expBullets').checked, desc: $('expDesc').checked }; localStorage.setItem('ebay_export_prefs', JSON.stringify(exportPrefs)); };
 $('backHomeBtn').onclick = goHome;
-document.querySelectorAll('[data-close]').forEach(btn => {
-  btn.onclick = (e) => e.target.closest('dialog').close();
-});
+document.querySelectorAll('[data-close]').forEach(btn => { btn.onclick = (e) => e.target.closest('dialog').close(); });
 
-// 启动
 init();
+</script>
+</body>
+</html>
