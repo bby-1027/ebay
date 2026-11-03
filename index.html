@@ -951,8 +951,51 @@ async function triggerAudit(itemId) {
 window.triggerAudit = triggerAudit;
 
 // ========== 动作：手动同步政策 ==========
+// ========== 动作：手动同步政策 ==========
 $('btnSyncPolicies').onclick = async () => {
   if (!confirm("确定要从 eBay 官方抓取最新政策正文并保存快照吗？\n这可能需要 10-20 秒。")) return;
   
   const btn = $('btnSyncPolicies');
   btn.disabled = true;
+  btn.textContent = '同步中...';
+  
+  try {
+    const res = await fetch(`${WORKER_URL}/api/sync_policies`, {
+      method: 'POST',
+      headers: { 'X-Workbench-Token': TOKEN }
+    });
+    const data = await res.json();
+    
+    if (data.success) {
+      alert(`✅ 同步成功！\n启用版本: ${data.version}\n成功抓取: ${data.success_count}/${data.total}\n\n详细结果:\n` + data.details.map(d => `${d.success ? '✅' : '❌'} ${d.url.split('id=')[1] || d.url} ${d.error ? '('+d.error+')' : ''}`).join('\n'));
+      fetchData(); // 刷新数据
+    } else {
+      alert(`❌ 同步失败/未保存\n\n原因:\n` + data.details.map(d => `${d.success ? '✅' : '❌'} ${d.url.split('id=')[1] || d.url} ${d.error ? '('+d.error+')' : ''}`).join('\n'));
+    }
+  } catch (e) {
+    alert('网络请求失败: ' + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '同步政策';
+  }
+};
+
+// ========== 初始化与事件绑定 ==========
+$('btnSettings').onclick = () => $('settingsDialog').showModal();
+$('settingsDialog').querySelector('.primary').onclick = () => {
+  exportPrefs = {
+    link: $('expLink').checked,
+    title: $('expTitle').checked,
+    bullets: $('expBullets').checked,
+    desc: $('expDesc').checked
+  };
+  localStorage.setItem('ebay_export_prefs', JSON.stringify(exportPrefs));
+};
+
+$('backHomeBtn').onclick = goHome;
+document.querySelectorAll('[data-close]').forEach(btn => {
+  btn.onclick = (e) => e.target.closest('dialog').close();
+});
+
+// 启动
+init();
