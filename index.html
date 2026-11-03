@@ -64,7 +64,7 @@ dialog::backdrop{background:#1c332c66}.dialoghead{padding:16px 24px;border-botto
       <div class="toolbar">
         <div class="batch-bar">
           <button id="btnBatchCollect">批量采集</button>
-          <button id="btnBatchRetry">重试失败项</button>
+          <button id="btnBatchRetry">重试采集失败</button>
           <button id="btnBatchExclude" class="danger">批量排除</button>
         </div>
         <div style="display:flex;gap:10px">
@@ -213,19 +213,14 @@ function toast(msg) {
   clearTimeout(el.timer); el.timer = setTimeout(() => el.style.display = 'none', 4000);
 }
 
-// 自适应解析采集系统返回的字段（智能解包与中英兼容，包含长描述模糊匹配）
+// 自适应解析采集系统返回的字段
 function normalizeCollectedData(raw) {
-  // 如果数据嵌套在 data 或 product 中，先解开
   const target = raw.data || raw.product || raw.item || raw;
-  
-  // 智能提取长描述（解决接口字段名不统一的问题）
   let descValue = target.description || target['长描述'] || target['商品描述'] || target['描述'] || '';
   
-  // 如果按常规名字没找到，就遍历所有属性进行模糊匹配
   if (!descValue) {
     for (const key in target) {
       const lowerKey = key.toLowerCase();
-      // 只要键名包含 desc 或者 包含"描述"两个字，且内容是较长的文本，就认为是长描述
       if ((lowerKey.includes('desc') || key.includes('描述')) && typeof target[key] === 'string' && target[key].length > 10) {
         descValue = target[key];
         break;
@@ -386,8 +381,10 @@ function renderItems() {
 
     let rTag = `<span class="badge b-gray">-</span>`;
     if (i.reviewStatus === 'pending') rTag = `<span class="badge b-gray">待审核</span>`;
+    if (i.reviewStatus === 'auditing') rTag = `<span class="badge b-run">审核中...</span>`;
     if (i.reviewStatus === 'verify') rTag = `<span class="badge b-warn">待核验</span>`;
     if (i.reviewStatus === 'passed') rTag = `<span class="badge b-pass">已通过</span>`;
+    if (i.reviewStatus === 'error') rTag = `<span class="badge b-err">审核失败</span>`;
     if (i.reviewStatus === 'excluded') rTag = `<span class="badge b-err" style="background:#f0f2f0;color:#748079;border-color:#e2e5e2">已排除</span>`;
     
     if (i.reviewStatus === 'passed') {
@@ -471,7 +468,6 @@ $('goodsFile').onchange = async (e) => {
     
     for (let i = 1; i < rows.length; i++) {
       const row = rows[i];
-      // 检查 B 列(索引1)及之后是否有非空值
       const hasExtraData = row.slice(1).some(cell => String(cell).trim() !== '');
       if (hasExtraData) {
         throw new Error(`仅支持 A 列 SKU，请清空其余列 (第 ${i+1} 行存在额外数据)`);
@@ -569,7 +565,6 @@ async function runCollection(batch, targets) {
     });
     if (!res.ok) throw new Error('提交任务失败: ' + res.status);
     
-    // 提交后立即捕获可能的 batch_id
     const submitData = await res.json().catch(()=>({}));
     let extractedBatchId = submitData.id || submitData.batch_id || submitData.batchId || submitData.detail?.batch_id || submitData.detail?.id;
 
@@ -585,7 +580,6 @@ async function runCollection(batch, targets) {
       const done = data.done ?? data.completed ?? data.processed ?? 0;
       const total = data.total ?? asins.length;
       
-      // 从轮询中捕获 batch_id
       if (!extractedBatchId) {
         extractedBatchId = data.id || data.batch_id || data.batchId || data.detail?.batch_id || data.detail?.id;
       }
@@ -605,7 +599,6 @@ async function runCollection(batch, targets) {
     
     const recordsData = await recordsRes.json();
     
-    // 智能提取数组：兼容 {data: [...]}, {records: [...]}, {items: [...]} 等
     let allRecords = [];
     if (Array.isArray(recordsData)) allRecords = recordsData;
     else allRecords = recordsData.data || recordsData.records || recordsData.items || recordsData.results || [];
@@ -615,7 +608,6 @@ async function runCollection(batch, targets) {
     }
 
     targets.forEach(t => {
-      // 暴力匹配：只要这条记录的 JSON 文本里包含该 ASIN，就认为匹配成功
       const match = allRecords.find(r => JSON.stringify(r).includes(t.asin));
       
       if (match) {
@@ -798,6 +790,8 @@ function openDetail(itemId) {
   if (item.reviewStatus === 'passed') { bText = '已通过'; bCls = 'b-pass'; }
   if (item.reviewStatus === 'excluded') { bText = '已排除'; bCls = 'b-err'; }
   if (item.reviewStatus === 'verify') { bText = '待核验'; bCls = 'b-warn'; }
+  if (item.reviewStatus === 'error') { bText = '审核失败'; bCls = 'b-err'; }
+  if (item.reviewStatus === 'auditing') { bText = '审核中'; bCls = 'b-run'; }
   $('dtStatus').textContent = bText;
   $('dtStatus').className = `badge ${bCls}`;
 
@@ -818,99 +812,131 @@ function openDetail(itemId) {
       <div>
   `;
 
-  if (item.reviewStatus === 'verify') {
-    html += `
-      <div class="section-box" style="background:#fffbf2;border-color:#f2d8a6">
-        <h4>待核验处理</h4>
-        <div class="field"><div class="label">系统提示原因</div><div style="color:#966314;font-weight:500">${esc(item.reason || '需人工介入确认')}</div></div>
-        <div class="form-group" style="margin-top:15px">
-          <label>核验结论</label>
-          <select id="dtDecision">
-            <option value="passed">确认通过（进入文案清理）</option>
-            <option value="excluded">排除商品</option>
-          </select>
-        </div>
-        <div class="form-group">
-          <label>人工核验依据（必填）</label>
-          <textarea id="dtReviewReason" rows="3"></textarea>
-        </div>
+  if (item.reviewStatus === 'pending') {
+    html += `<div class="section-box">
+      <h4>AI 审核</h4>
+      <p class="muted" style="margin-bottom:12px">当前商品已采集完成，可以发起审核。</p>
+      <button class="primary" onclick="triggerAudit('${item.itemId}')">开始 AI 审核</button>
+    </div>`;
+  } else if (item.reviewStatus === 'auditing') {
+    html += `<div class="section-box" style="background:#f0f4f1">
+      <h4>审核中...</h4>
+      <p class="muted">系统正在请求 AI 接口，请稍候（约需 10-30 秒）。</p>
+    </div>`;
+  } else if (item.reviewStatus === 'error') {
+    html += `<div class="section-box" style="background:#fceceb;border-color:#f2cac7">
+      <h4>审核调用失败</h4>
+      <p style="color:#a34f48;font-weight:500">${esc(item.reason || '接口错误')}</p>
+      <p class="muted" style="margin-top:10px;font-size:12px">注意：这是接口失败，不代表商品被排除。请检查网络或重试。</p>
+      <button class="primary" style="margin-top:12px" onclick="triggerAudit('${item.itemId}')">重试</button>
+    </div>`;
+  } else if (item.reviewStatus === 'passed' || item.reviewStatus === 'verify' || item.reviewStatus === 'excluded') {
+    const a = item.audit || {};
+    let resultCls = item.reviewStatus === 'passed' ? 'b-pass' : (item.reviewStatus === 'verify' ? 'b-warn' : 'b-err');
+    let resultText = item.reviewStatus === 'passed' ? '通过' : (item.reviewStatus === 'verify' ? '待核验' : '排除');
+
+    html += `<div class="section-box">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <h4 style="margin:0">AI 审核结论</h4>
+        <span class="badge ${resultCls}">${resultText}</span>
       </div>
-    `;
-  } else if (item.reviewStatus === 'excluded') {
-    html += `<div class="section-box" style="background:#fceceb;border-color:#f2cac7"><h4>排除原因</h4><div class="text" style="background:transparent;border:none;padding:0">${esc(item.reason || '人工排除')}</div></div>`;
-  } else if (item.reviewStatus === 'passed') {
-    html += `<div class="section-box" style="background:#e7f4ec;border-color:#c3e6d3"><h4>审核结论</h4><div class="field"><div class="label">文案状态</div><div>${item.copyStatus === 'completed' ? '文案已就绪，可导出' : '等待 AI 清理接入'}</div></div>`;
-    if (item.copyStatus === 'verify') {
-      html += `
-        <div style="margin-top:15px;border-top:1px solid #c3e6d3;padding-top:15px">
-          <div class="form-group"><label>清理后标题</label><input type="text" id="dtCopyTitle" value="${esc(item.copy?.title || title)}"></div>
-          <div class="form-group"><label>清理后五点</label><textarea id="dtCopyBullets" rows="3">${esc(item.copy?.bullets || bullets)}</textarea></div>
-          <div class="form-group"><label>清理后长描述</label><textarea id="dtCopyDesc" rows="3">${esc(item.copy?.description || desc)}</textarea></div>
-        </div>
-      `;
-    }
-    html += `</div>`;
-  } else if (item.reviewStatus === 'pending') {
-    html += `<div class="section-box"><h4>当前进度</h4><p class="muted">等待接入 AI 审核接口，或请人工介入核验。</p></div>`;
+      <div class="field"><div class="label">具体理由</div><div class="text">${esc(a.reason || '-')}</div></div>
+      <div class="field"><div class="label">原文依据</div><div class="text">${esc(a.evidence || '-')}</div></div>
+      ${a.risk_category && a.risk_category.length > 0 ? `<div class="field"><div class="label">风险分类</div><div>${a.risk_category.join(', ')}</div></div>` : ''}
+      ${a.conflicts && a.conflicts.length > 0 ? `<div class="field"><div class="label" style="color:#a34f48">发现冲突</div><div style="color:#a34f48;font-weight:500">${a.conflicts.join('<br>')}</div></div>` : ''}
+      ${a.manual_questions && a.manual_questions.length > 0 ? `<div class="field"><div class="label">待人工确认</div><div style="color:#966314">${a.manual_questions.join('<br>')}</div></div>` : ''}
+      ${a.missing_info && a.missing_info.length > 0 ? `<div class="field"><div class="label">缺失信息</div><div>${a.missing_info.join('<br>')}</div></div>` : ''}
+      <div class="field"><div class="label">政策依据</div><div style="font-size:12px;color:var(--muted)">${a.policies ? a.policies.map(p => `${p.title} (核验于 ${p.checked_at})`).join('<br>') : '未提供'}</div></div>
+    </div>`;
   }
 
   html += `</div></div>`;
   $('dtBody').innerHTML = html;
 
   let footerHtml = `<button data-close>关闭</button>`;
-  if (item.reviewStatus === 'verify') footerHtml = `<button data-close>取消</button><button class="primary" onclick="saveDetailVerify()">保存结论</button>`;
-  else if (item.copyStatus === 'verify') footerHtml = `<button data-close>取消</button><button class="primary" onclick="saveDetailCopy()">确认清理文案</button>`;
-  
   $('dtFooter').innerHTML = footerHtml;
   $('detailDialog').showModal();
 }
 
-async function saveDetailVerify() {
+// ========== 动作：AI 审核真实调用 ==========
+async function triggerAudit(itemId) {
   const batch = app.batches.find(b => b.id === app.currentBatchId);
-  const item = batch.items.find(i => i.itemId === app.detailItemId);
-  const decision = $('dtDecision').value;
-  const reason = $('dtReviewReason').value.trim();
-  if (!reason) return toast('请填写人工核验依据。');
-  
-  item.reviewStatus = decision;
-  item.reason = reason;
-  item.audit = { decision, reason, time: new Date().toISOString() };
-  item.history.push({ time: new Date().toISOString(), action: '人工' + (decision === 'passed' ? '通过' : '排除'), detail: reason });
-  if (decision === 'passed') item.copyStatus = 'completed'; 
-  
-  const btn = $('dtFooter').querySelector('.primary');
-  btn.disabled = true; btn.textContent = '保存中...';
-  const ok = await saveData();
-  btn.disabled = false; btn.textContent = '保存结论';
-  if (ok) {
-    $('detailDialog').close();
-    renderItems();
-    toast('核验结论已保存。');
-  }
-}
+  const item = batch.items.find(i => i.itemId === itemId);
+  if (!item) return;
 
-async function saveDetailCopy() {
-  const batch = app.batches.find(b => b.id === app.currentBatchId);
-  const item = batch.items.find(i => i.itemId === app.detailItemId);
-  item.copy = {
-    title: $('dtCopyTitle').value.trim(),
-    bullets: $('dtCopyBullets').value.trim(),
-    description: $('dtCopyDesc').value.trim(),
-    confirmed: true, time: new Date().toISOString()
-  };
-  item.copyStatus = 'completed';
-  item.history.push({ time: new Date().toISOString(), action: '确认清理文案' });
+  // 1. 保存当前资料快照，用于版本比对
+  const snapshotStr = JSON.stringify(item.collected || {});
+
+  // 2. 更新本地状态，保存并刷新页面
+  item.reviewStatus = 'auditing';
+  item.reason = '正在请求 AI 审核...';
+  await saveData();
+  renderItems();
+  openDetail(itemId); 
+
+  // 3. 提取所有原始资料（包含 _raw）
+  let allFields = {};
+  const sourceObj = item.collected || item.source || {};
+  if (sourceObj._raw) {
+     allFields = { ...sourceObj._raw };
+  } else {
+     allFields = { ...sourceObj };
+  }
   
-  const btn = $('dtFooter').querySelector('.primary');
-  btn.disabled = true; btn.textContent = '保存中...';
-  const ok = await saveData();
-  btn.disabled = false; btn.textContent = '确认清理文案';
-  if (ok) {
-    $('detailDialog').close();
+  // 4. 发起请求
+  try {
+    const res = await fetch(`${WORKER_URL}/api/audit`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Workbench-Token': TOKEN },
+      body: JSON.stringify({
+        batchId: app.currentBatchId,
+        itemId: item.itemId,
+        asin: item.asin,
+        fields: allFields
+      })
+    });
+
+    const data = await res.json();
+
+    // 5. 版本校验（防止审核期间资料被修改）
+    const currentItem = app.batches.find(b => b.id === app.currentBatchId).items.find(i => i.itemId === itemId);
+    if (JSON.stringify(currentItem.collected || {}) !== snapshotStr) {
+      toast('商品资料在审核期间已变更，本次审核结果作废，请重新审核。');
+      currentItem.reviewStatus = 'pending';
+      await saveData();
+      renderItems();
+      openDetail(itemId);
+      return;
+    }
+
+    // 6. 处理结果
+    if (data.error) {
+      currentItem.reviewStatus = 'error';
+      currentItem.reason = `AI 接口失败: ${data.detail || data.error}`;
+    } else if (data.success && data.audit) {
+      currentItem.audit = data.audit;
+      currentItem.reviewStatus = data.audit.decision;
+      currentItem.reason = data.audit.reason;
+    } else {
+      currentItem.reviewStatus = 'error';
+      currentItem.reason = '未知的返回格式';
+    }
+
+    await saveData();
     renderItems();
-    toast('清理文案已确认。');
+    openDetail(itemId);
+
+  } catch (e) {
+    // 网络层面失败
+    const currentItem = app.batches.find(b => b.id === app.currentBatchId).items.find(i => i.itemId === itemId);
+    currentItem.reviewStatus = 'error';
+    currentItem.reason = `网络错误: ${e.message}`;
+    await saveData();
+    renderItems();
+    openDetail(itemId);
   }
 }
+window.triggerAudit = triggerAudit;
 
 // ========== 动作：设置 ==========
 $('btnSettings').onclick = () => $('settingsDialog').showModal();
