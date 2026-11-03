@@ -514,7 +514,10 @@ function openDetail(itemId) {
     if (a.cited_policy_id && a.cited_policy_id !== 'none') { policyHtml += `<strong>引用条款 ID: ${a.cited_policy_id}</strong><br>原文依据: "${a.applicable_clause}"<br>适用原因: ${a.applicable_reason}`; } else { policyHtml += `模型未提供具体条款引用`; }
     policyHtml += '</div></div>';
 
-    html += `<div class="section-box"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px"><h4 style="margin:0">AI 审核结论</h4><span class="badge ${resultCls}">${resultText}</span></div><div class="field"><div class="label">具体理由</div><div class="text">${esc(a.reason || '-')}</div></div><div class="field"><div class="label">原文依据</div><div class="text">${esc(a.product_evidence || a.evidence || '-')}</div></div>${a.conflicts && a.conflicts.length > 0 ? `<div class="field"><div class="label" style="color:#a34f48">发现冲突</div><div style="color:#a34f48;font-weight:500">${a.conflicts.join('<br>')}</div></div>` : ''}${a.manual_questions && a.manual_questions.length > 0 ? `<div class="field"><div class="label">待人工确认</div><div style="color:#966314">${a.manual_questions.join('<br>')}</div></div>` : ''}${a.missing_info && a.missing_info.length > 0 ? `<div class="field"><div class="label">缺失信息</div><div>${a.missing_info.join('<br>')}</div></div>` : ''}${policyHtml}</div>`;
+    html += `<div class="section-box"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px"><h4 style="margin:0">AI 审核结论</h4><span class="badge ${resultCls}">${resultText}</span></div><div class="field"><div class="label">具体理由</div><div class="text">${esc(a.reason || '-')}</div></div><div class="field"><div class="label">原文依据</div><div class="text">${esc(a.product_evidence || a.evidence || '-')}</div></div>${a.conflicts && a.conflicts.length > 0 ? `<div class="field"><div class="label" style="color:#a34f48">发现冲突</div><div style="color:#a34f48;font-weight:500">${a.conflicts.join('<br>')}</div></div>` : ''}${a.manual_questions && a.manual_questions.length > 0 ? `<div class="field"><div class="label">待人工确认</div><div style="color:#966314">${a.manual_questions.join('<br>')}</div></div>` : ''}${a.missing_info && a.missing_info.length > 0 ? `<div class="field"><div class="label">缺失信息</div><div>${a.missing_info.join('<br>')}</div></div>` : ''}${policyHtml}
+    <div style="margin-top: 16px; padding-top: 16px; border-top: 1px dashed var(--line); text-align: right;">
+         <button class="primary" onclick="triggerAudit('${item.itemId}')">重新审核</button>
+    </div></div>`;
   }
 
   html += `</div></div>`;
@@ -525,21 +528,77 @@ function openDetail(itemId) {
 }
 
 async function triggerAudit(itemId) {
-  const batch = app.batches.find(b => b.id === app.currentBatchId); const item = batch.items.find(i => i.itemId === itemId); if (!item) return;
+  const batch = app.batches.find(b => b.id === app.currentBatchId); 
+  const item = batch.items.find(i => i.itemId === itemId); 
+  if (!item) return;
+
+  // 保存当前快照
   const snapshotStr = JSON.stringify(item.collected || {});
-  item.reviewStatus = 'auditing'; item.reason = '正在请求 AI 审核...'; await saveData(); renderItems(); openDetail(itemId);
-  let allFields = {}; const sourceObj = item.collected || item.source || {}; if (sourceObj._raw) { allFields = { ...sourceObj._raw }; } else { allFields = { ...sourceObj }; }
+
+  // 如果已有审核结果，先将旧记录 push 到 history
+  if (item.audit && item.reviewStatus !== 'pending') {
+    item.history.push({
+      time: new Date().toISOString(),
+      action: '覆盖旧审核记录',
+      detail: JSON.stringify({
+         old_decision: item.reviewStatus,
+         old_reason: item.reason,
+         old_audit: item.audit
+      })
+    });
+  }
+
+  item.reviewStatus = 'auditing'; 
+  item.reason = '正在请求 AI 审核...'; 
+  await saveData(); 
+  renderItems(); 
+  openDetail(itemId);
+
+  let allFields = {}; 
+  const sourceObj = item.collected || item.source || {}; 
+  if (sourceObj._raw) { allFields = { ...sourceObj._raw }; } else { allFields = { ...sourceObj }; }
+
   try {
-    const res = await fetch(`${WORKER_URL}/api/audit`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Workbench-Token': TOKEN }, body: JSON.stringify({ batchId: app.currentBatchId, itemId: item.itemId, asin: item.asin, fields: allFields }) });
+    const res = await fetch(`${WORKER_URL}/api/audit`, { 
+      method: 'POST', 
+      headers: { 'Content-Type': 'application/json', 'X-Workbench-Token': TOKEN }, 
+      body: JSON.stringify({ batchId: app.currentBatchId, itemId: item.itemId, asin: item.asin, fields: allFields }) 
+    });
     const data = await res.json();
+    
+    // 取最新对象进行比对，防止审核期间资料被修改
     const currentItem = app.batches.find(b => b.id === app.currentBatchId).items.find(i => i.itemId === itemId);
-    if (JSON.stringify(currentItem.collected || {}) !== snapshotStr) { toast('商品资料在审核期间已变更，本次审核结果作废，请重新审核。'); currentItem.reviewStatus = 'pending'; await saveData(); renderItems(); openDetail(itemId); return; }
-    if (data.error) { currentItem.reviewStatus = 'error'; currentItem.reason = `AI 接口失败: ${data.detail || data.error}`; }
-    else if (data.success && data.audit) { currentItem.audit = data.audit; currentItem.reviewStatus = data.audit.decision; currentItem.reason = data.audit.reason; }
-    else { currentItem.reviewStatus = 'error'; currentItem.reason = '未知的返回格式'; }
-    await saveData(); renderItems(); openDetail(itemId);
+    if (JSON.stringify(currentItem.collected || {}) !== snapshotStr) { 
+      toast('商品资料在审核期间已变更，本次审核结果作废，请重新审核。'); 
+      currentItem.reviewStatus = 'pending'; 
+      await saveData(); 
+      renderItems(); 
+      openDetail(itemId); 
+      return; 
+    }
+    
+    if (data.error) { 
+      currentItem.reviewStatus = 'error'; 
+      currentItem.reason = `AI 接口失败: ${data.detail || data.error}`; 
+    } else if (data.success && data.audit) { 
+      currentItem.audit = data.audit; 
+      currentItem.reviewStatus = data.audit.decision; 
+      currentItem.reason = data.audit.reason; 
+    } else { 
+      currentItem.reviewStatus = 'error'; 
+      currentItem.reason = '未知的返回格式'; 
+    }
+    
+    await saveData(); 
+    renderItems(); 
+    openDetail(itemId);
   } catch (e) {
-    const currentItem = app.batches.find(b => b.id === app.currentBatchId).items.find(i => i.itemId === itemId); currentItem.reviewStatus = 'error'; currentItem.reason = `网络错误: ${e.message}`; await saveData(); renderItems(); openDetail(itemId);
+    const currentItem = app.batches.find(b => b.id === app.currentBatchId).items.find(i => i.itemId === itemId); 
+    currentItem.reviewStatus = 'error'; 
+    currentItem.reason = `网络错误: ${e.message}`; 
+    await saveData(); 
+    renderItems(); 
+    openDetail(itemId);
   }
 }
 window.triggerAudit = triggerAudit;
