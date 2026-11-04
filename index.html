@@ -212,8 +212,8 @@ async function saveData() {
       body: JSON.stringify(payload)
     });
     if (res.status === 409) {
-      toast('保存冲突：有其他人刚刚修改了数据，当前操作已取消。');
-      fetchData();
+      // 发生冲突，说明别的窗口改了数据，静默重新拉取
+      await fetchData(true);
       return false;
     }
     if (!res.ok) throw new Error('保存失败: ' + res.status);
@@ -247,27 +247,36 @@ function renderHome() {
   
   $('batchRows').innerHTML = sorted.map(b => {
     const total = b.items.length;
-    let cDone = 0, cErr = 0, rDone = 0, rVerify = 0, cpDone = 0, skipped = 0, passable = 0;
+    let cDone = 0, cErr = 0, rDone = 0, rVerify = 0, cpDone = 0, skipped = 0, passable = 0, running = false;
     
     b.items.forEach(i => {
       if (i.collectStatus === 'collected') cDone++;
-      if (i.collectStatus === 'error') cErr++;
+      else if (i.collectStatus === 'error') cErr++;
+      else if (i.collectStatus === 'collecting') running = true;
+      
       if (i.reviewStatus === 'passed') rDone++;
-      if (i.reviewStatus === 'verify') rVerify++;
-      if (i.reviewStatus === 'skipped') skipped++;
+      else if (i.reviewStatus === 'verify') rVerify++;
+      else if (i.reviewStatus === 'skipped') skipped++;
+      else if (i.reviewStatus === 'auditing') running = true;
+      
       if (i.reviewStatus === 'passed' && i.copyStatus === 'completed') cpDone++;
       if (i.reviewStatus === 'passed' && i.copyStatus === 'completed') passable++;
     });
 
     let bStatus = '未开始'; let bCls = 'b-gray';
     let btnAction = `<button class="primary" onclick="startBatch('${b.id}')">开始处理</button>`;
-    if (b.runStatus === 'running') {
+    
+    // 优先使用真实的 runStatus 和 运行状态
+    if (b.runStatus === 'running' || running) {
       bStatus = '运行中'; bCls = 'b-run';
       btnAction = `<button class="danger" onclick="pauseBatch('${b.id}')">暂停</button>`;
     } else if (b.runStatus === 'paused') {
       bStatus = '已暂停'; bCls = 'b-warn';
       btnAction = `<button class="primary" onclick="resumeBatch('${b.id}')">继续</button>`;
-    } else if (b.runStatus === 'completed' || (!b.runStatus && rDone+rVerify+skipped === total)) {
+    } else if (b.runStatus === 'completed') {
+      bStatus = '已完成'; bCls = 'b-pass';
+      btnAction = `<button disabled>已完成</button>`;
+    } else if (total > 0 && (rDone + rVerify + skipped === total)) {
       bStatus = '已完成'; bCls = 'b-pass';
       btnAction = `<button disabled>已完成</button>`;
     }
@@ -302,7 +311,7 @@ function renderItems() {
     const fTitle = (i.collected?.title || i.source?.title || '').toLowerCase();
     const matchSearch = !app.searchQuery || i.asin.includes(app.searchQuery.toUpperCase()) || fTitle.includes(app.searchQuery.toLowerCase());
     let matchStatus = true;
-    if (app.filterStatus === 'collect_pending') matchStatus = i.collectStatus === 'pending';
+    if (app.filterStatus === 'collect_pending') matchStatus = i.collectStatus === 'pending' || i.collectStatus === 'collecting';
     else if (app.filterStatus === 'collect_error') matchStatus = i.collectStatus === 'error';
     else if (app.filterStatus === 'review_pending') matchStatus = i.reviewStatus === 'pending' || i.reviewStatus === 'auditing';
     else if (app.filterStatus === 'review_verify') matchStatus = i.reviewStatus === 'verify';
@@ -386,7 +395,7 @@ async function startBatchLoop(batchId) {
 
   try {
     while (true) {
-      // 1. 每次执行前重新拉取数据，确保状态最新，且检测是否被其他窗口锁定
+      // 每次执行前重新拉取数据，确保状态最新，且检测是否被其他窗口锁定
       await fetchData(true);
       const b = app.batches.find(x => x.id === batchId);
       if (!b || b.runStatus !== 'running') {
@@ -394,21 +403,31 @@ async function startBatchLoop(batchId) {
         return; // 已暂停或删除
       }
 
-      // 2. 找需要采集的
+      let activeTask = false;
+
+      // 1. 找需要采集的
       const toCollect = b.items.find(i => i.collectStatus === 'pending' || i.collectStatus === 'error');
       if (toCollect) {
         await doCollect(batchId, toCollect.itemId);
         continue;
       }
+      
+      // 如果发现有采集中或审核中的任务，说明有任务在跑（可能是别的窗口在跑，或者刷新前留下的），等待即可
+      const isRunning = b.items.some(i => i.collectStatus === 'collecting' || i.reviewStatus === 'auditing');
+      if (isRunning) {
+        // 但如果所有任务都在跑，且我们自己没在处理，就等 2 秒后重试，防止死循环
+        await new Promise(r => setTimeout(r, 2000));
+        continue;
+      }
 
-      // 3. 找需要审核的
+      // 2. 找需要审核的
       const toAudit = b.items.find(i => i.collectStatus === 'collected' && i.reviewStatus === 'pending');
       if (toAudit) {
         await doAudit(batchId, toAudit.itemId);
         continue;
       }
 
-      // 4. 所有任务结束
+      // 3. 所有任务结束
       b.runStatus = 'completed';
       await saveData();
       render();
@@ -434,7 +453,6 @@ async function doCollect(batchId, itemId) {
   const locked = await saveData();
   if (!locked) return; // 抢锁失败，别的窗口在处理
 
-  // 发起真实采集
   try {
     const asins = [item.asin];
     const batchName = `wb_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -447,7 +465,6 @@ async function doCollect(batchId, itemId) {
     const submitData = await res.json().catch(()=>({}));
     let extractedBatchId = submitData.id || submitData.batch_id || submitData.detail?.id;
 
-    // 轮询
     let isCompleted = false; let poll = 0;
     while (!isCompleted && poll < 150) {
       await new Promise(r => setTimeout(r, 2000));
@@ -457,7 +474,6 @@ async function doCollect(batchId, itemId) {
       const data = await stRes.json();
       const done = data.done ?? 0; const total = data.total ?? 1;
       item.reason = `采集进度: ${done}/${total}`;
-      // 更新UI但不强制阻塞
       if(app.view === 'items' && app.currentBatchId === batchId) renderItems();
       
       if (!extractedBatchId) extractedBatchId = data.id || data.batch_id;
@@ -489,7 +505,6 @@ async function doAudit(batchId, itemId) {
   const b = app.batches.find(x => x.id === batchId);
   const item = b.items.find(x => x.itemId === itemId);
 
-  // 资料前置筛除
   const f = item.collected || {};
   const title = (f.title || '').trim();
   const desc = (f.description || '').trim();
@@ -506,13 +521,11 @@ async function doAudit(batchId, itemId) {
     return;
   }
 
-  // 前置抢锁
   item.reviewStatus = 'auditing';
   item.reason = '正在请求 AI 审核...';
   const locked = await saveData();
   if (!locked) return;
 
-  // 真实审核
   try {
     let allFields = item.collected._raw ? { ...item.collected._raw } : { ...item.collected };
     const res = await fetch(`${WORKER_URL}/api/audit`, {
@@ -558,9 +571,7 @@ $('btnBatchRetry').onclick = async () => {
   }
 };
 
-// ================= 其他基础代码（导入、详情、设置等） =================
-// (为了控制代码长度，此处保留核心导入和详情渲染逻辑，与原版基本一致)
-
+// ================= 基础代码 =================
 $('importBtn').onclick = () => { $('inputBatchName').value = ''; $('skuInput').value = ''; $('goodsFile').value = ''; $('importError').textContent = ''; $('importSummary').innerHTML = '待导入数量：0 个'; $('importDialog').showModal(); };
 $('goodsFile').onchange = async (e) => {
   const file = e.target.files[0]; if (!file) return;
