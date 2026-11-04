@@ -325,7 +325,7 @@ function enterBatch(id) { app.currentBatchId = id; app.view = 'items'; app.searc
 function goHome() { app.view = 'home'; app.currentBatchId = null; render(); }
 window.enterBatch = enterBatch; window.openDetail = openDetail;
 
-// ================= 核心调度引擎（批量采集 -> 批量审核） =================
+// ================= 核心调度引擎 =================
 async function startBatch(id) {
   const b = app.batches.find(x => x.id === id);
   if (!b || b.runStatus === 'running') return;
@@ -355,14 +355,20 @@ async function startBatchLoop(batchId) {
       const b = app.batches.find(x => x.id === batchId);
       if (!b || b.runStatus !== 'running') { app.isLoopRunning = false; return; }
 
-      // --- 阶段 1：批量采集 ---
-      const toCollect = b.items.filter(i => i.collectStatus === 'pending' || i.collectStatus === 'error');
+      // --- 阶段 1：处理采集 (只拉结果，或者拉不到再提交) ---
+      const toCollect = b.items.filter(i => i.collectStatus === 'pending' || (i.collectStatus === 'error' && (i.retryCount || 0) < 3));
+      
       if (toCollect.length > 0) {
-        await doBatchCollect(batchId, toCollect);
+        // 如果存在上一次未完成的任务，优先接管
+        if (b.externalBatchId) {
+           await pollAndFetchResults(batchId, b.externalBatchId, toCollect);
+        } else {
+           await submitAndPollCollection(batchId, toCollect);
+        }
         continue;
       }
 
-      // --- 阶段 2：逐个审核 ---
+      // --- 阶段 2：审核 ---
       const toAudit = b.items.find(i => i.collectStatus === 'collected' && i.reviewStatus === 'pending');
       if (toAudit) {
         await doSingleAudit(batchId, toAudit.itemId);
@@ -373,7 +379,7 @@ async function startBatchLoop(batchId) {
       b.runStatus = 'completed'; 
       await saveData(); 
       render(); 
-      toast('本批次自动处理完毕，请检查待核验结果');
+      toast('本批次自动处理完毕');
       app.isLoopRunning = false; 
       return;
     }
@@ -383,84 +389,99 @@ async function startBatchLoop(batchId) {
   }
 }
 
-// ================= 批量采集逻辑 =================
-async function doBatchCollect(batchId, itemsToCollect) {
+// 提交并轮询采集结果
+async function submitAndPollCollection(batchId, itemsToCollect) {
   const b = app.batches.find(x => x.id === batchId);
   
-  itemsToCollect.forEach(i => { i.collectStatus = 'collecting'; i.reason = '正在提交采集...'; });
+  itemsToCollect.forEach(i => { i.collectStatus = 'collecting'; i.reason = '正在提交...'; });
   await saveData();
 
   try {
     const asins = itemsToCollect.map(i => i.asin);
     const batchName = `wb_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-    
+    b.externalBatchId = batchName; // 存入云端，防止刷新丢失
+    await saveData();
+
     const res = await fetchWithTimeout(`${WORKER_URL}/api/batches`, {
       method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Workbench-Token': TOKEN },
       body: JSON.stringify({ asins, batch_name: batchName })
     }, { timeout: 20000 });
     
-    if (!res.ok) throw new Error('提交批量采集失败');
-    const sData = await res.json().catch(()=>({}));
-    let bId = sData.id || sData.batch_id || sData.batch_name || batchName;
+    if (!res.ok) throw new Error('提交采集失败，请稍后重试');
 
-    let isCompleted = false, poll = 0; 
-    while (!isCompleted && poll < 60) { // 最多等 120 秒
-      await new Promise(r => setTimeout(r, 2000));
-      
-      const curB = app.batches.find(x => x.id === batchId);
-      if (curB.runStatus === 'paused') {
-         itemsToCollect.forEach(i => { i.collectStatus = 'pending'; i.reason = '已暂停'; });
-         await saveData();
-         return;
-      }
-      
-      poll++;
-      try {
-        // 查进度
-        const stRes = await fetchWithTimeout(`${WORKER_URL}/api/batches/${batchName}/status`, { headers: { 'X-Workbench-Token': TOKEN } }, { timeout: 8000 });
-        if (stRes.ok) {
-           const stData = await stRes.json();
-           const stateStr = String(stData.status || '').toLowerCase();
-           const done = stData.done ?? 0; 
-           const total = stData.total ?? asins.length;
-           
-           itemsToCollect.forEach(i => { i.reason = `批量采集中 (${done}/${total})`; });
-           if(app.view === 'items' && app.currentBatchId === batchId) renderItems();
-
-           if (done >= total || stateStr.includes('complete') || stateStr.includes('done') || stData.is_done) {
-              isCompleted = true;
-           }
-        }
-      } catch (err) { console.warn('查询进度单次失败'); }
-    }
-
-    if (!isCompleted) throw new Error('采集等待超时');
-
-    // 无论状态如何，强行拉取结果（有些接口状态不准，但有结果）
-    const rRes = await fetchWithTimeout(`${WORKER_URL}/api/results?batch_id=${bId}&limit=100`, { headers: { 'X-Workbench-Token': TOKEN } }, { timeout: 15000 });
-    if (!rRes.ok) throw new Error('拉取采集结果失败');
-    
-    const rData = await rRes.json();
-    let arr = Array.isArray(rData) ? rData : (rData.data || rData.records || rData.results || []);
-    
-    itemsToCollect.forEach(item => {
-      const match = arr.find(r => JSON.stringify(r).includes(item.asin));
-      if (match) {
-        item.collected = normalizeCollectedData(match);
-        item.collectStatus = 'collected'; 
-        item.reason = '采集成功';
-      } else {
-        item.collectStatus = 'error'; 
-        item.reason = '未在结果中找到该商品';
-      }
-    });
+    // 提交成功，开始拉取结果
+    await pollAndFetchResults(batchId, batchName, itemsToCollect);
 
   } catch (e) {
-    itemsToCollect.forEach(i => { 
-      i.collectStatus = 'error'; 
-      i.reason = e.message; 
-    });
+    itemsToCollect.forEach(i => { i.collectStatus = 'error'; i.reason = e.message; });
+    b.externalBatchId = null;
+    await saveData();
   }
+}
+
+// 轮询并强制拉取结果（已提取任务ID时直接调用此函数）
+async function pollAndFetchResults(batchId, externalBatchId, itemsToCollect) {
+  const b = app.batches.find(x => x.id === batchId);
+  itemsToCollect.forEach(i => { i.collectStatus = 'collecting'; i.reason = '正在获取数据...'; });
+  await saveData();
+
+  let isCompleted = false, poll = 0; 
+  // 最多等 60 秒 (30次 * 2s)
+  while (!isCompleted && poll < 30) {
+    await new Promise(r => setTimeout(r, 2000));
+    
+    const curB = app.batches.find(x => x.id === batchId);
+    if (curB.runStatus === 'paused') {
+       itemsToCollect.forEach(i => { i.collectStatus = 'pending'; i.reason = '已暂停'; });
+       b.externalBatchId = null;
+       await saveData();
+       return;
+    }
+    
+    poll++;
+    try {
+      // 直接强行拉取结果（不依赖状态）
+      const rRes = await fetchWithTimeout(`${WORKER_URL}/api/results?batch_id=${externalBatchId}&limit=100`, { headers: { 'X-Workbench-Token': TOKEN } }, { timeout: 10000 });
+      if (rRes.ok) {
+        const rData = await rRes.json();
+        let arr = Array.isArray(rData) ? rData : (rData.data || rData.records || rData.results || []);
+        
+        let foundCount = 0;
+        itemsToCollect.forEach(item => {
+          const match = arr.find(r => JSON.stringify(r).includes(item.asin));
+          if (match) {
+            item.collected = normalizeCollectedData(match);
+            item.collectStatus = 'collected'; 
+            item.reason = '采集成功';
+            foundCount++;
+          }
+        });
+
+        if (foundCount === itemsToCollect.length) {
+           isCompleted = true; 
+           b.externalBatchId = null; // 采集全部完成，清除批次任务ID
+           break;
+        } else {
+           itemsToCollect.forEach(item => {
+              if (item.collectStatus === 'collecting') item.reason = `采集中 (${poll*2}s)...`;
+           });
+           if(app.view === 'items' && app.currentBatchId === batchId) renderItems();
+        }
+      }
+    } catch (err) { console.warn('拉取失败', err); }
+  }
+
+  if (!isCompleted) {
+    itemsToCollect.forEach(i => { 
+      if (i.collectStatus === 'collecting') {
+        i.collectStatus = 'error'; 
+        i.reason = '采集超时未拉取到数据'; 
+        i.retryCount = (i.retryCount || 0) + 1;
+      }
+    });
+    b.externalBatchId = null; // 超时，强制丢弃旧任务，允许下次重试
+  }
+  
   await saveData();
 }
 
@@ -656,12 +677,13 @@ $('btnBatchRetry').onclick = async () => {
   if (!b) return;
   let count = 0;
   b.items.forEach(i => {
-    if (i.collectStatus === 'error') { i.collectStatus = 'pending'; count++; }
+    if (i.collectStatus === 'error' && (i.retryCount || 0) < 3) { i.collectStatus = 'pending'; count++; }
     if (i.reviewStatus === 'error') { i.reviewStatus = 'pending'; count++; }
   });
   if (count > 0) {
+    b.externalBatchId = null; // 重置任务ID
     b.runStatus = 'running'; await saveData(); renderItems(); toast(`开始重试 ${count} 个任务`); startBatchLoop(b.id);
-  } else { toast('没有失败的任务需要重试。'); }
+  } else { toast('没有可重试的失败任务（或已达最大重试次数）。'); }
 };
 
 $('backHomeBtn').onclick = goHome;
