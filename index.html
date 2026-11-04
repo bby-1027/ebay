@@ -430,7 +430,7 @@ async function startBatchLoop(batchId) {
   }
 }
 
-// ================= 执行任务 =================
+// ================= 执行任务（结果优先拦截） =================
 
 async function doCollect(batchId, itemId) {
   const b = app.batches.find(x => x.id === batchId);
@@ -456,50 +456,57 @@ async function doCollect(batchId, itemId) {
     const submitData = await res.json().catch(()=>({}));
     let extractedBatchId = submitData.id || submitData.batch_id || submitData.detail?.id;
 
-    let isCompleted = false; let poll = 0; let consecutiveErrors = 0;
-    while (!isCompleted && poll < 60) {
+    let isCompleted = false; let poll = 0; 
+    while (!isCompleted && poll < 30) { // 最多等 60 秒
       await new Promise(r => setTimeout(r, 2000));
       
+      // 检查暂停
       const curB = app.batches.find(x => x.id === batchId);
       if (curB.runStatus === 'paused') throw new Error('用户已暂停');
       
       poll++;
+      // 【核心修复】不再死等状态接口，直接尝试拉结果
+      try {
+        const recordsRes = await fetch(`${WORKER_URL}/api/results?batch_id=${extractedBatchId||batchName}&limit=10`, { headers: { 'X-Workbench-Token': TOKEN } });
+        if (recordsRes.ok) {
+          const recordsData = await recordsRes.json();
+          let allRecords = Array.isArray(recordsData) ? recordsData : (recordsData.data || recordsData.records || recordsData.results || []);
+          
+          const match = allRecords.find(r => JSON.stringify(r).includes(item.asin));
+          
+          if (match) {
+            // 成功拿到数据
+            item.collected = normalizeCollectedData(match);
+            item.collectStatus = 'collected';
+            item.reason = '采集成功';
+            item.taskId = null;
+            isCompleted = true;
+            break;
+          } else if (allRecords.length > 0) {
+            // 接口返回了数据，但没有这个ASIN，说明采集可能失败了
+            throw new Error('采集完成，但未找到该商品数据');
+          }
+        }
+      } catch (err) {
+        if (err.message.includes('已暂停') || err.message.includes('未找到')) throw err;
+        // 其他网络错误忽略，继续拉
+      }
+      
+      // 顺便查一下进度，给用户看
       try {
         const stRes = await fetch(`${WORKER_URL}/api/batches/${batchName}/status`, { headers: { 'X-Workbench-Token': TOKEN } });
-        if (!stRes.ok) {
-           consecutiveErrors++;
-           if (consecutiveErrors > 3) throw new Error('查询进度连续失败，已超时');
-           continue;
+        if (stRes.ok) {
+           const data = await stRes.json();
+           const done = data.done ?? data.completed ?? 0; 
+           const total = data.total ?? 1;
+           item.reason = `采集中... (${done}/${total})`;
+           if(app.view === 'items' && app.currentBatchId === batchId) renderItems();
         }
-        consecutiveErrors = 0;
-        const data = await stRes.json();
-        const done = data.done ?? 0; const total = data.total ?? 1;
-        item.reason = `采集进度: ${done}/${total}`;
-        if(app.view === 'items' && app.currentBatchId === batchId) renderItems();
-        
-        if (!extractedBatchId) extractedBatchId = data.id || data.batch_id;
-        const stateStr = String(data.status || '').toLowerCase();
-        if (done >= total || stateStr.includes('complete') || stateStr.includes('finish') || data.is_done) isCompleted = true;
-      } catch (err) {
-         if (err.message.includes('已暂停') || err.message.includes('超时')) throw err;
-      }
+      } catch(e) {}
     }
-    if (!isCompleted) throw new Error('采集超时');
+    
+    if (!isCompleted) throw new Error('采集超时，未拉取到结果');
 
-    const recordsRes = await fetch(`${WORKER_URL}/api/results?batch_id=${extractedBatchId||batchName}&limit=10`, { headers: { 'X-Workbench-Token': TOKEN } });
-    if (!recordsRes.ok) throw new Error('拉取数据失败');
-    const recordsData = await recordsRes.json();
-    let allRecords = Array.isArray(recordsData) ? recordsData : (recordsData.data || recordsData.records || recordsData.results || []);
-    const match = allRecords.find(r => JSON.stringify(r).includes(item.asin));
-
-    if (match) {
-      item.collected = normalizeCollectedData(match);
-      item.collectStatus = 'collected';
-      item.reason = '采集成功';
-      item.taskId = null;
-    } else {
-      throw new Error('采集中断：未返回该 ASIN');
-    }
   } catch (e) {
     if (e.message === '用户已暂停') {
       item.reason = '已暂停，等待继续';
