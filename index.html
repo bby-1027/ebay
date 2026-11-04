@@ -156,6 +156,16 @@ function toast(msg) {
   clearTimeout(el.timer); el.timer = setTimeout(() => el.style.display = 'none', 4000);
 }
 
+// 强行限制网络请求超时（防止页面卡死）
+async function fetchWithTimeout(resource, options = {}) {
+  const { timeout = 15000 } = options;
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), timeout);
+  const response = await fetch(resource, { ...options, signal: controller.signal });
+  clearTimeout(id);
+  return response;
+}
+
 function normalizeCollectedData(raw) {
   const target = raw.data || raw.product || raw.item || raw;
   let descValue = target.description || target['长描述'] || target['商品描述'] || target['描述'] || '';
@@ -171,7 +181,7 @@ function normalizeCollectedData(raw) {
 
 async function fetchData(silent = false) {
   try {
-    const res = await fetch(`${WORKER_URL}/api/data`, { headers: { 'X-Workbench-Token': TOKEN } });
+    const res = await fetchWithTimeout(`${WORKER_URL}/api/data`, { headers: { 'X-Workbench-Token': TOKEN } });
     if (!res.ok) throw new Error('获取数据失败: ' + res.status);
     const data = await res.json();
     app.serverVersion = data.version || 0;
@@ -183,7 +193,7 @@ async function fetchData(silent = false) {
 async function saveData() {
   try {
     const payload = { version: app.serverVersion, batches: app.batches };
-    const res = await fetch(`${WORKER_URL}/api/data`, {
+    const res = await fetchWithTimeout(`${WORKER_URL}/api/data`, {
       method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Workbench-Token': TOKEN },
       body: JSON.stringify(payload)
     });
@@ -345,10 +355,19 @@ async function startBatchLoop(batchId) {
       const b = app.batches.find(x => x.id === batchId);
       if (!b || b.runStatus !== 'running') { app.isLoopRunning = false; return; }
 
+      // 检查是否有卡住的 collecting 任务，如果有，重试或接管
+      const stuckCollecting = b.items.find(i => i.collectStatus === 'collecting');
+      if (stuckCollecting) {
+        // 强制重置为 error 让用户重试，防止无限卡住
+        stuckCollecting.collectStatus = 'error';
+        stuckCollecting.reason = '采集卡死，请重试';
+        await saveData();
+      }
+
       const toCollect = b.items.find(i => i.collectStatus === 'pending' || i.collectStatus === 'error');
       if (toCollect) { await doCollect(batchId, toCollect.itemId); continue; }
       
-      const isRunning = b.items.some(i => i.collectStatus === 'collecting' || i.reviewStatus === 'auditing');
+      const isRunning = b.items.some(i => i.reviewStatus === 'auditing');
       if (isRunning) { await new Promise(r => setTimeout(r, 2000)); continue; }
 
       const toAudit = b.items.find(i => i.collectStatus === 'collected' && i.reviewStatus === 'pending');
@@ -368,39 +387,59 @@ async function doCollect(batchId, itemId) {
 
   try {
     const batchName = `wb_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-    const res = await fetch(`${WORKER_URL}/api/batches`, {
+    item.taskId = batchName; // 保存 taskId，防止刷新丢失
+    await saveData();
+
+    const res = await fetchWithTimeout(`${WORKER_URL}/api/batches`, {
       method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Workbench-Token': TOKEN },
       body: JSON.stringify({ asins: [item.asin], batch_name: batchName })
-    });
-    if (!res.ok) throw new Error('提交失败');
-    const sData = await res.json().catch(()=>({}));
-    let bId = sData.id || sData.batch_id || sData.detail?.id;
+    }, { timeout: 15000 });
+    
+    if (!res.ok) throw new Error('提交任务失败');
 
     let isCompleted = false, poll = 0; 
     while (!isCompleted && poll < 30) {
       await new Promise(r => setTimeout(r, 2000));
-      if (app.batches.find(x => x.id === batchId).runStatus === 'paused') throw new Error('已暂停');
+      
+      const curB = app.batches.find(x => x.id === batchId);
+      if (curB.runStatus === 'paused') throw new Error('用户已暂停');
+      
       poll++;
       try {
-        const rRes = await fetch(`${WORKER_URL}/api/results?batch_id=${bId||batchName}&limit=10`, { headers: { 'X-Workbench-Token': TOKEN } });
-        if (rRes.ok) {
-          const rData = await rRes.json();
-          let arr = Array.isArray(rData) ? rData : (rData.data || rData.records || rData.results || []);
-          const match = arr.find(r => JSON.stringify(r).includes(item.asin));
-          if (match) {
-            item.collected = normalizeCollectedData(match);
-            item.collectStatus = 'collected'; item.reason = '采集成功';
-            isCompleted = true; break;
-          }
+        // 先查状态
+        const stRes = await fetchWithTimeout(`${WORKER_URL}/api/batches/${batchName}/status`, { headers: { 'X-Workbench-Token': TOKEN } }, { timeout: 5000 });
+        if (stRes.ok) {
+           const stData = await stRes.json();
+           const stateStr = String(stData.status || '').toLowerCase();
+           const done = stData.done ?? 0; 
+           const total = stData.total ?? 1;
+           item.reason = `采集中... (${done}/${total})`;
+           if(app.view === 'items' && app.currentBatchId === batchId) renderItems();
+
+           if (done >= total || stateStr.includes('complete') || stateStr.includes('done') || stData.is_done) {
+              // 如果完成，去查结果
+              const rRes = await fetchWithTimeout(`${WORKER_URL}/api/results?batch_id=${batchName}&limit=10`, { headers: { 'X-Workbench-Token': TOKEN } }, { timeout: 10000 });
+              if (rRes.ok) {
+                const rData = await rRes.json();
+                let arr = Array.isArray(rData) ? rData : (rData.data || rData.records || rData.results || []);
+                const match = arr.find(r => JSON.stringify(r).includes(item.asin));
+                if (match) {
+                  item.collected = normalizeCollectedData(match);
+                  item.collectStatus = 'collected'; item.reason = '采集成功';
+                  isCompleted = true; break;
+                }
+              }
+           }
         }
-      } catch (err) {}
-      item.reason = `采集中 (${poll*2}s)...`;
-      if(app.view === 'items' && app.currentBatchId === batchId) renderItems();
+      } catch (err) {
+        console.warn('单次轮询失败', err);
+      }
     }
-    if (!isCompleted) throw new Error('超时未获取到数据');
+    if (!isCompleted) throw new Error('采集超时（60秒内未获取到数据）');
   } catch (e) {
-    item.collectStatus = e.message === '已暂停' ? 'pending' : 'error';
+    item.collectStatus = e.message === '用户已暂停' ? 'pending' : 'error';
     item.reason = e.message;
+    item.taskId = null;
   }
   await saveData();
 }
@@ -419,22 +458,23 @@ async function doAudit(batchId, itemId) {
 
   try {
     let allFields = f._raw ? { ...f._raw } : { ...f };
-    const res = await fetch(`${WORKER_URL}/api/audit`, {
+    const res = await fetchWithTimeout(`${WORKER_URL}/api/audit`, {
       method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Workbench-Token': TOKEN },
       body: JSON.stringify({ batchId, itemId, asin: item.asin, fields: allFields })
-    });
+    }, { timeout: 90000 }); // 给大模型多留时间
+
     const data = await res.json();
-    if (app.batches.find(x => x.id === batchId).runStatus === 'paused') throw new Error('已暂停');
+    if (app.batches.find(x => x.id === batchId).runStatus === 'paused') throw new Error('用户已暂停');
 
     if (data.error) { item.reviewStatus = 'error'; item.reason = data.detail; }
     else if (data.success && data.audit) {
       item.audit = data.audit;
       item.reviewStatus = data.audit.decision;
       item.reason = data.audit.reason;
-      if (item.reviewStatus === 'passed') item.copyStatus = 'pending'; // 需人工确认文案
+      if (item.reviewStatus === 'passed') item.copyStatus = 'pending';
     }
   } catch (e) {
-    item.reviewStatus = e.message === '已暂停' ? 'pending' : 'error';
+    item.reviewStatus = e.message === '用户已暂停' ? 'pending' : 'error';
     item.reason = e.message;
   }
   await saveData();
@@ -472,7 +512,6 @@ function openDetail(itemId) {
     </div>`;
   }
 
-  // 核验区
   if (item.reviewStatus === 'verify') {
     html += `<div class="section-box" style="background:#fffbf2">
       <h4>人工核验操作</h4>
@@ -482,7 +521,6 @@ function openDetail(itemId) {
     </div>`;
   }
 
-  // 文案清理区（通过后显示）
   if (item.reviewStatus === 'passed' && item.copyStatus !== 'completed') {
     html += `<div class="section-box" style="background:#e7f4ec">
       <h4>文案清理（暂未接入 AI）</h4>
