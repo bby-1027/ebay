@@ -5,7 +5,7 @@
 <title>商品审核工作台</title>
 <style>
 :root{font-family:Inter,"Microsoft YaHei",system-ui,sans-serif;color:#23332f;background:#f5f7f6;font-size:14px;--green:#216b52;--line:#e2e8e4;--muted:#748079;--bg:#f9fbf9;}
-*{box-sizing:border-box}body{margin:0}button,input,textarea,select{font:inherit}button{cursor:pointer;border:1px solid var(--line);border-radius:8px;padding:10px 15px;background:white;color:inherit;transition:all .2s}button:hover{background:#f1f6f3}button:disabled{cursor:not-allowed;opacity:.5}.primary{background:var(--green);border-color:var(--green);color:white}.primary:hover{background:#17583f}.danger{color:#a53d38;border-color:#fceceb}.danger:hover{background:#fceceb}.linkbtn{border:0;background:transparent;color:var(--green);padding:0;font-size:13px}.linkbtn:hover{text-decoration:underline;background:transparent}
+*{box-sizing:border-box}body{margin:0}button,input,textarea,select{font:inherit}button{cursor:pointer;border:1px solid var(--line);border-radius:8px;padding:10px 15px;background:white;color:inherit;transition:all .2s}button:hover{background:#f1f6f3}button:disabled{cursor:not-allowed;opacity:.5}.primary{background:var(--green);border-color:var(--green);color:white}.primary:hover{background:#17583f}.danger{color:#a53d38;border-color:#fceceb}.danger:hover{background:#fceceb}.linkbtn{border:0;background:transparent;color:var(--green);padding:0;font-size:13px;font-weight:500}.linkbtn:hover{text-decoration:underline;background:transparent}
 header{height:82px;background:white;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;padding:0 max(24px,calc((100vw - 1260px)/2))}
 .brand{display:flex;align-items:center;gap:12px}.logo{background:var(--green);color:white;border-radius:10px;padding:10px;font-weight:800;font-size:18px}h1{font-size:19px;margin:0 0 4px}h2{font-size:20px;margin:0 0 12px}
 main{max-width:1260px;padding:30px 24px 64px;margin:auto}
@@ -112,23 +112,26 @@ dialog::backdrop{background:#1c332c66}.dialoghead{padding:16px 24px;border-botto
     <button class="close" data-close>×</button>
   </div>
   <div id="dtBody" class="dialogbody"></div>
-  <div class="dialogfoot" id="dtFooter"></div>
+  <div class="dialogfoot">
+    <button data-close>关闭</button>
+  </div>
 </dialog>
 
 <dialog id="settingsDialog" style="width:400px">
-  <div class="dialoghead"><h3>设置</h3><button class="close" data-close>×</button></div>
+  <div class="dialoghead"><h3>设置</h3><button class="close" id="settingsCloseBtn">×</button></div>
   <div class="dialogbody">
     <div class="section-box">
       <h4>导出字段设置</h4>
       <p class="muted" style="font-size:12px;margin-bottom:12px">此设置仅保存在本浏览器。</p>
       <label style="display:block;margin-bottom:8px"><input type="checkbox" checked disabled> SKU（必选）</label>
+      <label style="display:block;margin-bottom:8px"><input type="checkbox" id="expBrand" checked> 品牌</label>
       <label style="display:block;margin-bottom:8px"><input type="checkbox" id="expLink" checked> 亚马逊链接</label>
       <label style="display:block;margin-bottom:8px"><input type="checkbox" id="expTitle" checked> 清理后的标题</label>
       <label style="display:block;margin-bottom:8px"><input type="checkbox" id="expBullets" checked> 清理后的五点描述</label>
       <label style="display:block;margin-bottom:8px"><input type="checkbox" id="expDesc" checked> 清理后的长描述</label>
     </div>
   </div>
-  <div class="dialogfoot"><button class="primary" data-close>保存</button></div>
+  <div class="dialogfoot"><button class="primary" id="settingsSaveBtn">保存</button></div>
 </dialog>
 
 <div id="toast"></div>
@@ -142,7 +145,8 @@ let app = {
   serverVersion: 0, batches: [], currentBatchId: null, view: 'home',
   searchQuery: '', filterStatus: 'all', detailItemId: null, isLoopRunning: false
 };
-let exportPrefs = { link: true, title: true, bullets: true, desc: true };
+let exportPrefs = { link: true, title: true, bullets: true, desc: true, brand: true };
+let originalExportPrefs = JSON.parse(JSON.stringify(exportPrefs));
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -203,6 +207,8 @@ async function saveData() {
 async function init() {
   const prefsStr = localStorage.getItem('ebay_export_prefs');
   if (prefsStr) { try { exportPrefs = JSON.parse(prefsStr); } catch (e) {} }
+  originalExportPrefs = JSON.parse(JSON.stringify(exportPrefs));
+  $('expBrand').checked = exportPrefs.brand;
   $('expLink').checked = exportPrefs.link;
   $('expTitle').checked = exportPrefs.title;
   $('expBullets').checked = exportPrefs.bullets;
@@ -210,7 +216,6 @@ async function init() {
   
   await fetchData();
   
-  // 页面加载时，把处于半残状态的强制转为 paused
   let changed = false;
   app.batches.forEach(b => {
     if (b.runStatus === 'running') {
@@ -228,6 +233,7 @@ async function init() {
 function renderHome() {
   $('homeView').classList.remove('hidden');
   $('itemsView').classList.add('hidden');
+  // 严格按导入时间倒序（最新在最上）
   const sorted = [...app.batches].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
   
   $('batchRows').innerHTML = sorted.map(b => {
@@ -243,17 +249,17 @@ function renderHome() {
     });
 
     let bStatus = '未开始'; let bCls = 'b-gray';
-    let btnAction = `<button class="primary" onclick="startBatch('${b.id}')">一键开始</button>`;
+    let btnAction = `<button class="linkbtn" onclick="startBatch('${b.id}')">一键开始</button>`;
     
     if (b.runStatus === 'running') {
       bStatus = '运行中'; bCls = 'b-run';
-      btnAction = `<button class="danger" onclick="pauseBatch('${b.id}')">暂停</button>`;
+      btnAction = `<button class="linkbtn" style="color:#a53d38" onclick="pauseBatch('${b.id}')">暂停</button>`;
     } else if (b.runStatus === 'paused') {
       bStatus = '已暂停'; bCls = 'b-warn';
-      btnAction = `<button class="primary" onclick="resumeBatch('${b.id}')">继续</button>`;
+      btnAction = `<button class="linkbtn" onclick="resumeBatch('${b.id}')">继续</button>`;
     } else if (total > 0 && cDone === total && rDone + rVerify === total && (cpDone === rDone || rDone === 0)) {
       bStatus = '已完成'; bCls = 'b-pass';
-      btnAction = `<span class="muted">-</span>`;
+      btnAction = `<span class="muted" style="font-size:13px;color:#ccc">-</span>`;
     }
 
     return `<tr>
@@ -262,9 +268,11 @@ function renderHome() {
       <td><span class="badge ${bCls}">${bStatus}</span><br><small>采集 ${cDone}/${total} | 审核 ${rDone+rVerify}/${total} | 文案 ${cpDone}</small></td>
       <td>通过: ${rDone} | 核验: ${rVerify} | 失败: ${cErr} | 可导出: ${cpDone}</td>
       <td>
-        ${btnAction}
-        <span style="color:var(--line);margin:0 6px">|</span>
-        <button class="linkbtn" onclick="enterBatch('${b.id}')">明细</button>
+        <div style="display:flex;gap:12px;align-items:center">
+          ${btnAction}
+          <button class="linkbtn" onclick="enterBatch('${b.id}')">明细</button>
+          <button class="linkbtn" onclick="exportFromHome('${b.id}')">导出</button>
+        </div>
       </td>
     </tr>`;
   }).join('');
@@ -332,7 +340,6 @@ async function startBatch(id) {
   const b = app.batches.find(x => x.id === id);
   if (!b || b.runStatus === 'running') return;
   
-  // 【核心修复】启动前，强制把一切卡在中间状态的任务全部重置！
   b.items.forEach(i => {
     if (i.collectStatus === 'collecting') { i.collectStatus = 'pending'; i.reason = '重置待采'; }
     if (i.reviewStatus === 'auditing') { i.reviewStatus = 'pending'; i.reason = '重置待审'; }
@@ -357,7 +364,6 @@ async function resumeBatch(id) {
   const b = app.batches.find(x => x.id === id);
   if (!b || b.runStatus === 'running') return;
 
-  // 【核心修复】继续前，同样强制重置卡死状态
   b.items.forEach(i => {
     if (i.collectStatus === 'collecting') { i.collectStatus = 'pending'; i.reason = '重置待采'; }
     if (i.reviewStatus === 'auditing') { i.reviewStatus = 'pending'; i.reason = '重置待审'; }
@@ -431,7 +437,6 @@ async function submitCollectionTask(batchId, itemsToCollect) {
     const asins = itemsToCollect.map(i => i.asin);
     const batchName = `wb_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     
-    // 发起真实的 POST 请求
     const res = await fetchWithTimeout(`${WORKER_URL}/api/batches`, {
       method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Workbench-Token': TOKEN },
       body: JSON.stringify({ asins, batch_name: batchName })
@@ -439,13 +444,11 @@ async function submitCollectionTask(batchId, itemsToCollect) {
     
     if (!res.ok) throw new Error('提交采集失败，状态码: ' + res.status);
 
-    // 穷尽所有可能的字段，尝试提取真实的数字 ID
     const sData = await res.json().catch(()=>({}));
     const extractedId = sData.id || sData.batch_id || sData.batchId || sData.data?.id || sData.data?.batch_id || sData.detail?.batch_id || sData.detail?.id;
     b.externalBatchId = extractedId ? String(extractedId) : batchName; 
     await saveData();
 
-    // 开始拉取结果
     await syncCollectionResult(batchId, b.externalBatchId);
 
   } catch (e) {
@@ -580,7 +583,7 @@ async function autoCleanCopy(batchId, itemId) {
   await saveData();
 }
 
-// ================= 详情页与操作 =================
+// ================= 详情页 =================
 function openDetail(itemId) {
   app.detailItemId = itemId;
   const b = app.batches.find(x => x.id === app.currentBatchId);
@@ -596,11 +599,18 @@ function openDetail(itemId) {
   $('dtStatus').textContent = rTag;
   $('dtStatus').className = `badge ${rCls}`;
 
+  const f = item.collected || {};
   const a = item.audit || {};
-  let html = `<div class="detail-grid"><div><div class="section-box"><h4>原始资料</h4>
-    <div class="field"><div class="label">标题</div><div class="text">${esc(item.collected?.title || '未采集')}</div></div>
-    <div class="field"><div class="label">五点</div><div class="text">${esc(item.collected?.bullets || '未采集')}</div></div>
-  </div></div><div>`;
+  
+  let html = `<div class="detail-grid"><div>
+    <div class="section-box">
+      <h4>原始资料</h4>
+      <div class="field"><div class="label">标题</div><div class="text">${esc(f.title || '未采集')}</div></div>
+      <div class="field"><div class="label">品牌</div><div class="text">${esc(f.brand || '未采集')}</div></div>
+      <div class="field"><div class="label">五点</div><div class="text">${esc(f.bullets || '未采集')}</div></div>
+      <div class="field"><div class="label">长描述</div><div class="text">${esc(f.description || '未采集')}</div></div>
+    </div>
+  </div><div>`;
 
   if (item.reviewStatus === 'skipped') {
     html += `<div class="section-box"><h4>资料不足</h4><p>未调用 AI 审核。</p></div>`;
@@ -615,7 +625,7 @@ function openDetail(itemId) {
   if (item.reviewStatus === 'verify') {
     html += `<div class="section-box" style="background:#fffbf2">
       <h4>人工核验</h4>
-      <div class="form-group"><label>依据（必填）</label><textarea id="dtReviewReason" rows="2"></textarea></div>
+      <div class="form-group"><label>依据（选填）</label><textarea id="dtReviewReason" rows="2"></textarea></div>
       <button class="primary" onclick="saveDetailVerify('passed')">确认通过</button>
       <button class="danger" onclick="saveDetailVerify('excluded')">排除</button>
     </div>`;
@@ -627,40 +637,40 @@ function openDetail(itemId) {
 
   html += `</div></div>`;
   $('dtBody').innerHTML = html;
-  $('dtFooter').innerHTML = `<button data-close>关闭</button>`;
   $('detailDialog').showModal();
 }
 
 async function saveDetailVerify(decision) {
   const b = app.batches.find(x => x.id === app.currentBatchId);
   const item = b.items.find(x => x.itemId === app.detailItemId);
-  const reason = $('dtReviewReason').value.trim();
-  if (!reason) return toast('请填写人工核验依据。');
+  const reason = $('dtReviewReason').value.trim(); // 此处已移除必填校验
   
   item.reviewStatus = decision;
-  item.reason = '人工' + (decision === 'passed' ? '通过' : '排除') + ': ' + reason;
+  item.reason = '人工' + (decision === 'passed' ? '通过' : '排除') + (reason ? ': ' + reason : '');
   if (decision === 'passed') item.copyStatus = 'pending';
   
   if (await saveData()) { toast('结论已保存'); renderItems(); openDetail(item.itemId); }
 }
 window.saveDetailVerify = saveDetailVerify;
 
-// ================= 导出与导入 =================
-$('exportBatchBtn').onclick = () => {
-  const b = app.batches.find(x => x.id === app.currentBatchId);
+// ================= 导出逻辑 =================
+function executeExport(batchId) {
+  const b = app.batches.find(x => x.id === batchId);
   if (!b) return toast('无批次可导出');
   const items = b.items.filter(i => i.reviewStatus === 'passed' && i.copyStatus === 'completed');
-  if (!items.length) return toast('没有已通过且文案完成的商品');
+  if (!items.length) return toast('该批次没有已通过且文案完成的商品');
 
   const headers = ['SKU'];
+  if (exportPrefs.brand) headers.push('品牌');
   if (exportPrefs.link) headers.push('链接');
-  if (exportPrefs.title) headers.push('标题');
-  if (exportPrefs.bullets) headers.push('五点');
-  if (exportPrefs.desc) headers.push('长描述');
+  if (exportPrefs.title) headers.push('清理后标题');
+  if (exportPrefs.bullets) headers.push('清理后五点');
+  if (exportPrefs.desc) headers.push('清理后长描述');
 
   const rows = [headers];
   items.forEach(i => {
     const row = [i.asin];
+    if (exportPrefs.brand) row.push(i.collected?.brand || '');
     if (exportPrefs.link) row.push(`https://www.amazon.com/dp/${i.asin}`);
     if (exportPrefs.title) row.push(i.copyData?.title || i.collected?.title || '');
     if (exportPrefs.bullets) row.push(i.copyData?.bullets || i.collected?.bullets || '');
@@ -673,8 +683,11 @@ $('exportBatchBtn').onclick = () => {
   XLSX.utils.book_append_sheet(wb, ws, "通过商品");
   XLSX.writeFile(wb, `批次导出_${b.name}.xlsx`);
   toast('已生成 Excel 下载');
-};
+}
+$('exportBatchBtn').onclick = () => executeExport(app.currentBatchId);
+window.exportFromHome = executeExport;
 
+// ================= 导入与设置逻辑 =================
 $('importBtn').onclick = () => { $('inputBatchName').value = ''; $('skuInput').value = ''; $('goodsFile').value = ''; $('importError').textContent = ''; $('importSummary').innerHTML = '待导入数量：0 个'; $('importDialog').showModal(); };
 $('goodsFile').onchange = async (e) => {
   const file = e.target.files[0]; if (!file) return;
@@ -721,13 +734,49 @@ $('btnBatchRetry').onclick = async () => {
 };
 
 $('backHomeBtn').onclick = goHome;
-document.querySelectorAll('[data-close]').forEach(btn => { btn.onclick = (e) => e.target.closest('dialog').close(); });
-$('btnSettings').onclick = () => $('settingsDialog').showModal();
-$('settingsDialog').querySelector('.primary').onclick = () => {
-  exportPrefs = { link: $('expLink').checked, title: $('expTitle').checked, bullets: $('expBullets').checked, desc: $('expDesc').checked };
+
+// 设置弹窗逻辑优化
+$('btnSettings').onclick = () => {
+  originalExportPrefs = JSON.parse(JSON.stringify(exportPrefs));
+  $('expBrand').checked = exportPrefs.brand;
+  $('expLink').checked = exportPrefs.link;
+  $('expTitle').checked = exportPrefs.title;
+  $('expBullets').checked = exportPrefs.bullets;
+  $('expDesc').checked = exportPrefs.desc;
+  $('settingsDialog').showModal();
+};
+
+$('settingsSaveBtn').onclick = () => {
+  exportPrefs = { 
+    brand: $('expBrand').checked, 
+    link: $('expLink').checked, 
+    title: $('expTitle').checked, 
+    bullets: $('expBullets').checked, 
+    desc: $('expDesc').checked 
+  };
   localStorage.setItem('ebay_export_prefs', JSON.stringify(exportPrefs));
+  $('settingsDialog').close();
   toast('设置已保存');
 };
+
+$('settingsCloseBtn').onclick = () => {
+  const current = { brand: $('expBrand').checked, link: $('expLink').checked, title: $('expTitle').checked, bullets: $('expBullets').checked, desc: $('expDesc').checked };
+  if (JSON.stringify(current) !== JSON.stringify(originalExportPrefs)) {
+    if (confirm("您有未保存的更改，是否需要保存？\n点击“确定”保存并关闭，点击“取消”放弃修改。")) {
+      $('settingsSaveBtn').click();
+      return;
+    }
+  }
+  $('settingsDialog').close();
+};
+
+// 全局关闭事件代理
+document.addEventListener('click', (e) => {
+  const closeBtn = e.target.closest('[data-close]');
+  if (closeBtn) {
+    closeBtn.closest('dialog').close();
+  }
+});
 
 init();
 </script>
