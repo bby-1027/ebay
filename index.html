@@ -141,7 +141,7 @@ dialog::backdrop{background:#1c332c66}.dialoghead{padding:16px 24px;border-botto
 <script>
 'use strict';
 const WORKER_URL = 'https://scraper-proxy.1172743763.workers.dev';
-const TOKEN = 'ebay1031'; // 确保这是你的真实密码
+const TOKEN = 'ebay1031'; 
 
 let app = {
   serverVersion: 0, batches: [], currentBatchId: null, view: 'home',
@@ -186,6 +186,21 @@ async function fetchData(silent = false) {
     const data = await res.json();
     app.serverVersion = data.version || 0;
     app.batches = data.batches || [];
+    
+    // 【重要修复】刷新页面时，如果发现状态是 running，强制转为 paused，绝不自动运行
+    let changed = false;
+    app.batches.forEach(b => {
+      if (b.runStatus === 'running') {
+        b.runStatus = 'paused';
+        b.items.forEach(i => {
+          if (i.collectStatus === 'collecting') { i.collectStatus = 'pending'; i.reason = '已暂停'; }
+          if (i.reviewStatus === 'auditing') { i.reviewStatus = 'pending'; i.reason = '已暂停'; }
+        });
+        changed = true;
+      }
+    });
+    if (changed) await saveData();
+    
     render();
   } catch (e) { if(!silent) toast(e.message); }
 }
@@ -212,14 +227,8 @@ function init() {
   $('expTitle').checked = exportPrefs.title;
   $('expBullets').checked = exportPrefs.bullets;
   $('expDesc').checked = exportPrefs.desc;
-  
-  fetchData().then(() => {
-    const runningBatch = app.batches.find(b => b.runStatus === 'running');
-    if (runningBatch) setTimeout(() => runPipeline(runningBatch.id), 1000);
-  });
+  fetchData();
 }
-
-// ================= 渲染 =================
 
 function renderHome() {
   $('homeView').classList.remove('hidden');
@@ -323,7 +332,7 @@ function enterBatch(id) { app.currentBatchId = id; app.view = 'items'; app.searc
 function goHome() { app.view = 'home'; app.currentBatchId = null; render(); }
 window.enterBatch = enterBatch; window.openDetail = openDetail;
 
-// ================= 调度引擎 =================
+// ================= 核心调度引擎 =================
 async function startBatch(id) {
   const b = app.batches.find(x => x.id === id);
   if (!b || b.runStatus === 'running') return;
@@ -373,7 +382,7 @@ async function runPipeline(batchId) {
         continue;
       }
 
-      // 3. 自动清理文案（针对通过的商品）
+      // 3. 自动清理文案
       const toClean = b.items.find(i => i.reviewStatus === 'passed' && i.copyStatus === 'pending');
       if (toClean) {
         await autoCleanCopy(batchId, toClean.itemId);
@@ -389,7 +398,9 @@ async function runPipeline(batchId) {
       return;
     }
   } catch (e) { 
-    toast('调度异常: ' + e.message); 
+    toast('调度异常，已停止：' + e.message); 
+    const b = app.batches.find(x => x.id === batchId);
+    if (b) { b.runStatus = 'paused'; await saveData(); render(); }
     app.isLoopRunning = false; 
   }
 }
@@ -412,14 +423,11 @@ async function submitCollectionTask(batchId, itemsToCollect) {
     }, { timeout: 20000 });
     
     if (!res.ok) throw new Error('提交采集失败');
+
     await syncCollectionResult(batchId, batchName);
 
   } catch (e) {
-    itemsToCollect.forEach(i => { 
-      i.collectStatus = 'error'; 
-      i.reason = e.message; 
-      i.retryCount = (i.retryCount || 0) + 1; 
-    });
+    itemsToCollect.forEach(i => { i.collectStatus = 'error'; i.reason = e.message; i.retryCount = (i.retryCount || 0) + 1; });
     b.externalBatchId = null;
     await saveData();
   }
@@ -430,13 +438,19 @@ async function syncCollectionResult(batchId, externalBatchId) {
   let itemsToCollect = b.items.filter(i => i.collectStatus === 'collecting' || (i.collectStatus === 'error' && (i.retryCount || 0) < 3));
   
   let isCompleted = false, poll = 0; 
-  while (!isCompleted && poll < 30) {
+  while (!isCompleted && poll < 60) { // 放宽到 120 秒
     await new Promise(r => setTimeout(r, 2000));
-    if (app.batches.find(x => x.id === batchId).runStatus === 'paused') return;
+    
+    const curB = app.batches.find(x => x.id === batchId);
+    if (curB.runStatus === 'paused') {
+      itemsToCollect.forEach(i => { i.collectStatus = 'pending'; i.reason = '已暂停'; });
+      await saveData();
+      return;
+    }
     
     poll++;
     try {
-      const rRes = await fetchWithTimeout(`${WORKER_URL}/api/results?batch_id=${externalBatchId}&limit=100`, { headers: { 'X-Workbench-Token': TOKEN } }, { timeout: 10000 });
+      const rRes = await fetchWithTimeout(`${WORKER_URL}/api/results?batch_id=${externalBatchId}&limit=100`, { headers: { 'X-Workbench-Token': TOKEN } }, { timeout: 15000 });
       if (rRes.ok) {
         const rData = await rRes.json();
         let arr = Array.isArray(rData) ? rData : (rData.data || rData.records || rData.results || []);
@@ -466,7 +480,7 @@ async function syncCollectionResult(batchId, externalBatchId) {
     itemsToCollect.forEach(i => { 
       if (i.collectStatus === 'collecting') {
         i.collectStatus = 'error'; 
-        i.reason = '同步结果超时'; 
+        i.reason = '同步结果超时(120s)'; 
         i.retryCount = (i.retryCount || 0) + 1;
       }
     });
@@ -503,7 +517,7 @@ async function doSingleAudit(batchId, itemId) {
       item.audit = data.audit;
       item.reviewStatus = data.audit.decision;
       item.reason = data.audit.reason;
-      if (item.reviewStatus === 'passed') item.copyStatus = 'pending'; // 进入清理队列
+      if (item.reviewStatus === 'passed') item.copyStatus = 'pending'; 
     }
   } catch (e) {
     item.reviewStatus = e.message === '用户已暂停' ? 'pending' : 'error';
@@ -518,7 +532,6 @@ async function autoCleanCopy(batchId, itemId) {
   const item = b.items.find(x => x.itemId === itemId);
   const f = item.collected || {};
   
-  // 简单正则：去掉 Amazon, Prime 和当前品牌词
   const brand = f.brand || '';
   const clean = (str) => {
     if (!str) return '';
