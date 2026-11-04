@@ -7,7 +7,7 @@
 :root{font-family:Inter,"Microsoft YaHei",system-ui,sans-serif;color:#23332f;background:#f5f7f6;font-size:14px;--green:#216b52;--line:#e2e8e4;--muted:#748079;--bg:#f9fbf9;}
 *{box-sizing:border-box}body{margin:0}button,input,textarea,select{font:inherit}button{cursor:pointer;border:1px solid var(--line);border-radius:8px;padding:10px 15px;background:white;color:inherit;transition:all .2s}button:hover{background:#f1f6f3}button:disabled{cursor:not-allowed;opacity:.5}.primary{background:var(--green);border-color:var(--green);color:white}.primary:hover{background:#17583f}.danger{color:#a53d38;border-color:#fceceb}.danger:hover{background:#fceceb}.linkbtn{border:0;background:transparent;color:var(--green);padding:0;font-size:13px}.linkbtn:hover{text-decoration:underline;background:transparent}
 header{height:82px;background:white;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;padding:0 max(24px,calc((100vw - 1260px)/2))}
-.brand{display:flex;align-items:center;gap:12px}.logo{background:var(--green);color:white;border-radius:10px;padding:10px;font-weight:800;font-size:18px}h1{font-size:19px;margin:0 0 4px}h2{font-size:20px;margin:0 0 12px;display:flex;align-items:center;gap:12px}
+.brand{display:flex;align-items:center;gap:12px}.logo{background:var(--green);color:white;border-radius:10px;padding:10px;font-weight:800;font-size:18px}h1{font-size:19px;margin:0 0 4px}h2{font-size:20px;margin:0 0 12px}
 main{max-width:1260px;padding:30px 24px 64px;margin:auto}
 .actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
 .card{background:white;border:1px solid var(--line);border-radius:12px;overflow:hidden;margin-bottom:20px}
@@ -38,24 +38,23 @@ dialog::backdrop{background:#1c332c66}.dialoghead{padding:16px 24px;border-botto
   </div>
 </header>
 <main>
+  <!-- 首页视图 -->
   <div id="homeView">
     <div class="actions" style="justify-content:space-between;margin-bottom:20px">
       <h2>批次列表</h2>
-      <div>
-        <button id="exportBatchBtn" style="margin-right:10px">导出当前批通过</button>
-        <button id="importBtn" class="primary">＋ 导入新批次</button>
-      </div>
+      <button id="importBtn" class="primary">＋ 导入新批次</button>
     </div>
     <div class="card">
       <div class="tablewrap">
         <table>
-          <thead><tr><th>批次名称 / 导入时间</th><th>商品数量</th><th>批次状态</th><th>进度</th><th>待核验</th><th>失败</th><th>可导出</th><th>操作</th></tr></thead>
+          <thead><tr><th>批次名称 / 导入时间</th><th>商品数量</th><th>当前进度</th><th>统计</th><th>操作</th></tr></thead>
           <tbody id="batchRows"></tbody>
         </table>
       </div>
     </div>
   </div>
 
+  <!-- 明细视图 -->
   <div id="itemsView" class="hidden">
     <div class="actions" style="margin-bottom:20px">
       <button id="backHomeBtn">← 返回批次列表</button>
@@ -65,6 +64,7 @@ dialog::backdrop{background:#1c332c66}.dialoghead{padding:16px 24px;border-botto
       <div class="toolbar">
         <div class="batch-bar">
           <button id="btnBatchRetry" class="primary">重试失败项</button>
+          <button id="exportBatchBtn" class="primary">导出通过商品</button>
         </div>
         <div style="display:flex;gap:10px">
           <input type="text" id="searchInput" class="search-input" placeholder="搜索 SKU 或标题">
@@ -75,12 +75,11 @@ dialog::backdrop{background:#1c332c66}.dialoghead{padding:16px 24px;border-botto
           </select>
         </div>
       </div>
-
       <div class="tablewrap">
         <table>
           <thead>
             <tr>
-              <th>SKU</th><th>商品标题</th><th>采集状态</th><th>审核状态</th><th>文案状态</th><th>原因 / 待办</th><th>操作</th>
+              <th>SKU</th><th>商品标题</th><th>Amazon链接</th><th>采集状态</th><th>审核状态</th><th>文案状态</th><th>原因 / 待办</th><th>操作</th>
             </tr>
           </thead>
           <tbody id="itemRows"></tbody>
@@ -90,6 +89,7 @@ dialog::backdrop{background:#1c332c66}.dialoghead{padding:16px 24px;border-botto
   </div>
 </main>
 
+<!-- 导入弹窗 -->
 <dialog id="importDialog">
   <div class="dialoghead"><h3>导入新批次</h3><button class="close" data-close>×</button></div>
   <div class="dialogbody">
@@ -106,9 +106,10 @@ dialog::backdrop{background:#1c332c66}.dialoghead{padding:16px 24px;border-botto
     <div id="importSummary" style="background:#f0f4f1;padding:10px;border-radius:6px;font-size:13px;margin-bottom:15px">待导入数量：0 个</div>
     <div id="importError" style="color:#a53d38;font-size:13px;margin-top:10px"></div>
   </div>
-  <div class="dialogfoot"><button data-close>取消</button><button id="btnConfirmImport" class="primary">确认导入</button></div>
+  <div class="dialogfoot"><button data-close>取消</button><button id="btnConfirmImport" class="primary">确认并开始</button></div>
 </dialog>
 
+<!-- 详情弹窗 -->
 <dialog id="detailDialog">
   <div class="dialoghead">
     <div><h3 id="dtTitle" style="margin-bottom:4px">商品详情</h3><span id="dtStatus" class="badge b-gray"></span></div>
@@ -118,6 +119,7 @@ dialog::backdrop{background:#1c332c66}.dialoghead{padding:16px 24px;border-botto
   <div class="dialogfoot" id="dtFooter"></div>
 </dialog>
 
+<!-- 设置弹窗 -->
 <dialog id="settingsDialog" style="width:400px">
   <div class="dialoghead"><h3>设置</h3><button class="close" data-close>×</button></div>
   <div class="dialogbody">
@@ -139,7 +141,7 @@ dialog::backdrop{background:#1c332c66}.dialoghead{padding:16px 24px;border-botto
 <script>
 'use strict';
 const WORKER_URL = 'https://scraper-proxy.1172743763.workers.dev';
-const TOKEN = 'ebay1031'; 
+const TOKEN = 'ebay1031'; // 确保这是你的真实密码
 
 let app = {
   serverVersion: 0, batches: [], currentBatchId: null, view: 'home',
@@ -149,7 +151,6 @@ let exportPrefs = { link: true, title: true, bullets: true, desc: true };
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const meaningful = v => !['', 'n/a', 'na', 'null', 'none', '未提供'].includes(String(v).trim().toLowerCase());
 function asin(v) { const s = String(v).trim().toUpperCase(); return /^[A-Z0-9]{10}$/.test(s) ? s : null; }
 function toast(msg) {
   const el = $('toast'); el.textContent = msg; el.style.display = 'block';
@@ -157,7 +158,7 @@ function toast(msg) {
 }
 
 async function fetchWithTimeout(resource, options = {}) {
-  const { timeout = 20000 } = options;
+  const { timeout = 15000 } = options;
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), timeout);
   const response = await fetch(resource, { ...options, signal: controller.signal });
@@ -214,9 +215,11 @@ function init() {
   
   fetchData().then(() => {
     const runningBatch = app.batches.find(b => b.runStatus === 'running');
-    if (runningBatch) setTimeout(() => startBatchLoop(runningBatch.id), 1000);
+    if (runningBatch) setTimeout(() => runPipeline(runningBatch.id), 1000);
   });
 }
+
+// ================= 渲染 =================
 
 function renderHome() {
   $('homeView').classList.remove('hidden');
@@ -225,22 +228,18 @@ function renderHome() {
   
   $('batchRows').innerHTML = sorted.map(b => {
     const total = b.items.length;
-    let cDone = 0, cErr = 0, rDone = 0, rVerify = 0, passable = 0, running = false;
+    let cDone = 0, rDone = 0, rVerify = 0, cpDone = 0, cErr = 0;
     
     b.items.forEach(i => {
       if (i.collectStatus === 'collected') cDone++;
-      else if (i.collectStatus === 'error') cErr++;
-      else if (i.collectStatus === 'collecting') running = true;
-      
+      if (i.collectStatus === 'error') cErr++;
       if (i.reviewStatus === 'passed') rDone++;
-      else if (i.reviewStatus === 'verify') rVerify++;
-      else if (i.reviewStatus === 'auditing') running = true;
-      
-      if (i.reviewStatus === 'passed' && i.copyStatus === 'completed') passable++;
+      if (i.reviewStatus === 'verify') rVerify++;
+      if (i.reviewStatus === 'passed' && i.copyStatus === 'completed') cpDone++;
     });
 
     let bStatus = '未开始'; let bCls = 'b-gray';
-    let btnAction = `<button class="primary" onclick="startBatch('${b.id}')">开始处理</button>`;
+    let btnAction = `<button class="primary" onclick="startBatch('${b.id}')">一键开始</button>`;
     
     if (b.runStatus === 'running') {
       bStatus = '运行中'; bCls = 'b-run';
@@ -248,19 +247,16 @@ function renderHome() {
     } else if (b.runStatus === 'paused') {
       bStatus = '已暂停'; bCls = 'b-warn';
       btnAction = `<button class="primary" onclick="resumeBatch('${b.id}')">继续</button>`;
-    } else if (total > 0 && (rDone + rVerify === total)) {
+    } else if (total > 0 && cDone === total && rDone + rVerify === total && (cpDone === rDone || rDone === 0)) {
       bStatus = '已完成'; bCls = 'b-pass';
-      btnAction = `<button disabled>已完成</button>`;
+      btnAction = `<span class="muted">-</span>`;
     }
 
     return `<tr>
       <td><strong>${esc(b.name)}</strong><br><small style="color:var(--muted)">${new Date(b.createdAt).toLocaleString()}</small></td>
       <td>${total}</td>
-      <td><span class="badge ${bCls}">${bStatus}</span></td>
-      <td style="font-size:12px">采集 ${cDone}/${total} | 审核 ${rDone+rVerify}/${total}</td>
-      <td>${rVerify > 0 ? `<span style="color:#966314">${rVerify}</span>` : '-'}</td>
-      <td>${cErr > 0 ? `<span style="color:#a34f48">${cErr}</span>` : '-'}</td>
-      <td>${passable > 0 ? `<strong>${passable}</strong>` : '-'}</td>
+      <td><span class="badge ${bCls}">${bStatus}</span><br><small>采集 ${cDone}/${total} | 审核 ${rDone+rVerify}/${total} | 文案 ${cpDone}</small></td>
+      <td>通过: ${rDone} | 核验: ${rVerify} | 失败: ${cErr} | 可导出: ${cpDone}</td>
       <td>
         ${btnAction}
         <span style="color:var(--line);margin:0 6px">|</span>
@@ -288,34 +284,36 @@ function renderItems() {
 
   $('itemRows').innerHTML = filtered.map(i => {
     const title = i.collected?.title || i.source?.title || '尚未采集标题';
+    const link = `https://www.amazon.com/dp/${i.asin}`;
     
     let cTag = `<span class="badge b-gray">待采集</span>`;
     if (i.collectStatus === 'collecting') cTag = `<span class="badge b-run">采集中</span>`;
     if (i.collectStatus === 'collected') cTag = `<span class="badge b-pass">已采集</span>`;
-    if (i.collectStatus === 'error') cTag = `<span class="badge b-err">采集失败</span>`;
+    if (i.collectStatus === 'error') cTag = `<span class="badge b-err">失败</span>`;
 
     let rTag = `<span class="badge b-gray">待审核</span>`;
     if (i.reviewStatus === 'auditing') rTag = `<span class="badge b-run">审核中</span>`;
-    if (i.reviewStatus === 'skipped') rTag = `<span class="badge b-gray" style="background:#eef1ee;color:#8c9992">资料筛除</span>`;
+    if (i.reviewStatus === 'skipped') rTag = `<span class="badge b-gray">资料筛除</span>`;
     if (i.reviewStatus === 'verify') rTag = `<span class="badge b-warn">待核验</span>`;
     if (i.reviewStatus === 'passed') rTag = `<span class="badge b-pass">已通过</span>`;
-    if (i.reviewStatus === 'excluded') rTag = `<span class="badge b-err" style="background:#f0f2f0;color:#748079;border-color:#e2e5e2">已排除</span>`;
-    if (i.reviewStatus === 'error') rTag = `<span class="badge b-err">审核失败</span>`;
+    if (i.reviewStatus === 'excluded') rTag = `<span class="badge b-err" style="background:#f0f2f0">已排除</span>`;
+    if (i.reviewStatus === 'error') rTag = `<span class="badge b-err">失败</span>`;
 
     let cpTag = `<span class="badge b-gray">-</span>`;
     if (i.reviewStatus === 'passed') {
-       if (i.copyStatus === 'pending') cpTag = `<span class="badge b-warn">待人工确认</span>`;
+       if (i.copyStatus === 'pending') cpTag = `<span class="badge b-warn">待确认</span>`;
        if (i.copyStatus === 'completed') cpTag = `<span class="badge b-pass">已确认</span>`;
     }
 
     return `<tr>
       <td style="font-family:monospace">${i.asin}</td>
       <td><div class="title-col" title="${esc(title)}">${esc(title)}</div></td>
+      <td><a href="${link}" target="_blank" rel="noopener noreferrer">查看 ↗</a></td>
       <td>${cTag}</td>
       <td>${rTag}</td>
       <td>${cpTag}</td>
       <td style="color:var(--muted);font-size:12px;max-width:200px">${esc(i.reason || '-')}</td>
-      <td><button class="linkbtn" onclick="openDetail('${i.itemId}')">查看详情</button></td>
+      <td><button class="linkbtn" onclick="openDetail('${i.itemId}')">查看</button></td>
     </tr>`;
   }).join('');
 }
@@ -325,27 +323,29 @@ function enterBatch(id) { app.currentBatchId = id; app.view = 'items'; app.searc
 function goHome() { app.view = 'home'; app.currentBatchId = null; render(); }
 window.enterBatch = enterBatch; window.openDetail = openDetail;
 
-// ================= 核心调度引擎 =================
+// ================= 调度引擎 =================
 async function startBatch(id) {
   const b = app.batches.find(x => x.id === id);
   if (!b || b.runStatus === 'running') return;
-  b.runStatus = 'running'; await saveData(); render(); startBatchLoop(id);
+  b.runStatus = 'running'; await saveData(); render(); runPipeline(id);
 }
 window.startBatch = startBatch;
+
 async function pauseBatch(id) {
   const b = app.batches.find(x => x.id === id);
   if (!b || b.runStatus === 'paused') return;
   b.runStatus = 'paused'; render(); toast('已暂停'); await saveData();
 }
 window.pauseBatch = pauseBatch;
+
 async function resumeBatch(id) {
   const b = app.batches.find(x => x.id === id);
   if (!b || b.runStatus === 'running') return;
-  b.runStatus = 'running'; await saveData(); render(); startBatchLoop(id);
+  b.runStatus = 'running'; await saveData(); render(); runPipeline(id);
 }
 window.resumeBatch = resumeBatch;
 
-async function startBatchLoop(batchId) {
+async function runPipeline(batchId) {
   if (app.isLoopRunning) return;
   app.isLoopRunning = true;
 
@@ -355,31 +355,36 @@ async function startBatchLoop(batchId) {
       const b = app.batches.find(x => x.id === batchId);
       if (!b || b.runStatus !== 'running') { app.isLoopRunning = false; return; }
 
-      // --- 阶段 1：处理采集 (只拉结果，或者拉不到再提交) ---
+      // 1. 采集
       const toCollect = b.items.filter(i => i.collectStatus === 'pending' || (i.collectStatus === 'error' && (i.retryCount || 0) < 3));
-      
       if (toCollect.length > 0) {
-        // 如果存在上一次未完成的任务，优先接管
         if (b.externalBatchId) {
-           await pollAndFetchResults(batchId, b.externalBatchId, toCollect);
+           await syncCollectionResult(batchId, b.externalBatchId);
         } else {
-           await submitAndPollCollection(batchId, toCollect);
+           await submitCollectionTask(batchId, toCollect);
         }
         continue;
       }
 
-      // --- 阶段 2：审核 ---
+      // 2. 审核
       const toAudit = b.items.find(i => i.collectStatus === 'collected' && i.reviewStatus === 'pending');
       if (toAudit) {
         await doSingleAudit(batchId, toAudit.itemId);
         continue;
       }
 
-      // --- 阶段 3：完成 ---
+      // 3. 自动清理文案（针对通过的商品）
+      const toClean = b.items.find(i => i.reviewStatus === 'passed' && i.copyStatus === 'pending');
+      if (toClean) {
+        await autoCleanCopy(batchId, toClean.itemId);
+        continue;
+      }
+
+      // 4. 完成
       b.runStatus = 'completed'; 
       await saveData(); 
       render(); 
-      toast('本批次自动处理完毕');
+      toast('当前批次处理完毕');
       app.isLoopRunning = false; 
       return;
     }
@@ -389,17 +394,16 @@ async function startBatchLoop(batchId) {
   }
 }
 
-// 提交并轮询采集结果
-async function submitAndPollCollection(batchId, itemsToCollect) {
+// ================= 采集逻辑 =================
+async function submitCollectionTask(batchId, itemsToCollect) {
   const b = app.batches.find(x => x.id === batchId);
-  
   itemsToCollect.forEach(i => { i.collectStatus = 'collecting'; i.reason = '正在提交...'; });
   await saveData();
 
   try {
     const asins = itemsToCollect.map(i => i.asin);
     const batchName = `wb_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-    b.externalBatchId = batchName; // 存入云端，防止刷新丢失
+    b.externalBatchId = batchName;
     await saveData();
 
     const res = await fetchWithTimeout(`${WORKER_URL}/api/batches`, {
@@ -407,99 +411,81 @@ async function submitAndPollCollection(batchId, itemsToCollect) {
       body: JSON.stringify({ asins, batch_name: batchName })
     }, { timeout: 20000 });
     
-    if (!res.ok) throw new Error('提交采集失败，请稍后重试');
-
-    // 提交成功，开始拉取结果
-    await pollAndFetchResults(batchId, batchName, itemsToCollect);
+    if (!res.ok) throw new Error('提交采集失败');
+    await syncCollectionResult(batchId, batchName);
 
   } catch (e) {
-    itemsToCollect.forEach(i => { i.collectStatus = 'error'; i.reason = e.message; });
+    itemsToCollect.forEach(i => { 
+      i.collectStatus = 'error'; 
+      i.reason = e.message; 
+      i.retryCount = (i.retryCount || 0) + 1; 
+    });
     b.externalBatchId = null;
     await saveData();
   }
 }
 
-// 轮询并强制拉取结果（已提取任务ID时直接调用此函数）
-async function pollAndFetchResults(batchId, externalBatchId, itemsToCollect) {
+async function syncCollectionResult(batchId, externalBatchId) {
   const b = app.batches.find(x => x.id === batchId);
-  itemsToCollect.forEach(i => { i.collectStatus = 'collecting'; i.reason = '正在获取数据...'; });
-  await saveData();
-
+  let itemsToCollect = b.items.filter(i => i.collectStatus === 'collecting' || (i.collectStatus === 'error' && (i.retryCount || 0) < 3));
+  
   let isCompleted = false, poll = 0; 
-  // 最多等 60 秒 (30次 * 2s)
   while (!isCompleted && poll < 30) {
     await new Promise(r => setTimeout(r, 2000));
-    
-    const curB = app.batches.find(x => x.id === batchId);
-    if (curB.runStatus === 'paused') {
-       itemsToCollect.forEach(i => { i.collectStatus = 'pending'; i.reason = '已暂停'; });
-       b.externalBatchId = null;
-       await saveData();
-       return;
-    }
+    if (app.batches.find(x => x.id === batchId).runStatus === 'paused') return;
     
     poll++;
     try {
-      // 直接强行拉取结果（不依赖状态）
       const rRes = await fetchWithTimeout(`${WORKER_URL}/api/results?batch_id=${externalBatchId}&limit=100`, { headers: { 'X-Workbench-Token': TOKEN } }, { timeout: 10000 });
       if (rRes.ok) {
         const rData = await rRes.json();
         let arr = Array.isArray(rData) ? rData : (rData.data || rData.records || rData.results || []);
         
-        let foundCount = 0;
+        let found = 0;
         itemsToCollect.forEach(item => {
           const match = arr.find(r => JSON.stringify(r).includes(item.asin));
           if (match) {
             item.collected = normalizeCollectedData(match);
             item.collectStatus = 'collected'; 
             item.reason = '采集成功';
-            foundCount++;
+            found++;
           }
         });
 
-        if (foundCount === itemsToCollect.length) {
-           isCompleted = true; 
-           b.externalBatchId = null; // 采集全部完成，清除批次任务ID
-           break;
+        if (found === itemsToCollect.length) {
+           isCompleted = true; b.externalBatchId = null; break;
         } else {
-           itemsToCollect.forEach(item => {
-              if (item.collectStatus === 'collecting') item.reason = `采集中 (${poll*2}s)...`;
-           });
+           itemsToCollect.forEach(i => { if (i.collectStatus === 'collecting') i.reason = `采集中(${poll*2}s)`; });
            if(app.view === 'items' && app.currentBatchId === batchId) renderItems();
         }
       }
-    } catch (err) { console.warn('拉取失败', err); }
+    } catch (err) {}
   }
 
   if (!isCompleted) {
     itemsToCollect.forEach(i => { 
       if (i.collectStatus === 'collecting') {
         i.collectStatus = 'error'; 
-        i.reason = '采集超时未拉取到数据'; 
+        i.reason = '同步结果超时'; 
         i.retryCount = (i.retryCount || 0) + 1;
       }
     });
-    b.externalBatchId = null; // 超时，强制丢弃旧任务，允许下次重试
+    b.externalBatchId = null;
   }
-  
   await saveData();
 }
 
-// ================= 单条审核逻辑 =================
+// ================= 审核逻辑 =================
 async function doSingleAudit(batchId, itemId) {
   const b = app.batches.find(x => x.id === batchId);
   const item = b.items.find(x => x.itemId === itemId);
   const f = item.collected || {};
   
   if (!(f.title && f.title.length > 3) && !(f.description && f.description.length > 5)) {
-    item.reviewStatus = 'skipped'; 
-    item.reason = '资料不足'; 
-    await saveData(); 
-    return;
+    item.reviewStatus = 'skipped'; item.reason = '资料不足'; await saveData(); return;
   }
 
-  item.reviewStatus = 'auditing'; 
-  item.reason = '请求 AI 审核...';
+  item.reviewStatus = 'auditing'; item.reason = 'AI 审核中...';
   if (!await saveData()) return;
 
   try {
@@ -510,19 +496,14 @@ async function doSingleAudit(batchId, itemId) {
     }, { timeout: 90000 });
 
     const data = await res.json();
-    
-    if (app.batches.find(x => x.id === batchId).runStatus === 'paused') {
-      throw new Error('用户已暂停');
-    }
+    if (app.batches.find(x => x.id === batchId).runStatus === 'paused') throw new Error('用户已暂停');
 
-    if (data.error) { 
-      item.reviewStatus = 'error'; 
-      item.reason = data.detail; 
-    } else if (data.success && data.audit) {
+    if (data.error) { item.reviewStatus = 'error'; item.reason = data.detail; }
+    else if (data.success && data.audit) {
       item.audit = data.audit;
       item.reviewStatus = data.audit.decision;
       item.reason = data.audit.reason;
-      if (item.reviewStatus === 'passed') item.copyStatus = 'pending';
+      if (item.reviewStatus === 'passed') item.copyStatus = 'pending'; // 进入清理队列
     }
   } catch (e) {
     item.reviewStatus = e.message === '用户已暂停' ? 'pending' : 'error';
@@ -531,7 +512,36 @@ async function doSingleAudit(batchId, itemId) {
   await saveData();
 }
 
-// ================= 详情页与人工处理 =================
+// ================= 文案本地清理逻辑 =================
+async function autoCleanCopy(batchId, itemId) {
+  const b = app.batches.find(x => x.id === batchId);
+  const item = b.items.find(x => x.itemId === itemId);
+  const f = item.collected || {};
+  
+  // 简单正则：去掉 Amazon, Prime 和当前品牌词
+  const brand = f.brand || '';
+  const clean = (str) => {
+    if (!str) return '';
+    let s = String(str);
+    if (brand) {
+      const regex = new RegExp(brand, 'gi');
+      s = s.replace(regex, '');
+    }
+    s = s.replace(/Amazon|Prime/gi, '');
+    return s.replace(/\s+/g, ' ').trim();
+  };
+
+  item.copyData = {
+    title: clean(f.title),
+    bullets: clean(f.bullets),
+    description: clean(f.description)
+  };
+  
+  item.copyStatus = 'completed';
+  await saveData();
+}
+
+// ================= 详情页与操作 =================
 function openDetail(itemId) {
   app.detailItemId = itemId;
   const b = app.batches.find(x => x.id === app.currentBatchId);
@@ -548,7 +558,7 @@ function openDetail(itemId) {
   $('dtStatus').className = `badge ${rCls}`;
 
   const a = item.audit || {};
-  let html = `<div class="detail-grid"><div><div class="section-box"><h4>原始资料（采集所得）</h4>
+  let html = `<div class="detail-grid"><div><div class="section-box"><h4>原始资料</h4>
     <div class="field"><div class="label">标题</div><div class="text">${esc(item.collected?.title || '未采集')}</div></div>
     <div class="field"><div class="label">五点</div><div class="text">${esc(item.collected?.bullets || '未采集')}</div></div>
   </div></div><div>`;
@@ -565,23 +575,15 @@ function openDetail(itemId) {
 
   if (item.reviewStatus === 'verify') {
     html += `<div class="section-box" style="background:#fffbf2">
-      <h4>人工核验操作</h4>
-      <div class="form-group"><label>核验依据（必填）</label><textarea id="dtReviewReason" rows="2"></textarea></div>
-      <button class="primary" onclick="saveDetailVerify('passed')" style="margin-right:10px">确认通过</button>
-      <button class="danger" onclick="saveDetailVerify('excluded')">排除商品</button>
+      <h4>人工核验</h4>
+      <div class="form-group"><label>依据（必填）</label><textarea id="dtReviewReason" rows="2"></textarea></div>
+      <button class="primary" onclick="saveDetailVerify('passed')">确认通过</button>
+      <button class="danger" onclick="saveDetailVerify('excluded')">排除</button>
     </div>`;
   }
 
-  if (item.reviewStatus === 'passed' && item.copyStatus !== 'completed') {
-    html += `<div class="section-box" style="background:#e7f4ec">
-      <h4>文案清理（暂未接入 AI）</h4>
-      <p class="muted" style="font-size:12px;margin-bottom:10px">请人工确认清理后的标题、五点（删去平台词）。</p>
-      <div class="form-group"><label>清理后标题</label><input type="text" id="dtCopyTitle" value="${esc(item.collected?.title || '')}"></div>
-      <div class="form-group"><label>清理后五点</label><textarea id="dtCopyBullets" rows="3">${esc(item.collected?.bullets || '')}</textarea></div>
-      <button class="primary" onclick="saveDetailCopy('${item.itemId}')">确认文案并允许导出</button>
-    </div>`;
-  } else if (item.copyStatus === 'completed') {
-    html += `<div class="section-box" style="background:#e7f4ec"><h4>文案已确认，可导出。</h4></div>`;
+  if (item.copyStatus === 'completed') {
+    html += `<div class="section-box" style="background:#e7f4ec"><h4>已自动清理，可导出</h4><p>标题: ${esc(item.copyData?.title)}</p></div>`;
   }
 
   html += `</div></div>`;
@@ -604,21 +606,9 @@ async function saveDetailVerify(decision) {
 }
 window.saveDetailVerify = saveDetailVerify;
 
-async function saveDetailCopy(itemId) {
-  const b = app.batches.find(x => x.id === app.currentBatchId);
-  const item = b.items.find(x => x.itemId === itemId);
-  item.copyStatus = 'completed';
-  item.copyData = {
-    title: $('dtCopyTitle').value.trim(),
-    bullets: $('dtCopyBullets').value.trim()
-  };
-  if (await saveData()) { toast('文案已确认，可导出'); renderItems(); openDetail(item.itemId); }
-}
-window.saveDetailCopy = saveDetailCopy;
-
 // ================= 导出与导入 =================
-function doExport() {
-  const b = app.batches.find(x => x.id === app.currentBatchId) || app.batches[0];
+$('exportBatchBtn').onclick = () => {
+  const b = app.batches.find(x => x.id === app.currentBatchId);
   if (!b) return toast('无批次可导出');
   const items = b.items.filter(i => i.reviewStatus === 'passed' && i.copyStatus === 'completed');
   if (!items.length) return toast('没有已通过且文案完成的商品');
@@ -635,7 +625,7 @@ function doExport() {
     if (exportPrefs.link) row.push(`https://www.amazon.com/dp/${i.asin}`);
     if (exportPrefs.title) row.push(i.copyData?.title || i.collected?.title || '');
     if (exportPrefs.bullets) row.push(i.copyData?.bullets || i.collected?.bullets || '');
-    if (exportPrefs.desc) row.push(i.collected?.description || '');
+    if (exportPrefs.desc) row.push(i.copyData?.description || i.collected?.description || '');
     rows.push(row);
   });
 
@@ -644,8 +634,7 @@ function doExport() {
   XLSX.utils.book_append_sheet(wb, ws, "通过商品");
   XLSX.writeFile(wb, `批次导出_${b.name}.xlsx`);
   toast('已生成 Excel 下载');
-}
-$('exportBatchBtn').onclick = doExport;
+};
 
 $('importBtn').onclick = () => { $('inputBatchName').value = ''; $('skuInput').value = ''; $('goodsFile').value = ''; $('importError').textContent = ''; $('importSummary').innerHTML = '待导入数量：0 个'; $('importDialog').showModal(); };
 $('goodsFile').onchange = async (e) => {
@@ -665,11 +654,17 @@ $('btnConfirmImport').onclick = async () => {
   if (!allAsins.length) return $('importError').textContent = '无有效SKU';
   const bName = $('inputBatchName').value.trim() || '批次_' + new Date().toLocaleDateString().replace(/\//g,'');
   const items = allAsins.map(a => ({ itemId: 'itm_' + Math.random().toString(36).slice(2, 9), asin: a, collectStatus: 'pending', reviewStatus: 'pending', copyStatus: 'pending', reason: '等待处理' }));
-  app.batches.push({ id: 'b_' + Date.now(), name: bName, createdAt: new Date().toISOString(), runStatus: 'idle', items });
+  const newB = { id: 'b_' + Date.now(), name: bName, createdAt: new Date().toISOString(), runStatus: 'running', items };
+  app.batches.push(newB);
   $('btnConfirmImport').disabled = true;
   const ok = await saveData();
   $('btnConfirmImport').disabled = false;
-  if (ok) { $('importDialog').close(); renderHome(); window._fileAsins = []; }
+  if (ok) { 
+    $('importDialog').close(); 
+    window._fileAsins = []; 
+    renderHome();
+    runPipeline(newB.id);
+  }
 };
 
 $('btnBatchRetry').onclick = async () => {
@@ -681,9 +676,9 @@ $('btnBatchRetry').onclick = async () => {
     if (i.reviewStatus === 'error') { i.reviewStatus = 'pending'; count++; }
   });
   if (count > 0) {
-    b.externalBatchId = null; // 重置任务ID
-    b.runStatus = 'running'; await saveData(); renderItems(); toast(`开始重试 ${count} 个任务`); startBatchLoop(b.id);
-  } else { toast('没有可重试的失败任务（或已达最大重试次数）。'); }
+    b.externalBatchId = null; 
+    b.runStatus = 'running'; await saveData(); renderItems(); toast(`开始重试 ${count} 个任务`); runPipeline(b.id);
+  } else { toast('没有可重试的失败任务'); }
 };
 
 $('backHomeBtn').onclick = goHome;
