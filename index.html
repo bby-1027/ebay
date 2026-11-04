@@ -210,22 +210,18 @@ async function init() {
   
   await fetchData();
   
-  // 【关键拦截】：刷新页面时，强制把所有 running 的批次转为 paused，绝不自动跑
+  // 页面加载时，把处于半残状态的强制转为 paused
   let changed = false;
   app.batches.forEach(b => {
     if (b.runStatus === 'running') {
       b.runStatus = 'paused';
-      b.items.forEach(i => {
-        if (i.collectStatus === 'collecting') { i.collectStatus = 'pending'; i.reason = '已暂停'; }
-        if (i.reviewStatus === 'auditing') { i.reviewStatus = 'pending'; i.reason = '已暂停'; }
-      });
       changed = true;
     }
   });
   if (changed) {
     await saveData();
     render();
-    toast('已拦截中断的任务，请手动点击继续。');
+    toast('拦截到未完成的运行任务，请手动点击继续。');
   }
 }
 
@@ -335,7 +331,18 @@ window.enterBatch = enterBatch; window.openDetail = openDetail;
 async function startBatch(id) {
   const b = app.batches.find(x => x.id === id);
   if (!b || b.runStatus === 'running') return;
-  b.runStatus = 'running'; await saveData(); render(); runPipeline(id);
+  
+  // 【核心修复】启动前，强制把一切卡在中间状态的任务全部重置！
+  b.items.forEach(i => {
+    if (i.collectStatus === 'collecting') { i.collectStatus = 'pending'; i.reason = '重置待采'; }
+    if (i.reviewStatus === 'auditing') { i.reviewStatus = 'pending'; i.reason = '重置待审'; }
+  });
+  b.externalBatchId = null;
+
+  b.runStatus = 'running'; 
+  await saveData(); 
+  render(); 
+  runPipeline(id);
 }
 window.startBatch = startBatch;
 
@@ -349,7 +356,17 @@ window.pauseBatch = pauseBatch;
 async function resumeBatch(id) {
   const b = app.batches.find(x => x.id === id);
   if (!b || b.runStatus === 'running') return;
-  b.runStatus = 'running'; await saveData(); render(); runPipeline(id);
+
+  // 【核心修复】继续前，同样强制重置卡死状态
+  b.items.forEach(i => {
+    if (i.collectStatus === 'collecting') { i.collectStatus = 'pending'; i.reason = '重置待采'; }
+    if (i.reviewStatus === 'auditing') { i.reviewStatus = 'pending'; i.reason = '重置待审'; }
+  });
+
+  b.runStatus = 'running'; 
+  await saveData(); 
+  render(); 
+  runPipeline(id);
 }
 window.resumeBatch = resumeBatch;
 
@@ -404,7 +421,7 @@ async function runPipeline(batchId) {
   }
 }
 
-// ================= 采集逻辑（修复提取与防重） =================
+// ================= 采集逻辑 =================
 async function submitCollectionTask(batchId, itemsToCollect) {
   const b = app.batches.find(x => x.id === batchId);
   itemsToCollect.forEach(i => { i.collectStatus = 'collecting'; i.reason = '正在提交...'; });
@@ -414,6 +431,7 @@ async function submitCollectionTask(batchId, itemsToCollect) {
     const asins = itemsToCollect.map(i => i.asin);
     const batchName = `wb_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     
+    // 发起真实的 POST 请求
     const res = await fetchWithTimeout(`${WORKER_URL}/api/batches`, {
       method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Workbench-Token': TOKEN },
       body: JSON.stringify({ asins, batch_name: batchName })
@@ -421,7 +439,7 @@ async function submitCollectionTask(batchId, itemsToCollect) {
     
     if (!res.ok) throw new Error('提交采集失败，状态码: ' + res.status);
 
-    // 【彻底挖取真实 ID】
+    // 穷尽所有可能的字段，尝试提取真实的数字 ID
     const sData = await res.json().catch(()=>({}));
     const extractedId = sData.id || sData.batch_id || sData.batchId || sData.data?.id || sData.data?.batch_id || sData.detail?.batch_id || sData.detail?.id;
     b.externalBatchId = extractedId ? String(extractedId) : batchName; 
@@ -443,7 +461,6 @@ async function syncCollectionResult(batchId, externalBatchId) {
   if (itemsToCollect.length === 0) return; 
   
   let isCompleted = false, poll = 0; 
-  // 最多等 90 秒 (45次 * 2s)
   while (!isCompleted && poll < 45) {
     await new Promise(r => setTimeout(r, 2000));
     
@@ -475,19 +492,14 @@ async function syncCollectionResult(batchId, externalBatchId) {
 
         if (found === itemsToCollect.length) {
            isCompleted = true; 
-           b.externalBatchId = null; // 成功，清除任务ID
+           b.externalBatchId = null;
            break;
         } else {
            itemsToCollect.forEach(i => { if (i.collectStatus === 'collecting') i.reason = `采集中(已等${poll*2}s)...`; });
            if(app.view === 'items' && app.currentBatchId === batchId) renderItems();
         }
-      } else if (rRes.status === 404) {
-         itemsToCollect.forEach(i => { if (i.collectStatus === 'collecting') i.reason = `等待任务初始化(${poll*2}s)...`; });
-         if(app.view === 'items' && app.currentBatchId === batchId) renderItems();
       }
-    } catch (err) {
-      console.warn('拉取结果单次异常，继续重试', err);
-    }
+    } catch (err) {}
   }
 
   if (!isCompleted) {
@@ -498,7 +510,7 @@ async function syncCollectionResult(batchId, externalBatchId) {
         i.retryCount = (i.retryCount || 0) + 1;
       }
     });
-    b.externalBatchId = null; // 超时立刻清空ID，阻止后台无脑重试
+    b.externalBatchId = null; 
   }
   await saveData();
 }
