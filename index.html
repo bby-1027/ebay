@@ -532,19 +532,46 @@ async function triggerAudit(itemId) {
   const item = batch.items.find(i => i.itemId === itemId); 
   if (!item) return;
 
-  // 保存当前快照
-  const snapshotStr = JSON.stringify(item.collected || {});
+  // === 1. 资料前置多维验收 ===
+  const f = item.collected || {};
+  const title = (f.title || '').trim();
+  const desc = (f.description || '').trim();
+  const bullets = (f.bullets || '').trim();
+  
+  let hasValidAttrs = false;
+  if (f._raw) {
+    const keys = Object.keys(f._raw);
+    hasValidAttrs = keys.some(k => 
+      !k.toLowerCase().includes('image') && 
+      !k.toLowerCase().includes('url') && 
+      typeof f._raw[k] === 'string' && f._raw[k].trim().length > 3
+    );
+  }
 
-  // 如果已有审核结果，先将旧记录 push 到 history
+  // 规则：必须有实质性文本（标题+描述/五点），或者标题+有效属性
+  const isDataSufficient = (title.length > 3 && (desc.length > 5 || bullets.length > 5)) || (title.length > 3 && hasValidAttrs);
+
+  if (!isDataSufficient) {
+    // 直接标记为筛除，不发起 AI 请求
+    item.reviewStatus = 'excluded'; 
+    item.reason = '资料不足，未进行AI审核';
+    item.audit = { decision: 'excluded', reason: item.reason, is_data_skip: true };
+    item.history.push({ time: new Date().toISOString(), action: '前置筛除', detail: '资料缺失' });
+    
+    await saveData(); // 持久化保存
+    renderItems(); 
+    openDetail(itemId);
+    toast('资料不足，已跳过 AI 审核并保存。');
+    return;
+  }
+
+  // === 2. 正常发起 AI 审核 ===
+  const snapshotStr = JSON.stringify(item.collected || {});
   if (item.audit && item.reviewStatus !== 'pending') {
     item.history.push({
       time: new Date().toISOString(),
       action: '覆盖旧审核记录',
-      detail: JSON.stringify({
-         old_decision: item.reviewStatus,
-         old_reason: item.reason,
-         old_audit: item.audit
-      })
+      detail: JSON.stringify({ old_decision: item.reviewStatus, old_reason: item.reason })
     });
   }
 
@@ -566,7 +593,6 @@ async function triggerAudit(itemId) {
     });
     const data = await res.json();
     
-    // 取最新对象进行比对，防止审核期间资料被修改
     const currentItem = app.batches.find(b => b.id === app.currentBatchId).items.find(i => i.itemId === itemId);
     if (JSON.stringify(currentItem.collected || {}) !== snapshotStr) { 
       toast('商品资料在审核期间已变更，本次审核结果作废，请重新审核。'); 
