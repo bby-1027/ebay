@@ -174,7 +174,6 @@ function normalizeCollectedData(raw) {
   };
 }
 
-// 【关键修复】：拉取数据不再带有强制阻断逻辑，纯粹拉取
 async function fetchData(silent = false) {
   try {
     const res = await fetchWithTimeout(`${WORKER_URL}/api/data`, { headers: { 'X-Workbench-Token': TOKEN } });
@@ -211,7 +210,7 @@ async function init() {
   
   await fetchData();
   
-  // 【只在这里执行一次拦截】：页面加载时，如果发现有 running 状态的批次，强制转为 paused
+  // 【关键拦截】：刷新页面时，强制把所有 running 的批次转为 paused，绝不自动跑
   let changed = false;
   app.batches.forEach(b => {
     if (b.runStatus === 'running') {
@@ -226,11 +225,9 @@ async function init() {
   if (changed) {
     await saveData();
     render();
-    toast('已自动拦截上次未完成的运行任务，请确认后手动点击继续。');
+    toast('已拦截中断的任务，请手动点击继续。');
   }
 }
-
-// ================= 渲染 =================
 
 function renderHome() {
   $('homeView').classList.remove('hidden');
@@ -362,7 +359,7 @@ async function runPipeline(batchId) {
 
   try {
     while (true) {
-      await fetchData(true); // 此时 fetchData 是纯拉取，不会再乱改状态了
+      await fetchData(true); 
       const b = app.batches.find(x => x.id === batchId);
       if (!b || b.runStatus !== 'running') { app.isLoopRunning = false; return; }
 
@@ -407,7 +404,7 @@ async function runPipeline(batchId) {
   }
 }
 
-// ================= 采集逻辑 =================
+// ================= 采集逻辑（修复提取与防重） =================
 async function submitCollectionTask(batchId, itemsToCollect) {
   const b = app.batches.find(x => x.id === batchId);
   itemsToCollect.forEach(i => { i.collectStatus = 'collecting'; i.reason = '正在提交...'; });
@@ -416,17 +413,22 @@ async function submitCollectionTask(batchId, itemsToCollect) {
   try {
     const asins = itemsToCollect.map(i => i.asin);
     const batchName = `wb_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-    b.externalBatchId = batchName;
-    await saveData();
-
+    
     const res = await fetchWithTimeout(`${WORKER_URL}/api/batches`, {
       method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Workbench-Token': TOKEN },
       body: JSON.stringify({ asins, batch_name: batchName })
     }, { timeout: 20000 });
     
-    if (!res.ok) throw new Error('提交采集失败');
+    if (!res.ok) throw new Error('提交采集失败，状态码: ' + res.status);
 
-    await syncCollectionResult(batchId, batchName);
+    // 【彻底挖取真实 ID】
+    const sData = await res.json().catch(()=>({}));
+    const extractedId = sData.id || sData.batch_id || sData.batchId || sData.data?.id || sData.data?.batch_id || sData.detail?.batch_id || sData.detail?.id;
+    b.externalBatchId = extractedId ? String(extractedId) : batchName; 
+    await saveData();
+
+    // 开始拉取结果
+    await syncCollectionResult(batchId, b.externalBatchId);
 
   } catch (e) {
     itemsToCollect.forEach(i => { i.collectStatus = 'error'; i.reason = e.message; i.retryCount = (i.retryCount || 0) + 1; });
@@ -437,10 +439,12 @@ async function submitCollectionTask(batchId, itemsToCollect) {
 
 async function syncCollectionResult(batchId, externalBatchId) {
   const b = app.batches.find(x => x.id === batchId);
-  let itemsToCollect = b.items.filter(i => i.collectStatus === 'collecting' || (i.collectStatus === 'error' && (i.retryCount || 0) < 3));
+  let itemsToCollect = b.items.filter(i => i.collectStatus === 'collecting');
+  if (itemsToCollect.length === 0) return; 
   
   let isCompleted = false, poll = 0; 
-  while (!isCompleted && poll < 60) { // 最多等 120 秒
+  // 最多等 90 秒 (45次 * 2s)
+  while (!isCompleted && poll < 45) {
     await new Promise(r => setTimeout(r, 2000));
     
     const curB = app.batches.find(x => x.id === batchId);
@@ -452,10 +456,11 @@ async function syncCollectionResult(batchId, externalBatchId) {
     
     poll++;
     try {
-      const rRes = await fetchWithTimeout(`${WORKER_URL}/api/results?batch_id=${externalBatchId}&limit=100`, { headers: { 'X-Workbench-Token': TOKEN } }, { timeout: 15000 });
+      const rRes = await fetchWithTimeout(`${WORKER_URL}/api/results?batch_id=${externalBatchId}&limit=1000`, { headers: { 'X-Workbench-Token': TOKEN } }, { timeout: 15000 });
+      
       if (rRes.ok) {
         const rData = await rRes.json();
-        let arr = Array.isArray(rData) ? rData : (rData.data || rData.records || rData.results || []);
+        let arr = Array.isArray(rData) ? rData : (rData.data || rData.records || rData.results || rData.items || []);
         
         let found = 0;
         itemsToCollect.forEach(item => {
@@ -469,24 +474,31 @@ async function syncCollectionResult(batchId, externalBatchId) {
         });
 
         if (found === itemsToCollect.length) {
-           isCompleted = true; b.externalBatchId = null; break;
+           isCompleted = true; 
+           b.externalBatchId = null; // 成功，清除任务ID
+           break;
         } else {
-           itemsToCollect.forEach(i => { if (i.collectStatus === 'collecting') i.reason = `采集中(${poll*2}s)`; });
+           itemsToCollect.forEach(i => { if (i.collectStatus === 'collecting') i.reason = `采集中(已等${poll*2}s)...`; });
            if(app.view === 'items' && app.currentBatchId === batchId) renderItems();
         }
+      } else if (rRes.status === 404) {
+         itemsToCollect.forEach(i => { if (i.collectStatus === 'collecting') i.reason = `等待任务初始化(${poll*2}s)...`; });
+         if(app.view === 'items' && app.currentBatchId === batchId) renderItems();
       }
-    } catch (err) {}
+    } catch (err) {
+      console.warn('拉取结果单次异常，继续重试', err);
+    }
   }
 
   if (!isCompleted) {
     itemsToCollect.forEach(i => { 
       if (i.collectStatus === 'collecting') {
         i.collectStatus = 'error'; 
-        i.reason = '同步结果超时(120s)'; 
+        i.reason = '同步结果超时(1.5分钟)'; 
         i.retryCount = (i.retryCount || 0) + 1;
       }
     });
-    b.externalBatchId = null;
+    b.externalBatchId = null; // 超时立刻清空ID，阻止后台无脑重试
   }
   await saveData();
 }
