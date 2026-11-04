@@ -38,7 +38,6 @@ dialog::backdrop{background:#1c332c66}.dialoghead{padding:16px 24px;border-botto
   </div>
 </header>
 <main>
-  <!-- 首页视图 -->
   <div id="homeView">
     <div class="actions" style="justify-content:space-between;margin-bottom:20px">
       <h2>批次列表</h2>
@@ -54,7 +53,6 @@ dialog::backdrop{background:#1c332c66}.dialoghead{padding:16px 24px;border-botto
     </div>
   </div>
 
-  <!-- 明细视图 -->
   <div id="itemsView" class="hidden">
     <div class="actions" style="margin-bottom:20px">
       <button id="backHomeBtn">← 返回批次列表</button>
@@ -89,7 +87,6 @@ dialog::backdrop{background:#1c332c66}.dialoghead{padding:16px 24px;border-botto
   </div>
 </main>
 
-<!-- 导入弹窗 -->
 <dialog id="importDialog">
   <div class="dialoghead"><h3>导入新批次</h3><button class="close" data-close>×</button></div>
   <div class="dialogbody">
@@ -109,7 +106,6 @@ dialog::backdrop{background:#1c332c66}.dialoghead{padding:16px 24px;border-botto
   <div class="dialogfoot"><button data-close>取消</button><button id="btnConfirmImport" class="primary">确认并开始</button></div>
 </dialog>
 
-<!-- 详情弹窗 -->
 <dialog id="detailDialog">
   <div class="dialoghead">
     <div><h3 id="dtTitle" style="margin-bottom:4px">商品详情</h3><span id="dtStatus" class="badge b-gray"></span></div>
@@ -119,7 +115,6 @@ dialog::backdrop{background:#1c332c66}.dialoghead{padding:16px 24px;border-botto
   <div class="dialogfoot" id="dtFooter"></div>
 </dialog>
 
-<!-- 设置弹窗 -->
 <dialog id="settingsDialog" style="width:400px">
   <div class="dialoghead"><h3>设置</h3><button class="close" data-close>×</button></div>
   <div class="dialogbody">
@@ -179,6 +174,7 @@ function normalizeCollectedData(raw) {
   };
 }
 
+// 【关键修复】：拉取数据不再带有强制阻断逻辑，纯粹拉取
 async function fetchData(silent = false) {
   try {
     const res = await fetchWithTimeout(`${WORKER_URL}/api/data`, { headers: { 'X-Workbench-Token': TOKEN } });
@@ -186,21 +182,6 @@ async function fetchData(silent = false) {
     const data = await res.json();
     app.serverVersion = data.version || 0;
     app.batches = data.batches || [];
-    
-    // 【重要修复】刷新页面时，如果发现状态是 running，强制转为 paused，绝不自动运行
-    let changed = false;
-    app.batches.forEach(b => {
-      if (b.runStatus === 'running') {
-        b.runStatus = 'paused';
-        b.items.forEach(i => {
-          if (i.collectStatus === 'collecting') { i.collectStatus = 'pending'; i.reason = '已暂停'; }
-          if (i.reviewStatus === 'auditing') { i.reviewStatus = 'pending'; i.reason = '已暂停'; }
-        });
-        changed = true;
-      }
-    });
-    if (changed) await saveData();
-    
     render();
   } catch (e) { if(!silent) toast(e.message); }
 }
@@ -220,15 +201,36 @@ async function saveData() {
   } catch (e) { toast(e.message); return false; }
 }
 
-function init() {
+async function init() {
   const prefsStr = localStorage.getItem('ebay_export_prefs');
   if (prefsStr) { try { exportPrefs = JSON.parse(prefsStr); } catch (e) {} }
   $('expLink').checked = exportPrefs.link;
   $('expTitle').checked = exportPrefs.title;
   $('expBullets').checked = exportPrefs.bullets;
   $('expDesc').checked = exportPrefs.desc;
-  fetchData();
+  
+  await fetchData();
+  
+  // 【只在这里执行一次拦截】：页面加载时，如果发现有 running 状态的批次，强制转为 paused
+  let changed = false;
+  app.batches.forEach(b => {
+    if (b.runStatus === 'running') {
+      b.runStatus = 'paused';
+      b.items.forEach(i => {
+        if (i.collectStatus === 'collecting') { i.collectStatus = 'pending'; i.reason = '已暂停'; }
+        if (i.reviewStatus === 'auditing') { i.reviewStatus = 'pending'; i.reason = '已暂停'; }
+      });
+      changed = true;
+    }
+  });
+  if (changed) {
+    await saveData();
+    render();
+    toast('已自动拦截上次未完成的运行任务，请确认后手动点击继续。');
+  }
 }
+
+// ================= 渲染 =================
 
 function renderHome() {
   $('homeView').classList.remove('hidden');
@@ -360,7 +362,7 @@ async function runPipeline(batchId) {
 
   try {
     while (true) {
-      await fetchData(true);
+      await fetchData(true); // 此时 fetchData 是纯拉取，不会再乱改状态了
       const b = app.batches.find(x => x.id === batchId);
       if (!b || b.runStatus !== 'running') { app.isLoopRunning = false; return; }
 
@@ -438,7 +440,7 @@ async function syncCollectionResult(batchId, externalBatchId) {
   let itemsToCollect = b.items.filter(i => i.collectStatus === 'collecting' || (i.collectStatus === 'error' && (i.retryCount || 0) < 3));
   
   let isCompleted = false, poll = 0; 
-  while (!isCompleted && poll < 60) { // 放宽到 120 秒
+  while (!isCompleted && poll < 60) { // 最多等 120 秒
     await new Promise(r => setTimeout(r, 2000));
     
     const curB = app.batches.find(x => x.id === batchId);
