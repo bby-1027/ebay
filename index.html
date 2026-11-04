@@ -370,7 +370,7 @@ async function pauseBatch(id) {
   const b = app.batches.find(x => x.id === id);
   if (!b || b.runStatus === 'paused') return;
   b.runStatus = 'paused';
-  render(); // 立即刷新界面，把按钮改成继续
+  render(); 
   toast('批次已暂停，正在停止当前请求...');
   await saveData();
 }
@@ -399,29 +399,24 @@ async function startBatchLoop(batchId) {
         return;
       }
 
-      // 1. 找需要采集的
       const toCollect = b.items.find(i => i.collectStatus === 'pending' || i.collectStatus === 'error');
       if (toCollect) {
         await doCollect(batchId, toCollect.itemId);
         continue;
       }
       
-      // 2. 如果发现有卡在 collecting 或 auditing 的（可能是刷新前的），尝试接管或等待
       const isRunning = b.items.some(i => i.collectStatus === 'collecting' || i.reviewStatus === 'auditing');
       if (isRunning) {
-        // 这里其实是别的窗口在跑，或者系统残留。我们稍等 2 秒重新检查
         await new Promise(r => setTimeout(r, 2000));
         continue;
       }
 
-      // 3. 找需要审核的
       const toAudit = b.items.find(i => i.collectStatus === 'collected' && i.reviewStatus === 'pending');
       if (toAudit) {
         await doAudit(batchId, toAudit.itemId);
         continue;
       }
 
-      // 4. 全部完成
       b.runStatus = 'completed';
       await saveData();
       render();
@@ -435,13 +430,12 @@ async function startBatchLoop(batchId) {
   }
 }
 
-// ================= 执行任务（前置抢锁 + 停止检测） =================
+// ================= 执行任务 =================
 
 async function doCollect(batchId, itemId) {
   const b = app.batches.find(x => x.id === batchId);
   const item = b.items.find(x => x.itemId === itemId);
   
-  // 前置抢占锁
   item.collectStatus = 'collecting';
   item.reason = '正在提交采集任务...';
   const locked = await saveData();
@@ -450,7 +444,7 @@ async function doCollect(batchId, itemId) {
   try {
     const asins = [item.asin];
     const batchName = `wb_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-    item.taskId = batchName; // 保存 taskId，便于恢复
+    item.taskId = batchName;
     await saveData();
 
     const res = await fetch(`${WORKER_URL}/api/batches`, {
@@ -462,31 +456,38 @@ async function doCollect(batchId, itemId) {
     const submitData = await res.json().catch(()=>({}));
     let extractedBatchId = submitData.id || submitData.batch_id || submitData.detail?.id;
 
-    let isCompleted = false; let poll = 0;
-    while (!isCompleted && poll < 150) {
+    let isCompleted = false; let poll = 0; let consecutiveErrors = 0;
+    while (!isCompleted && poll < 60) {
       await new Promise(r => setTimeout(r, 2000));
       
-      // 【核心修复】每次轮询前，检查批次是否被暂停
       const curB = app.batches.find(x => x.id === batchId);
-      if (curB.runStatus === 'paused') {
-         throw new Error('用户已暂停');
-      }
+      if (curB.runStatus === 'paused') throw new Error('用户已暂停');
       
       poll++;
-      const stRes = await fetch(`${WORKER_URL}/api/batches/${batchName}/status`, { headers: { 'X-Workbench-Token': TOKEN } });
-      if (!stRes.ok) continue;
-      const data = await stRes.json();
-      const done = data.done ?? 0; const total = data.total ?? 1;
-      item.reason = `采集进度: ${done}/${total}`;
-      if(app.view === 'items' && app.currentBatchId === batchId) renderItems();
-      
-      if (!extractedBatchId) extractedBatchId = data.id || data.batch_id;
-      const stateStr = String(data.status || '').toLowerCase();
-      if (done >= total || stateStr.includes('complete') || data.is_done) isCompleted = true;
+      try {
+        const stRes = await fetch(`${WORKER_URL}/api/batches/${batchName}/status`, { headers: { 'X-Workbench-Token': TOKEN } });
+        if (!stRes.ok) {
+           consecutiveErrors++;
+           if (consecutiveErrors > 3) throw new Error('查询进度连续失败，已超时');
+           continue;
+        }
+        consecutiveErrors = 0;
+        const data = await stRes.json();
+        const done = data.done ?? 0; const total = data.total ?? 1;
+        item.reason = `采集进度: ${done}/${total}`;
+        if(app.view === 'items' && app.currentBatchId === batchId) renderItems();
+        
+        if (!extractedBatchId) extractedBatchId = data.id || data.batch_id;
+        const stateStr = String(data.status || '').toLowerCase();
+        if (done >= total || stateStr.includes('complete') || stateStr.includes('finish') || data.is_done) isCompleted = true;
+      } catch (err) {
+         if (err.message.includes('已暂停') || err.message.includes('超时')) throw err;
+      }
     }
     if (!isCompleted) throw new Error('采集超时');
 
     const recordsRes = await fetch(`${WORKER_URL}/api/results?batch_id=${extractedBatchId||batchName}&limit=10`, { headers: { 'X-Workbench-Token': TOKEN } });
+    if (!recordsRes.ok) throw new Error('拉取数据失败');
     const recordsData = await recordsRes.json();
     let allRecords = Array.isArray(recordsData) ? recordsData : (recordsData.data || recordsData.records || recordsData.results || []);
     const match = allRecords.find(r => JSON.stringify(r).includes(item.asin));
@@ -495,14 +496,13 @@ async function doCollect(batchId, itemId) {
       item.collected = normalizeCollectedData(match);
       item.collectStatus = 'collected';
       item.reason = '采集成功';
-      item.taskId = null; // 清除任务号
+      item.taskId = null;
     } else {
-      throw new Error('未返回有效数据');
+      throw new Error('采集中断：未返回该 ASIN');
     }
   } catch (e) {
     if (e.message === '用户已暂停') {
       item.reason = '已暂停，等待继续';
-      // 状态保留为 pending，这样点继续后能重新发起
       item.collectStatus = 'pending';
       item.taskId = null; 
     } else {
@@ -547,11 +547,8 @@ async function doAudit(batchId, itemId) {
     });
     const data = await res.json();
     
-    // 检查暂停
     const curB = app.batches.find(x => x.id === batchId);
-    if (curB.runStatus === 'paused') {
-       throw new Error('用户已暂停');
-    }
+    if (curB.runStatus === 'paused') throw new Error('用户已暂停');
 
     if (data.error) {
       item.reviewStatus = 'error';
@@ -574,7 +571,7 @@ async function doAudit(batchId, itemId) {
   await saveData();
 }
 
-// ================= 重试失败项 =================
+// ================= 其他基础代码 =================
 $('btnBatchRetry').onclick = async () => {
   const b = app.batches.find(x => x.id === app.currentBatchId);
   if (!b) return;
@@ -594,7 +591,6 @@ $('btnBatchRetry').onclick = async () => {
   }
 };
 
-// ================= 基础代码 =================
 $('importBtn').onclick = () => { $('inputBatchName').value = ''; $('skuInput').value = ''; $('goodsFile').value = ''; $('importError').textContent = ''; $('importSummary').innerHTML = '待导入数量：0 个'; $('importDialog').showModal(); };
 $('goodsFile').onchange = async (e) => {
   const file = e.target.files[0]; if (!file) return;
