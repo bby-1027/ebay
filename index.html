@@ -152,7 +152,7 @@ let app = {
   searchQuery: '',
   filterStatus: 'all',
   detailItemId: null,
-  isLoopRunning: false // 防止调度重入
+  isLoopRunning: false
 };
 let exportPrefs = { link: true, title: true, bullets: true, desc: true };
 
@@ -212,7 +212,6 @@ async function saveData() {
       body: JSON.stringify(payload)
     });
     if (res.status === 409) {
-      // 发生冲突，说明别的窗口改了数据，静默重新拉取
       await fetchData(true);
       return false;
     }
@@ -232,7 +231,6 @@ function init() {
   $('expDesc').checked = exportPrefs.desc;
   
   fetchData().then(() => {
-    // 检查是否有正在运行的任务，如果有则恢复调度
     const runningBatch = app.batches.find(b => b.runStatus === 'running');
     if (runningBatch) {
       setTimeout(() => startBatchLoop(runningBatch.id), 1000);
@@ -266,8 +264,7 @@ function renderHome() {
     let bStatus = '未开始'; let bCls = 'b-gray';
     let btnAction = `<button class="primary" onclick="startBatch('${b.id}')">开始处理</button>`;
     
-    // 优先使用真实的 runStatus 和 运行状态
-    if (b.runStatus === 'running' || running) {
+    if (b.runStatus === 'running') {
       bStatus = '运行中'; bCls = 'b-run';
       btnAction = `<button class="danger" onclick="pauseBatch('${b.id}')">暂停</button>`;
     } else if (b.runStatus === 'paused') {
@@ -361,7 +358,7 @@ window.enterBatch = enterBatch; window.openDetail = openDetail;
 
 async function startBatch(id) {
   const b = app.batches.find(x => x.id === id);
-  if (!b) return;
+  if (!b || b.runStatus === 'running') return;
   b.runStatus = 'running';
   await saveData();
   render();
@@ -371,17 +368,17 @@ window.startBatch = startBatch;
 
 async function pauseBatch(id) {
   const b = app.batches.find(x => x.id === id);
-  if (!b) return;
+  if (!b || b.runStatus === 'paused') return;
   b.runStatus = 'paused';
+  render(); // 立即刷新界面，把按钮改成继续
+  toast('批次已暂停，正在停止当前请求...');
   await saveData();
-  render();
-  toast('批次已暂停，不会再发起新任务。');
 }
 window.pauseBatch = pauseBatch;
 
 async function resumeBatch(id) {
   const b = app.batches.find(x => x.id === id);
-  if (!b) return;
+  if (!b || b.runStatus === 'running') return;
   b.runStatus = 'running';
   await saveData();
   render();
@@ -395,15 +392,12 @@ async function startBatchLoop(batchId) {
 
   try {
     while (true) {
-      // 每次执行前重新拉取数据，确保状态最新，且检测是否被其他窗口锁定
       await fetchData(true);
       const b = app.batches.find(x => x.id === batchId);
       if (!b || b.runStatus !== 'running') {
         app.isLoopRunning = false;
-        return; // 已暂停或删除
+        return;
       }
-
-      let activeTask = false;
 
       // 1. 找需要采集的
       const toCollect = b.items.find(i => i.collectStatus === 'pending' || i.collectStatus === 'error');
@@ -412,22 +406,22 @@ async function startBatchLoop(batchId) {
         continue;
       }
       
-      // 如果发现有采集中或审核中的任务，说明有任务在跑（可能是别的窗口在跑，或者刷新前留下的），等待即可
+      // 2. 如果发现有卡在 collecting 或 auditing 的（可能是刷新前的），尝试接管或等待
       const isRunning = b.items.some(i => i.collectStatus === 'collecting' || i.reviewStatus === 'auditing');
       if (isRunning) {
-        // 但如果所有任务都在跑，且我们自己没在处理，就等 2 秒后重试，防止死循环
+        // 这里其实是别的窗口在跑，或者系统残留。我们稍等 2 秒重新检查
         await new Promise(r => setTimeout(r, 2000));
         continue;
       }
 
-      // 2. 找需要审核的
+      // 3. 找需要审核的
       const toAudit = b.items.find(i => i.collectStatus === 'collected' && i.reviewStatus === 'pending');
       if (toAudit) {
         await doAudit(batchId, toAudit.itemId);
         continue;
       }
 
-      // 3. 所有任务结束
+      // 4. 全部完成
       b.runStatus = 'completed';
       await saveData();
       render();
@@ -441,7 +435,7 @@ async function startBatchLoop(batchId) {
   }
 }
 
-// ================= 执行任务（前置抢锁） =================
+// ================= 执行任务（前置抢锁 + 停止检测） =================
 
 async function doCollect(batchId, itemId) {
   const b = app.batches.find(x => x.id === batchId);
@@ -451,11 +445,14 @@ async function doCollect(batchId, itemId) {
   item.collectStatus = 'collecting';
   item.reason = '正在提交采集任务...';
   const locked = await saveData();
-  if (!locked) return; // 抢锁失败，别的窗口在处理
+  if (!locked) return; 
 
   try {
     const asins = [item.asin];
     const batchName = `wb_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    item.taskId = batchName; // 保存 taskId，便于恢复
+    await saveData();
+
     const res = await fetch(`${WORKER_URL}/api/batches`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Workbench-Token': TOKEN },
@@ -468,6 +465,13 @@ async function doCollect(batchId, itemId) {
     let isCompleted = false; let poll = 0;
     while (!isCompleted && poll < 150) {
       await new Promise(r => setTimeout(r, 2000));
+      
+      // 【核心修复】每次轮询前，检查批次是否被暂停
+      const curB = app.batches.find(x => x.id === batchId);
+      if (curB.runStatus === 'paused') {
+         throw new Error('用户已暂停');
+      }
+      
       poll++;
       const stRes = await fetch(`${WORKER_URL}/api/batches/${batchName}/status`, { headers: { 'X-Workbench-Token': TOKEN } });
       if (!stRes.ok) continue;
@@ -491,12 +495,20 @@ async function doCollect(batchId, itemId) {
       item.collected = normalizeCollectedData(match);
       item.collectStatus = 'collected';
       item.reason = '采集成功';
+      item.taskId = null; // 清除任务号
     } else {
       throw new Error('未返回有效数据');
     }
   } catch (e) {
-    item.collectStatus = 'error';
-    item.reason = e.message;
+    if (e.message === '用户已暂停') {
+      item.reason = '已暂停，等待继续';
+      // 状态保留为 pending，这样点继续后能重新发起
+      item.collectStatus = 'pending';
+      item.taskId = null; 
+    } else {
+      item.collectStatus = 'error';
+      item.reason = e.message;
+    }
   }
   await saveData();
 }
@@ -535,6 +547,12 @@ async function doAudit(batchId, itemId) {
     });
     const data = await res.json();
     
+    // 检查暂停
+    const curB = app.batches.find(x => x.id === batchId);
+    if (curB.runStatus === 'paused') {
+       throw new Error('用户已暂停');
+    }
+
     if (data.error) {
       item.reviewStatus = 'error';
       item.reason = `AI 接口失败: ${data.detail}`;
@@ -545,8 +563,13 @@ async function doAudit(batchId, itemId) {
       if (item.reviewStatus === 'passed') item.copyStatus = 'pending';
     }
   } catch (e) {
-    item.reviewStatus = 'error';
-    item.reason = '网络错误: ' + e.message;
+    if (e.message === '用户已暂停') {
+      item.reason = '已暂停，等待继续';
+      item.reviewStatus = 'pending';
+    } else {
+      item.reviewStatus = 'error';
+      item.reason = '网络错误: ' + e.message;
+    }
   }
   await saveData();
 }
