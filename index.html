@@ -61,6 +61,7 @@ dialog[open]{display:flex;flex-direction:column;width:760px;overflow:hidden}dial
 .policy-reference{padding:12px 0;border-top:1px solid var(--line);font-size:13px;line-height:1.7}
 .policy-title{font-weight:600}.policy-title a{font-size:12px;font-weight:400;margin-left:8px}
 .policy-reference p{margin:8px 0;white-space:pre-wrap;overflow-wrap:anywhere}
+.audit-check .field{margin:8px 0}.audit-check .text{white-space:pre-wrap;overflow-wrap:anywhere}
 .policy-reference small,.audit-version{font-size:11px;color:var(--muted)}
 .policy-explanation{color:#38534a}.check-tags{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0}
 .check-tag{font-size:11px;padding:4px 7px;border-radius:4px;background:#edf5f0;color:#23664f}.check-attention{background:#fff3df;color:#8b561c}
@@ -692,11 +693,24 @@ function renderSellerReview(i){
 }
 function renderAuditBasis(i){
  const a=i.audit||{},refs=Array.isArray(a.policy_references)?a.policy_references:[],sent=a._sent_policy_titles||[];
- const checks=(a.review_checks||[]).map(c=>`<span class="check-tag ${['blocked','needs_verification','unresolved_risk','not_checked'].includes(c.status)?'check-attention':''}" title="${esc(c.reason)}">${esc(({prohibited:'禁限售',safety:'安全',ip:'知识产权',conditions:'销售条件',consistency:'资料一致性'})[c.area]||c.area)}：${esc(({clear:'已检查',not_applicable:'不适用',blocked:'阻断',needs_verification:'待核验',unresolved_risk:'风险未解',not_checked:'未完成'})[c.status]||c.status)}</span>`).join('');
+ const review=Array.isArray(a.review_checks)?a.review_checks:[];
+ const facts=Array.isArray(a.review_evidence)?a.review_evidence:Array.isArray(a.evidence)?a.evidence:[];
+ const labels={prohibited:'禁售与限售',safety:'安全与特殊用途',ip:'知识产权与仿冒',conditions:'必要销售条件',consistency:'资料一致性'};
+ const statuses={clear:'已检查',not_applicable:'不适用',blocked:'阻断',needs_verification:'待核验',unresolved_risk:'风险未解',not_checked:'未完成'};
+ const sourceLink=r=>r.source&&/^https:\/\/[^/]*ebay\.[^/]+\//i.test(r.source)?` <a href="${esc(r.source)}" target="_blank" rel="noopener">eBay 官方页面 ↗</a>`:'';
+ const checkDetails=review.map(c=>{
+  const linked=refs.filter(r=>c.clause_ids?.includes(r.clause_id));
+  const evidence=facts.filter(f=>c.fact_ids?.includes(f.fact_id));
+  const quotes=evidence.map(f=>`${({title:'标题',bullets:'五点',description:'长描述',brand:'品牌',category:'类目'})[f.field]||f.field}：${f.quote}`).join('\n\n');
+  const policies=linked.map(r=>`<li>${esc(r.title||r.rule_id)} <small>${esc(r.rule_id)}${r.clause_no?` · 第 ${esc(r.clause_no)} 条`:''}</small>${sourceLink(r)}</li>`).join('');
+  const policyNote=c.policy_basis==='no_match'?'本次未发现适用限制。':c.policy_basis==='product_or_business'?'依据商品事实或经营标准，见本项判断。':'这项记录未关联到可展示的条款。';
+  const alert=['blocked','needs_verification','unresolved_risk','not_checked'].includes(c.status)?'check-attention':'';
+  return `<article class="policy-reference audit-check"><div class="policy-title">${esc(c.label||labels[c.area]||c.area)} <span class="check-tag ${alert}">${esc(statuses[c.status]||c.status)}</span></div>${field('判断标准',c.standard||'旧记录未保存分项标准')}${field('商品原文依据',quotes||'这项记录未保存可展示的商品原文')}${field('审核判断',c.reason)}${policies?`<div class="label">关联政策条款</div><ul class="policy-summary">${policies}</ul>`:field('政策核对',policyNote)}</article>`;
+ }).join('');
  const list=refs.map(r=>`<article class="policy-reference"><div class="policy-title">${esc(r.title||'政策依据')} <small>${esc(r.rule_id||'')}</small>${r.source&&/^https:\/\/[^/]*ebay\.[^/]+\//i.test(r.source)?` <a href="${esc(r.source)}" target="_blank" rel="noopener">eBay 官方页面 ↗</a>`:''}</div>${r.clause_zh?`<p>${esc(r.clause_zh)}</p><small>${r.text_kind==='official_excerpt'?'中文译文，非官方中文':'规则摘要中文译述，非官方原文'}</small>`:'<p class="muted">此记录没有中文条款译述。</p>'}${r.explanation?`<p class="policy-explanation">适用原因：${esc(r.explanation)}</p>`:''}${r.clause?`<details class="policy-source-text"><summary>${r.text_kind==='official_excerpt'?'查看已核验的 eBay 英文原文节选':'查看引用的英文筛查摘要'}</summary><p>${esc(r.clause)}</p>${r.read_date?`<small>记录／核验日期：${esc(r.read_date)}</small>`:''}</details>`:''}</article>`).join('');
  const titles=sent.map(r=>`<li>${esc(r.title)} <small>${esc(r.rule_id)}</small></li>`).join('');
  const summary=refs.map(r=>`<li>${esc(r.title||r.rule_id||'eBay 政策')}${r.read_date?` <span class="muted">（${esc(r.read_date)}）</span>`:''}</li>`).join('');
- return `<section class="audit-basis"><div class="label">政策依据</div>${summary?`<ul class="policy-summary">${summary}</ul>`:'<p class="muted">这条记录没有具体政策引用。</p>'}<details class="policy-detail"><summary>查看条款与检查详情</summary>${checks?`<div class="check-tags">${checks}</div>`:''}${list}<p class="audit-version">规则包：${esc(a._policy_version||'未记录')}<br>经营标准：${esc(a._seller_policy_version||'旧记录，需重新审核')}<br>范围：${a.scope==='hard_rule'?'明确禁售硬规则':'文本筛查；图片供人工查看，动态召回等未自动检索'}</p>${titles?`<details class="provided-rules"><summary>本次实际提供 ${sent.length} 条规则（中文名称）</summary><ul>${titles}</ul></details>`:''}</details></section>`;
+ return `<section class="audit-basis"><div class="label">政策依据</div>${summary?`<ul class="policy-summary">${summary}</ul>`:review.length&&review.every(c=>c.policy_basis==='no_match')?'<p class="muted">本次各项检查未发现适用限制。</p>':'<p class="muted">这条记录没有具体政策引用。</p>'}<details class="policy-detail"><summary>查看判断标准与依据</summary>${checkDetails}${list}<p class="audit-version">规则包：${esc(a._policy_version||'未记录')}<br>经营标准：${esc(a._seller_policy_version||'旧记录，需重新审核')}<br>范围：${a.scope==='hard_rule'?'明确禁售硬规则':'文本筛查；图片供人工查看，动态召回等未自动检索'}</p>${titles?`<details class="provided-rules"><summary>本次实际提供 ${sent.length} 条规则（中文名称）</summary><ul>${titles}</ul></details>`:''}</details></section>`;
 }
 
 function thumbnailUrl(src){
@@ -1029,7 +1043,7 @@ async function init() {
 }
 async function checkBackend(){
   if(app.backendCompatible)return true;
-  try{const info=await api('/api/workbench_info',{timeout:10000});if(info.audit_contract!==2||info.audit_protocol!==3||!(info.audit_model_protocol>=5)||info.seller_policy_version!==SELLER_POLICY_VERSION)throw new Error('版本不对应');app.backendCompatible=true;return true;}
+  try{const info=await api('/api/workbench_info',{timeout:10000});if(info.audit_contract!==2||info.audit_protocol!==3||!(info.audit_model_protocol>=6)||info.seller_policy_version!==SELLER_POLICY_VERSION)throw new Error('版本不对应');app.backendCompatible=true;return true;}
   catch{toast('审核后台版本未配套，请同时部署本次 worker.js 和 index.html。旧数据仍保留，需按新标准审核后导出。');return false;}
 }
 if(!window.__AUDIT_TEST__)fail(init());
