@@ -30,7 +30,8 @@ dialog::backdrop{background:#1c332c66}.dialoghead{padding:16px 24px;border-botto
 
 .review-card{border:1px solid var(--line);border-radius:10px;padding:16px;background:#fff}
 .review-card-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px}
-.review-card-head h4{border-left:3px solid #206952;padding-left:8px;margin:0}
+.review-column .review-card-head h4{border-left:3px solid #206952;padding-left:8px;margin:0;white-space:nowrap}
+.review-card-head .badge{flex:none}
 .review-card .field{margin:0 0 14px}
 .review-card .field .text{padding:9px 10px;background:#f5f7f6;border:1px solid #e9efeb;border-radius:6px}
 .review-evidence .field .text{max-height:190px;overflow:auto}
@@ -148,7 +149,8 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
 // Connection settings are copied from the inspected deployment by build.py.
 const WORKER_URL = 'https://scraper-proxy.1172743763.workers.dev';
 const TOKEN = 'ebay1031';
-const BUILD = '2026-11-05-audit-flow1';
+const BUILD = '2026-11-05-parallel-audit1';
+const AUDIT_CONCURRENCY = 2;
 const SELLER_POLICY_VERSION='2026-11-05-seller1';
 const $ = id => document.getElementById(id);
 const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -290,7 +292,9 @@ function stage(b) {
 function progress(b) {const c=counts(b);return `采集结束 ${c.collectEnded}/${c.total}（成功${c.collected}） · 审核 ${c.auditEligible?c.audited+'/'+c.auditEligible:'无需处理'} · 文案 ${c.passed?c.copyEnded+'/'+c.passed:'无需处理'}`;}
 function briefProgress(b){const c=counts(b);if(b.items.some(i=>['pending','collecting','sync_error'].includes(i.collectStatus)))return `采集 ${c.collected}/${c.total}`;
   if(b.items.some(i=>i.collectStatus==='collected'&&['pending','auditing'].includes(i.reviewStatus))){
-    return `审核已处理 ${c.audited+c.auditFailed}/${c.auditEligible}${c.auditFailed?` · 失败 ${c.auditFailed}`:''}`;
+    const active=b.items.filter(i=>i.collectStatus==='collected'&&i.reviewStatus==='auditing').length;
+    const pending=b.items.filter(i=>i.collectStatus==='collected'&&i.reviewStatus==='pending').length;
+    return `审核已处理 ${c.audited+c.auditFailed}/${c.auditEligible} · 进行中 ${active} · 待审 ${pending}${c.auditFailed?` · 失败 ${c.auditFailed}`:''}`;
   }
   if(b.items.some(i=>i.reviewStatus==='passed'&&['pending','processing'].includes(i.copyStatus)))return `文案 ${c.copyEnded}/${c.passed}`;
   return `已处理 ${c.total}/${c.total}`;}
@@ -460,6 +464,7 @@ async function auditItem(b,i,recover=false){
    const rev=i.dataRevision||0,decisionRevision=i.decisionRevision||0,fields=JSON.parse(JSON.stringify(i.collected||{}));
   const expectedHash=await auditInputHash(fields,i.asin,rev);
   if((i.dataRevision||0)!==rev||(i.decisionRevision||0)!==decisionRevision)return;
+  if(!recover&&(b.runStatus==='paused'||app.stopping))return;
  if(!recover){i.reviewStatus='auditing';i.reason='正在提交审核';i.auditRequestId=uid();i.auditWaitSince=now();i.auditNextCheckAt=0;i.auditReceiptConfirmed=false;i.auditRecoveryBlocked=false;i.auditRequestHash=expectedHash;await saveData();}
    if(recover&&(!i.auditRequestId||(i.auditRequestHash&&i.auditRequestHash!==expectedHash))){blockAuditRecovery(i,'原任务编号缺失或商品资料已经变化，不能使用旧审核结果');await saveData();return;}
   const requestId=i.auditRequestId;
@@ -577,20 +582,35 @@ async function copyItem(b,i) {
 async function runLoop(bid) {
   const b=batch(bid);if(!b)return;
   app.activeId=bid;app.processing=true;app.stopping=false;b.runStatus='running';b.flowVersion=1;render();
+  const auditJobs=new Map();
+  let auditJobError;
   try {
         for(const i of b.items){if(i.reviewStatus==='passed'&&(!sellerAuditCurrent(i)||(!auditCurrent(i)&&!legacyAudit(i)))){archive(i);i.reviewStatus='pending';i.auditRequestId=null;i.auditRecoverCount=0;i.auditWaitSince=null;i.auditNextCheckAt=0;invalidate(i);i.reason='资料与旧结果无法对应，已保留历史，等待重新审核';}}
     for(const i of b.items)if(i.reviewStatus==='auditing'&&!i.auditRequestId)blockAuditRecovery(i,'审核记录缺少原任务编号，已停止等待；请人工决定是否重新审核');
     await saveData();
     while(b.runStatus==='running'&&!app.stopping) {
-      let did=false;
-      if(b.collection&& !['completed','sync_error'].includes(b.collection.state)){await pollCollection(b);did=true;render();}
+      if(b.collection&&!['completed','sync_error'].includes(b.collection.state)){await pollCollection(b);render();}
       if(b.runStatus!=='running')break;
       const newItems=b.items.filter(i=>i.collectStatus==='pending'&&!b.collection?.members?.some(m=>m.id===i.itemId));
       if(newItems.length&&(!b.collection||b.collection.state==='completed')){await submitCollection(b,newItems);continue;}
-      const recovering=b.items.find(i=>i.reviewStatus==='auditing'&&i.auditRequestId&&(!i.auditNextCheckAt||Date.now()>=i.auditNextCheckAt));
-      if(recovering){await auditItem(b,recovering,true);render();continue;}
-      const a=b.items.find(i=>i.collectStatus==='collected'&&i.reviewStatus==='pending');
-      if(a){await auditItem(b,a);render();continue;}
+      while(auditJobs.size<AUDIT_CONCURRENCY){
+        const item=b.items.find(i=>!auditJobs.has(i.itemId)&&i.reviewStatus==='auditing'&&i.auditRequestId&&(!i.auditNextCheckAt||Date.now()>=i.auditNextCheckAt))
+          ||b.items.find(i=>!auditJobs.has(i.itemId)&&i.collectStatus==='collected'&&i.reviewStatus==='pending');
+        if(!item)break;
+        const job=auditItem(b,item,item.reviewStatus==='auditing').catch(error=>{
+          auditJobError??=error;
+          b.runStatus='paused';
+        }).finally(()=>{
+          auditJobs.delete(item.itemId);
+          render();
+        });
+        auditJobs.set(item.itemId,job);
+      }
+      if(auditJobs.size){
+        // Wake when a slot frees up, or when a saved task becomes ready to poll.
+        await Promise.race([...auditJobs.values(),sleep(1000)]);
+        continue;
+      }
       const cp=b.items.find(i=>copyAuthorized(i)&&['pending','processing'].includes(i.copyStatus));
       if(cp){await copyItem(b,cp);render();continue;}
       if(b.items.some(i=>i.reviewStatus==='auditing')){await sleep(1000);continue;}
@@ -599,7 +619,12 @@ async function runLoop(bid) {
       else b.runStatus=counts(b).failures?'blocked':counts(b).verify?'waiting_review':'completed';
       await saveData();break;
     }
-  } finally {app.processing=false;app.activeId=null;render();}
+  } finally {
+    // Keep the processing lock until submitted results have finished saving.
+    await Promise.allSettled(auditJobs.values());
+    app.processing=false;app.activeId=null;render();
+  }
+  if(auditJobError)throw auditJobError;
 }
 async function startBatch(bid) {
   if(app.adminBusy)return toast('批次管理正在保存，请稍候再开始任务');
@@ -728,7 +753,7 @@ function openDetail(iid,{preserveNavigation=false}={}) {
     ...(Array.isArray(a.required_checks_not_completed)?a.required_checks_not_completed:[])
   ])]:[];
   let html=`<div class="review-layout"><section class="product-column"><div class="detail-tabs" role="tablist"><button id="sourceTab" role="tab" data-action="tab-source">采集资料</button><button id="copyTab" role="tab" data-action="tab-copy" ${i.copyData?'':'disabled'}>清理后文案</button></div><div id="detailSource"></div></section>
-    <section class="review-column"><div class="review-card"><header class="review-card-head"><h4>AI 审核结论</h4>${badge(...resultBadge)}</header>${field('具体理由',currentResult?(i.manualDecision?i.reason:a.reason||i.reason||'等待处理'):itemReason(i))}${currentResult&&i.manualDecision?field('人工处理',`${i.manualDecision.decision==='passed'?'通过':'排除'}${i.manualDecision.reason?'：'+i.manualDecision.reason:'（未填写备注）'}`):''}${evidence?`<div class="review-evidence">${field('商品原文依据',evidence)}</div>`:'' }`;
+    <section class="review-column"><div class="review-card"><div class="review-card-head"><h4>AI 审核结论</h4>${badge(...resultBadge)}</div>${field('具体理由',currentResult?(i.manualDecision?i.reason:a.reason||i.reason||'等待处理'):itemReason(i))}${currentResult&&i.manualDecision?field('人工处理',`${i.manualDecision.decision==='passed'?'通过':'排除'}${i.manualDecision.reason?'：'+i.manualDecision.reason:'（未填写备注）'}`):''}${evidence?`<div class="review-evidence">${field('商品原文依据',evidence)}</div>`:'' }`;
   if(i.reviewStatus==='error')html+=`<details class="audit-failure"><summary>失败诊断</summary><div id="auditFailureSummary">${auditFailureHTML(i.auditError?.request_id===i.auditRequestId?i.auditError?.diagnostic_summary:null)}</div><button data-action="audit-diagnose">读取原失败详情（不调用AI）</button></details>`;
   if(i.reviewStatus==='skipped')html+='<p class="muted">资料不足，未调用AI。</p>';
   if(currentResult&&a.manual_questions?.length)html+=`<div class="review-questions">${field('待人工确认',a.manual_questions)}</div>`;
