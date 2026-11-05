@@ -34,13 +34,12 @@ dialog::backdrop{background:#1c332c66}.dialoghead{padding:16px 24px;border-botto
 .review-card-head .badge{flex:none}
 .review-card .field{margin:0 0 14px}
 .review-card .field .text{padding:9px 10px;background:#f5f7f6;border:1px solid #e9efeb;border-radius:6px}
-.review-evidence .field .text{max-height:190px;overflow:auto}
+.review-note small{display:block;margin-top:6px;line-height:1.45}
 .review-card .review-questions .text{color:#8a540d;background:#fff8ec;border-color:#f3e3ca}
 .policy-summary{list-style:none;padding:0;margin:4px 0 8px;font-size:13px;line-height:1.55}
 .policy-summary li+li{margin-top:3px}
 .review-card details>summary{cursor:pointer;color:#245c4d;font-size:13px}
 .review-card .audit-basis{margin:0}
-.review-card .audit-failure{margin:8px 0 0}
 </style>
 
 <style>
@@ -459,8 +458,10 @@ function itemReason(i){
   if(i.reviewStatus==='error')return i.auditError?.request_id===i.auditRequestId&&i.auditError?.detail||i.reason||'审核未完成';
   return i.reason||'—';
 }
-async function auditInputHash(fields,sku,revision){
-  const digest=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(JSON.stringify({fields,asin:sku,dataRevision:revision})));
+async function auditInputHash(fields,sku,revision,note=''){
+  const input={fields,asin:sku,dataRevision:revision};
+  if(note)input.manualReviewNote=note;
+  const digest=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(JSON.stringify(input)));
   return Array.from(new Uint8Array(digest),b=>b.toString(16).padStart(2,'0')).join('');
 }
 function blockAuditRecovery(i,reason){
@@ -471,10 +472,13 @@ function blockAuditRecovery(i,reason){
 async function auditItem(b,i,recover=false){
  const check=inputCheck({...i.collected,requestedAsin:i.asin});if(!check.ok){i.reviewStatus='skipped';i.reason='资料不足，未进行AI审核：'+check.reason;await saveData();return;}
    const rev=i.dataRevision||0,decisionRevision=i.decisionRevision||0,fields=JSON.parse(JSON.stringify(i.collected||{}));
-  const expectedHash=await auditInputHash(fields,i.asin,rev);
+  const history=Array.isArray(i.manualHistory)?i.manualHistory:[];
+  const priorNote=recover?i.auditRequestReviewNote:history.findLast(entry=>entry?.dataRevision===rev&&typeof entry.reason==='string'&&entry.reason.trim())?.reason;
+  const note=typeof priorNote==='string'?priorNote.trim().slice(0,500).trimEnd():'';
+  const expectedHash=await auditInputHash(fields,i.asin,rev,note);
   if((i.dataRevision||0)!==rev||(i.decisionRevision||0)!==decisionRevision)return;
   if(!recover&&(b.runStatus==='paused'||app.stopping))return;
- if(!recover){i.reviewStatus='auditing';i.reason='正在提交审核';i.auditRequestId=uid();i.auditWaitSince=now();i.auditNextCheckAt=0;i.auditReceiptConfirmed=false;i.auditRecoveryBlocked=false;i.auditRequestHash=expectedHash;await saveData();}
+ if(!recover){i.reviewStatus='auditing';i.reason='正在提交审核';i.auditRequestId=uid();i.auditWaitSince=now();i.auditNextCheckAt=0;i.auditReceiptConfirmed=false;i.auditRecoveryBlocked=false;i.auditRequestHash=expectedHash;i.auditRequestReviewNote=note;await saveData();}
    if(recover&&(!i.auditRequestId||(i.auditRequestHash&&i.auditRequestHash!==expectedHash))){blockAuditRecovery(i,'原任务编号缺失或商品资料已经变化，不能使用旧审核结果');await saveData();return;}
   const requestId=i.auditRequestId;
   const changedClock=!Number.isFinite(Date.parse(i.auditWaitSince))||Date.parse(i.auditWaitSince)>Date.now();
@@ -491,7 +495,7 @@ async function auditItem(b,i,recover=false){
  }
  try{
   const d=recover?await api('/api/audit_result?request_id='+encodeURIComponent(requestId)):
-    await api('/api/audit',{method:'POST',body:{requestId:i.auditRequestId,batchId:b.id,itemId:i.itemId,asin:i.asin,dataRevision:rev,fields},timeout:105000});
+    await api('/api/audit',{method:'POST',body:{requestId:i.auditRequestId,batchId:b.id,itemId:i.itemId,asin:i.asin,dataRevision:rev,fields,...(note?{manualReviewNote:note}:{})},timeout:105000});
   if((i.dataRevision||0)!==rev||(i.decisionRevision||0)!==decisionRevision||i.auditRequestId!==requestId)return;
    if(d.pending){if((d.input_hash&&d.input_hash!==expectedHash)||(d.data_revision!=null&&d.data_revision!==rev)){blockAuditRecovery(i,'原任务接收的商品资料与本次资料不一致，已停止恢复');mustSave=true;}else waitForOriginal(d.detail,d.started_at,d.receipt_confirmed,d.overdue);}
   else if(d.error){i.reviewStatus='error';i.auditFailureKnown=true;i.auditNextCheckAt=0;i.reason='审核未完成：'+(d.detail||d.error);i.auditError={code:d.error,detail:d.detail,request_id:i.auditRequestId,time:now(),diagnostic_summary:d.diagnostic_summary||null};mustSave=true;}
@@ -502,19 +506,6 @@ async function auditItem(b,i,recover=false){
  // Pending reads update local timing only. Do not rewrite the entire workbench
  // on every poll and leave a misleading "saving" banner during model waiting.
  if(mustSave)await saveData();
-}
-function auditFailureHTML(summary){
- if(!summary)return '<p class="muted">尚未读取详细失败信息。读取只查询原记录，不调用AI。</p>';
- const identity={missing_object:'AI未返回商品身份和用途对象',missing_name:'AI未返回有效的商品名称字段',missing_use:'AI未返回有效的商品用途字段',not_chinese:'旧版校验要求商品名称和用途必须中文，因此拒绝了返回结果；这不代表商品违规',source_language:'商品名称和用途已返回，保留了来源语言；需核对其他失败原因',valid:'商品身份字段完整，需检查提示中的其他校验项',unknown:'本记录尚无可用的模型字段诊断'};
- return (summary.model_attempts===2?'<p>已在同一任务内自动补审一次。</p>':'')+'<p>'+esc(identity[summary.identity_status]||identity.unknown)+'</p><p class="muted">'+(summary.output_present?'已保留原失败记录。读取诊断不会重新提交任务。':'本记录没有可读取的模型输出。')+'</p>';
-}
-async function readFailureDetail(b,i){
- const bid=b.id,iid=i.itemId,id=i.auditRequestId||i.auditError?.request_id;if(!id)return toast('本记录没有审核任务编号');
- const node=$('auditFailureSummary');if(node)node.textContent='正在读取原失败记录，不调用AI…';
- try{const d=await api('/api/audit_result?request_id='+encodeURIComponent(id));if(app.currentBatchId!==bid||app.detailItemId!==iid||i.auditRequestId!==id||i.reviewStatus!=='error')return;
-  if(d.error){i.auditError={...(i.auditError||{}),diagnostic_summary:d.diagnostic_summary||null};if($('auditFailureSummary'))$('auditFailureSummary').innerHTML=auditFailureHTML(d.diagnostic_summary);}
-  else if($('auditFailureSummary'))$('auditFailureSummary').textContent=d.pending?d.detail||'尚未查到原结果':'原任务已返回结果，请查询原任务恢复状态';
- }catch(e){if(app.currentBatchId===bid&&app.detailItemId===iid&&$('auditFailureSummary'))$('auditFailureSummary').textContent='读取失败：'+e.message;}
 }
 
 function cleanText(value){
@@ -700,17 +691,21 @@ function renderAuditBasis(i){
  const sourceLink=r=>r.source&&/^https:\/\/[^/]*ebay\.[^/]+\//i.test(r.source)?` <a href="${esc(r.source)}" target="_blank" rel="noopener">eBay 官方页面 ↗</a>`:'';
  const checkDetails=review.map(c=>{
   const linked=refs.filter(r=>c.clause_ids?.includes(r.clause_id));
-  const evidence=facts.filter(f=>c.fact_ids?.includes(f.fact_id));
-  const quotes=evidence.map(f=>`${({title:'标题',bullets:'五点',description:'长描述',brand:'品牌',category:'类目'})[f.field]||f.field}：${f.quote}`).join('\n\n');
+  const excerpts=Array.isArray(c.evidence_quotes)?c.evidence_quotes:[];
+  const quotes=excerpts.map(e=>{
+   const f=facts.find(v=>v.fact_id===e.fact_id);
+   return f?`${({title:'标题',bullets:'五点',description:'长描述',brand:'品牌',category:'类目'})[f.field]||f.field}：${e.quote}`:'';
+  }).filter(Boolean).join('\n');
+  const sourceFields=[...new Set(facts.filter(f=>c.fact_ids?.includes(f.fact_id)).map(f=>({title:'标题',bullets:'五点',description:'长描述',brand:'品牌',category:'类目'})[f.field]||f.field))];
   const policies=linked.map(r=>`<li>${esc(r.title||r.rule_id)} <small>${esc(r.rule_id)}${r.clause_no?` · 第 ${esc(r.clause_no)} 条`:''}</small>${sourceLink(r)}</li>`).join('');
   const policyNote=c.policy_basis==='no_match'?'本次未发现适用限制。':c.policy_basis==='product_or_business'?'依据商品事实或经营标准，见本项判断。':'这项记录未关联到可展示的条款。';
   const alert=['blocked','needs_verification','unresolved_risk','not_checked'].includes(c.status)?'check-attention':'';
-  return `<article class="policy-reference audit-check"><div class="policy-title">${esc(c.label||labels[c.area]||c.area)} <span class="check-tag ${alert}">${esc(statuses[c.status]||c.status)}</span></div>${field('判断标准',c.standard||'旧记录未保存分项标准')}${field('商品原文依据',quotes||'这项记录未保存可展示的商品原文')}${field('审核判断',c.reason)}${policies?`<div class="label">关联政策条款</div><ul class="policy-summary">${policies}</ul>`:field('政策核对',policyNote)}</article>`;
+  return `<article class="policy-reference audit-check"><div class="policy-title">${esc(c.label||labels[c.area]||c.area)} <span class="check-tag ${alert}">${esc(statuses[c.status]||c.status)}</span></div>${field('判断标准',c.standard||'旧记录未保存分项标准')}${field('审核判断',c.reason)}${field('商品原文依据',quotes||(sourceFields.length?'可在左侧查阅引用字段：'+sourceFields.join('、')+'。本轮未保存核实后的短句。':'本轮未保存分项原文短句。'))}${policies?`<div class="label">关联政策条款</div><ul class="policy-summary">${policies}</ul>`:field('政策核对',policyNote)}</article>`;
  }).join('');
  const list=refs.map(r=>`<article class="policy-reference"><div class="policy-title">${esc(r.title||'政策依据')} <small>${esc(r.rule_id||'')}</small>${r.source&&/^https:\/\/[^/]*ebay\.[^/]+\//i.test(r.source)?` <a href="${esc(r.source)}" target="_blank" rel="noopener">eBay 官方页面 ↗</a>`:''}</div>${r.clause_zh?`<p>${esc(r.clause_zh)}</p><small>${r.text_kind==='official_excerpt'?'中文译文，非官方中文':'规则摘要中文译述，非官方原文'}</small>`:'<p class="muted">此记录没有中文条款译述。</p>'}${r.explanation?`<p class="policy-explanation">适用原因：${esc(r.explanation)}</p>`:''}${r.clause?`<details class="policy-source-text"><summary>${r.text_kind==='official_excerpt'?'查看已核验的 eBay 英文原文节选':'查看引用的英文筛查摘要'}</summary><p>${esc(r.clause)}</p>${r.read_date?`<small>记录／核验日期：${esc(r.read_date)}</small>`:''}</details>`:''}</article>`).join('');
  const titles=sent.map(r=>`<li>${esc(r.title)} <small>${esc(r.rule_id)}</small></li>`).join('');
  const summary=refs.map(r=>`<li>${esc(r.title||r.rule_id||'eBay 政策')}${r.read_date?` <span class="muted">（${esc(r.read_date)}）</span>`:''}</li>`).join('');
- return `<section class="audit-basis"><div class="label">政策依据</div>${summary?`<ul class="policy-summary">${summary}</ul>`:review.length&&review.every(c=>c.policy_basis==='no_match')?'<p class="muted">本次各项检查未发现适用限制。</p>':'<p class="muted">这条记录没有具体政策引用。</p>'}<details class="policy-detail"><summary>查看判断标准与依据</summary>${checkDetails}${list}<p class="audit-version">规则包：${esc(a._policy_version||'未记录')}<br>经营标准：${esc(a._seller_policy_version||'旧记录，需重新审核')}<br>范围：${a.scope==='hard_rule'?'明确禁售硬规则':'文本筛查；图片供人工查看，动态召回等未自动检索'}</p>${titles?`<details class="provided-rules"><summary>本次实际提供 ${sent.length} 条规则（中文名称）</summary><ul>${titles}</ul></details>`:''}</details></section>`;
+ return `<section class="audit-basis"><h4>复核要点</h4>${checkDetails||'<p class="muted">这条记录未保存分项判断。</p>'}<details class="policy-detail"><summary>政策依据与版本</summary>${summary?`<ul class="policy-summary">${summary}</ul>`:''}${list}<p class="audit-version">规则包：${esc(a._policy_version||'未记录')}<br>经营标准：${esc(a._seller_policy_version||'旧记录，需重新审核')}<br>范围：${a.scope==='hard_rule'?'明确禁售硬规则':'文本筛查；图片供人工查看，动态召回等未自动检索'}</p>${titles?`<details class="provided-rules"><summary>本次实际提供 ${sent.length} 条规则（中文名称）</summary><ul>${titles}</ul></details>`:''}</details></section>`;
 }
 
 function thumbnailUrl(src){
@@ -751,7 +746,7 @@ function detailNavigationFooter(){
   return `<div class="detail-navigation"><button data-action="detail-prev" ${busy||index<=0?'disabled':''}>上一条</button><span>${index>=0?index+1:0} / ${nav.ids.length}</span><button data-action="detail-next" ${busy||index<0||index>=nav.ids.length-1?'disabled':''}>下一条</button></div>`;
 }
 function renderDetailFooter(i){const busy=!!app.detailBusy,blocked=busy||app.processing;
-  $('dtFooter').innerHTML=detailNavigationFooter()+`<div class="detail-main-actions">${needsManual(i)?`${i.reviewStatus==='verify'?`<button class="primary" data-action="manual-pass" ${blocked?'disabled':''}>确认通过</button>`:''}<button data-action="manual-exclude" ${blocked?'disabled':''}>排除</button>`:''}${ready(i)?'<button class="primary" data-action="export-one">导出此商品</button>':''}<button data-close>关闭</button></div>`;
+  $('dtFooter').innerHTML=detailNavigationFooter()+`<div class="detail-main-actions">${needsManual(i)?`${i.reviewStatus==='verify'?`<button class="primary" data-action="manual-pass" ${blocked?'disabled':''}>人工通过</button>`:''}<button data-action="manual-exclude" ${blocked?'disabled':''}>人工淘汰</button>`:''}${ready(i)?'<button class="primary" data-action="export-one">导出此商品</button>':''}<button data-close>关闭</button></div>`;
 }
 function openDetail(iid,{preserveNavigation=false}={}) {
   const b=batch(),i=b?.items.find(x=>x.itemId===iid);if(!i)return false;
@@ -764,27 +759,22 @@ function openDetail(iid,{preserveNavigation=false}={}) {
   $('dtTitle').textContent=i.asin;$('dtStatus').textContent=itemStatus(i)[0];$('dtStatus').className='badge b-'+itemStatus(i)[1];
   $('detailMeta').innerHTML=`<span>品牌：<strong>${esc(brandOf(i)||'未提供')}</strong></span><a href="${amazon(i)}" target="_blank" rel="noopener">Amazon ↗</a>`;
   const a=i.audit||{},currentResult=hasCurrentDisplayedAudit(i);
-  const fieldNames={title:'标题',bullets:'五点',description:'长描述',brand:'品牌',category:'类目'};
-  const sourceQuotes=Array.isArray(a.evidence)?a.evidence.filter(e=>typeof e?.quote==='string'):[];
-  const evidence=currentResult?(sourceQuotes.length
-    ?sourceQuotes.map(e=>`${fieldNames[e.field]||e.field||'商品资料'}：${e.quote}`).join('\n\n')
-    :a.product_evidence||text(a.evidence)):'';
   const conclusion=currentResult&&(i.reviewStatus!=='passed'||sellerAuditCurrent(i));
-  const resultBadge=conclusion&&i.reviewStatus==='passed'?['通过','pass']:itemStatus(i);
+  const aiDecision=conclusion&&i.manualDecision?a.decision:i.reviewStatus;
+  const resultBadge=conclusion&&aiDecision==='passed'?['通过','pass']:conclusion&&aiDecision==='verify'?['待核验','warn']:itemStatus(i);
   const missing=currentResult?[...new Set([
     ...(Array.isArray(a.missing_info)?a.missing_info:[]),
     ...(Array.isArray(a.required_checks_not_completed)?a.required_checks_not_completed:[])
   ])]:[];
   let html=`<div class="review-layout"><section class="product-column"><div class="detail-tabs" role="tablist"><button id="sourceTab" role="tab" data-action="tab-source">采集资料</button><button id="copyTab" role="tab" data-action="tab-copy" ${i.copyData?'':'disabled'}>清理后文案</button></div><div id="detailSource"></div></section>
-    <section class="review-column"><div class="review-card"><div class="review-card-head"><h4>${conclusion?'AI 审核结论':i.reviewStatus==='error'?'系统审核异常':'审核任务'}</h4>${badge(...resultBadge)}</div>${field('具体理由',conclusion?(i.manualDecision?i.reason:a.reason||i.reason||'等待处理'):itemReason(i))}${conclusion&&i.manualDecision?field('人工处理',`${i.manualDecision.decision==='passed'?'通过':'淘汰'}${i.manualDecision.reason?'：'+i.manualDecision.reason:'（未填写备注）'}`):''}${evidence?`<div class="review-evidence">${field('商品原文依据',evidence)}</div>`:'' }`;
-  if(i.reviewStatus==='error')html+=`<details class="audit-failure"><summary>失败诊断</summary><div id="auditFailureSummary">${auditFailureHTML(i.auditError?.request_id===i.auditRequestId?i.auditError?.diagnostic_summary:null)}</div><button data-action="audit-diagnose">读取原失败详情（不调用AI）</button></details>`;
+    <section class="review-column"><div class="review-card"><div class="review-card-head"><h4>${conclusion?'AI 审核结论':i.reviewStatus==='error'?'系统审核异常':'审核任务'}</h4>${badge(...resultBadge)}</div>${field('具体理由',conclusion?(a.reason||i.reason||'等待处理'):itemReason(i))}${conclusion&&i.manualDecision?field('人工处理',`${i.manualDecision.decision==='passed'?'通过':'淘汰'}${i.manualDecision.reason?'：'+i.manualDecision.reason:'（未填写建议）'}`):''}`;
   if(i.reviewStatus==='skipped')html+='<p class="muted">资料不足，未调用AI。</p>';
   if(currentResult&&a.manual_questions?.length)html+=`<div class="review-questions">${field('待人工确认',a.manual_questions)}</div>`;
+  if(needsManual(i))html+='<div class="review-note"><label for="manualReason">人工建议（选填）</label><textarea id="manualReason" rows="3" maxlength="500" aria-describedby="manualReasonHint" placeholder="例如：已查商品规格，12.5 英寸为外部宽度"></textarea><small id="manualReasonHint" class="muted">提交人工结论时保存。填写的建议可供这条 SKU 的同版资料再次 AI 审核时参考。</small></div>';
   if(missing.length)html+=field('缺少信息或未完成检查',missing);
   if(currentResult&&a.seller_review?.materials?.requirements?.length)html+=field('销售材料',a.seller_review.materials.requirements);
   if(currentResult)html+=renderAuditBasis(i);
   html+='</div>';
-  if(needsManual(i))html+=`<div class="review-note"><label for="manualReason">备注（选填）</label><textarea id="manualReason" rows="4" placeholder="可补充确认的信息，不填写也可以操作"></textarea></div>`;
   if(i.auditRecoveryBlocked)html+='<p class="muted">原任务资料无法对应，系统不会自动重新提交。请核对资料后，在更多操作中手动重新审核。</p>';
   if(i.reviewStatus==='passed'&&!exportCheck(i).ok)html+=`<p class="muted">${esc(exportCheck(i).reason)}</p><button data-action="recopy" ${app.processing?'disabled':''}>重新检查文案</button>`;
   if(currentResult&&(a.seller_review||a.scope==='hard_rule'))html+=`<details class="advanced"><summary>经营检查详情</summary>${renderSellerReview(i)}</details>`;
@@ -805,7 +795,6 @@ async function detailAction(action) {
   if(app.detailBusy)return;
   if(action==='detail-prev'||action==='detail-next')return navigateDetail(action==='detail-prev'?-1:1);
   if(action==='tab-source'||action==='tab-copy'){app.detailTab=action==='tab-copy'?'copy':'source';renderDetailSource(i);return;}
-  if(action==='audit-diagnose')return readFailureDetail(b,i);
   if(action==='export-one'){const before=app.selected;app.selected=new Set([i.itemId]);try{doExport(b.id,true);}finally{app.selected=before;}return;}
   if(action==='image-preview')return;
   if(action==='toggle-edit'){const panel=$('detailEditPanel');panel.hidden=!panel.hidden;return;}
@@ -826,8 +815,8 @@ async function detailAction(action) {
     i.collected={...i.collected,title:$('editTitle').value,bullets:$('editBullets').value,description:$('editDesc').value};
     i.dataRevision=(i.dataRevision||0)+1;i.reviewStatus='pending';invalidate(i);i.reason='资料已修正，需要重新审核';
   } else if(action==='manual-pass'||action==='manual-exclude') {
-    const reason=$('manualReason')?.value.trim()||'';
-    archive(i);i.decisionRevision=(i.decisionRevision||0)+1;i.manualDecision={decision:action==='manual-pass'?'passed':'excluded',reason,noteProvided:!!reason,time:now()};(i.manualHistory??=[]).push(i.manualDecision);
+    const reason=$('manualReason')?.value.trim().slice(0,500)||'';
+    archive(i);i.decisionRevision=(i.decisionRevision||0)+1;i.manualDecision={decision:action==='manual-pass'?'passed':'excluded',reason,noteProvided:!!reason,dataRevision:i.dataRevision||0,time:now()};(i.manualHistory??=[]).push(i.manualDecision);
     i.reviewStatus=i.manualDecision.decision;i.auditRevision=i.dataRevision||0;i.reason='人工'+(action==='manual-pass'?'通过':'排除')+(reason?'：'+reason:'（未填写备注）');invalidate(i);
       } else if(action==='reaudit') {archive(i);i.reviewStatus='pending';i.auditRequestId=null;i.auditRequestHash=null;i.auditRecoveryBlocked=false;i.auditRecoverCount=0;i.auditWaitSince=null;i.auditNextCheckAt=0;invalidate(i);i.reason='等待重新审核';}
   else if(action==='recollect') {
@@ -1043,7 +1032,7 @@ async function init() {
 }
 async function checkBackend(){
   if(app.backendCompatible)return true;
-  try{const info=await api('/api/workbench_info',{timeout:10000});if(info.audit_contract!==2||info.audit_protocol!==3||!(info.audit_model_protocol>=6)||info.seller_policy_version!==SELLER_POLICY_VERSION)throw new Error('版本不对应');app.backendCompatible=true;return true;}
+  try{const info=await api('/api/workbench_info',{timeout:10000});if(info.audit_contract!==2||info.audit_protocol!==3||!(info.audit_model_protocol>=7)||info.seller_policy_version!==SELLER_POLICY_VERSION)throw new Error('版本不对应');app.backendCompatible=true;return true;}
   catch{toast('审核后台版本未配套，请同时部署本次 worker.js 和 index.html。旧数据仍保留，需按新标准审核后导出。');return false;}
 }
 if(!window.__AUDIT_TEST__)fail(init());
