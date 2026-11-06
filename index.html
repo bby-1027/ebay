@@ -35,6 +35,10 @@ dialog::backdrop{background:#1c332c66}.dialoghead{padding:16px 24px;border-botto
 .review-card .field{margin:0 0 14px}
 .review-card .field .text{padding:9px 10px;background:#f5f7f6;border:1px solid #e9efeb;border-radius:6px}
 .review-note small{display:block;margin-top:6px;line-height:1.45}
+.review-note .manual-status-select{display:block;width:100%;min-height:42px;margin-top:6px;padding:9px 12px;border:1px solid #dfe8e2;border-radius:6px;background:#f5f7f6;color:inherit;cursor:pointer}
+.manual-status-select:hover:not(:disabled){border-color:#93b3a3}
+.manual-status-select:focus-visible{outline:2px solid var(--green);outline-offset:2px}
+.manual-status-select:disabled{opacity:.6;cursor:not-allowed}
 .review-card .review-questions .text{color:#8a540d;background:#fff8ec;border-color:#f3e3ca}
 .policy-summary{list-style:none;padding:0;margin:4px 0 8px;font-size:13px;line-height:1.55}
 .policy-summary li+li{margin-top:3px}
@@ -152,7 +156,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
 // Connection settings are copied from the inspected deployment by build.py.
 const WORKER_URL = 'https://scraper-proxy.1172743763.workers.dev';
 const TOKEN = 'ebay1031';
-const BUILD = '2026-11-06-manual-review1';
+const BUILD = '2026-11-06-detail-copy1';
 const MISSING_SOURCE_NOTICE='AI 审核结果缺少能对应到商品原文的证据';
 const AUDIT_CONCURRENCY = 2;
 const SELLER_POLICY_VERSION='2026-11-05-seller1';
@@ -261,7 +265,7 @@ function exportCheck(i){
   if(!copyAuthorized(i))return {ok:false,reason:'尚未完成有效的通过审核'};
   if(i.reviewStatus!=='passed')return {ok:false,reason:i.reviewStatus==='verify'?'需要人工核验':'尚未审核通过'};
   if(i.copyStatus!=='completed'||!i.copyData)return {ok:false,reason:'文案尚未完成'};
-  if(!substantive(i.copyData.title))return {ok:false,reason:'清理后标题为空'};
+  if(!substantive(stripBrandLabelLines(i.copyData.title,brandOf(i))))return {ok:false,reason:'清理后标题为空'};
   if(!Object.hasOwn(i.copyData,'bullets')||!Object.hasOwn(i.copyData,'description'))return {ok:false,reason:'旧文案缺少五点或长描述，请在详情重新检查文案'};
   if(auditCurrent(i)&&i.copyRevision===(i.dataRevision||0))return {ok:true,legacy:false};
   if(legacyAudit(i)&&(i.copyRevision==null||i.copyRevision===(i.dataRevision||0)))return {ok:true,legacy:true};
@@ -572,6 +576,11 @@ function tidySpacing(value){
     .replace(/\n{3,}/g,'\n\n')
     .trim();
 }
+function stripBrandLabelLines(value,brand=''){
+  const name=text(brand).trim();
+  const knownBrand=name&&!/[\r\n]/.test(name)?'(?:'+escapeRegExp(name)+'[ \\t]*)?':'';
+  return text(value).replace(new RegExp('^[ \\t]*(?:brand|品牌)[ \\t]*[:：][ \\t]*'+knownBrand+'(?:\\r?\\n|$)','gim'),'');
+}
 function factTokens(s) {return [...text(s).replace(/https?:\/\/\S+/g,'').matchAll(/\d+(?:\.\d+)?\s*(?:mm|cm|kg|lbs?|oz|inches|inch|ml|volts?|watts?|pcs?|pieces|ft|"|%|°C)\b/gi)].map(x=>x[0].toLowerCase()).sort();}
 function brandFactAmbiguous(brand,f={}){
   const b=text(brand).trim().toLowerCase(),raw=f._raw?.data||f._raw?.product||f._raw?.item||f._raw||{};
@@ -586,7 +595,7 @@ function brandFactAmbiguous(brand,f={}){
 function prepareCopy(f, brand) {
   if(/(?:compatible\s+(?:with|for)|\bfor|\bwith|replacement\s+for|\bfit(?:s)?)\s+(?:Amazon|Prime|Walmart|AliExpress|Temu)\b|\bAmazon\s+(?:Fire|Kindle|Echo)\b/i.test([f.title,f.bullets,f.description].map(text).join('\n')))throw new Error('兼容信息涉及来源平台品牌，不能靠删词改变事实，请人工处理');
   if(brandFactAmbiguous(brand,f)&&[f.title,f.bullets,f.description].some(v=>stripBareBrand(text(v),brand)!==text(v)))throw new Error('品牌词与材质、颜色或功能词重名，自动删词可能改变商品事实，请人工确认或排除');
-  const clean = v => tidySpacing(stripBareBrand(cleanText(v), brand));
+  const clean = v => tidySpacing(stripBrandLabelLines(stripBareBrand(cleanText(v), brand),brand));
   const copy={title:clean(f.title),bullets:clean(f.bullets),description:clean(f.description)};
   if(!copy.title)throw new Error('清理后标题为空，需要人工确认');
   if(JSON.stringify(factTokens([f.title,f.bullets,f.description].join('\n')))!==JSON.stringify(factTokens(Object.values(copy).join('\n'))))throw new Error('清理可能删除规格数据，已阻止导出');
@@ -777,7 +786,11 @@ function readableField(label,value,key){
 }
 function renderDetailSource(i){
   const f=i.collected||{},copy=app.detailTab==='copy';
-  $('detailSource').innerHTML=copy?(i.copyData?readableField('标题',i.copyData.title,'copy-title')+readableField('五点',i.copyData.bullets,'copy-bullets')+readableField('长描述',i.copyData.description,'copy-desc'):'<p class="muted">文案尚未完成。</p>'):
+  const data=i.copyData;
+  const brand=brandOf(i),clean=value=>stripBrandLabelLines(value,brand);
+  const oldBrandLabel=data&&[data.title,data.bullets,data.description].some(value=>clean(value)!==text(value));
+  const recopy=oldBrandLabel&&copyAuthorized(i)?`<div class="field"><button data-action="recopy" ${app.processing||app.detailBusy?'disabled':''}>重新清理旧文案</button></div>`:'';
+  $('detailSource').innerHTML=copy?(data?recopy+readableField('标题',clean(data.title),'copy-title')+readableField('五点',clean(data.bullets),'copy-bullets')+readableField('长描述',clean(data.description),'copy-desc'):'<p class="muted">文案尚未完成。</p>'):
     readableField('标题',f.title,'source-title')+readableField('五点',f.bullets,'source-bullets')+readableField('长描述',f.description,'source-desc')+
     (imageLinks(f.images).length?`<div class="product-images"><div class="label">商品图片（人工查看）</div>${renderProductImages(f.images)}</div>`:'');
   $('sourceTab').setAttribute('aria-selected',String(!copy));$('copyTab').setAttribute('aria-selected',String(copy));
@@ -817,12 +830,12 @@ function openDetail(iid,{preserveNavigation=false}={}) {
     ...(Array.isArray(a.required_checks_not_completed)?a.required_checks_not_completed:[])
   ])]:[];
   let html=`<div class="review-layout"><section class="product-column"><div class="detail-tabs" role="tablist"><button id="sourceTab" role="tab" data-action="tab-source">采集资料</button><button id="copyTab" role="tab" data-action="tab-copy" ${i.copyData?'':'disabled'}>清理后文案</button></div><div id="detailSource"></div></section>
-    <section class="review-column"><div class="review-card"><div class="review-card-head"><h4>${conclusion?'AI 审核结论':i.reviewStatus==='error'?'系统审核异常':'审核任务'}</h4>${badge(...resultBadge)}</div>${field('具体理由',conclusion?friendlyAuditReason(a.reason||i.reason||'等待处理'):itemReason(i))}`;
-  if(manual)html+=`<div class="review-note"><label for="manualStatus">人工处理</label><select id="manualStatus"><option value="passed" ${manual.decision==='passed'?'selected':!canManualPass(i)?'disabled':''}>通过</option><option value="excluded" ${manual.decision==='excluded'?'selected':''}>淘汰</option></select></div>`;
+    <section class="review-column"><div class="review-card"><div class="review-card-head"><h4>${conclusion?(manual?'AI 原始结论':'AI 审核结论'):i.reviewStatus==='error'?'系统审核异常':'审核任务'}</h4>${badge(...resultBadge)}</div>${field('具体理由',conclusion?friendlyAuditReason(a.reason||i.reason||'等待处理'):itemReason(i))}`;
+  if(manual)html+=`<div class="field"><div class="label">人工最终结论</div>${manual.decision==='passed'?badge('通过','pass'):badge('淘汰','err')}</div><div class="review-note"><label for="manualStatus">人工处理</label><select id="manualStatus" class="manual-status-select"><option value="passed" ${manual.decision==='passed'?'selected':!canManualPass(i)?'disabled':''}>通过</option><option value="excluded" ${manual.decision==='excluded'?'selected':''}>淘汰</option></select></div>`;
   if(i.reviewStatus==='skipped')html+='<p class="muted">资料不足，未调用AI。</p>';
-  if(currentResult&&a.prohibited_recheck_incomplete)html+='<p class="danger-text" role="note">AI 复查后仍未给出禁售与限售结论，请人工核对后再决定是否通过。</p>';
+  if(currentResult&&a.prohibited_recheck_incomplete)html+=`<p class="danger-text" role="note">${manual?'原 AI 提醒：复查后仍未给出禁售与限售结论。':'AI 复查后仍未给出禁售与限售结论，请人工核对后再决定是否通过。'}</p>`;
   if(currentResult&&a.missing_source_evidence?.length)html+=field(MISSING_SOURCE_NOTICE,'无原文引用：'+a.missing_source_evidence.join('、'));
-  if(currentResult&&a.manual_questions?.length)html+=`<div class="review-questions">${field('待人工确认',friendlyAuditReason(a.manual_questions))}</div>`;
+  if(currentResult&&a.manual_questions?.length)html+=`<div class="review-questions">${field(manual?'原 AI 提醒':'待人工确认',friendlyAuditReason(a.manual_questions))}</div>`;
   if(needsManual(i)||manual)html+=`<div class="review-note"><label for="manualReason">人工建议（选填）</label><textarea id="manualReason" rows="3" maxlength="500" aria-describedby="manualReasonHint" placeholder="例如：已查商品规格，12.5 英寸为外部宽度">${esc(manualSuggestion(i))}</textarea><small id="manualReasonHint" class="muted">保存后的建议可供同版商品资料再次审核时参考。</small></div>`;
   if(currentResult&&i.reviewStatus==='verify'&&!canManualPass(i))html+='<p class="muted">这条记录与当前商品资料或审核版本不对应，请先重新审核。</p>';
   if(missing.length)html+=field('缺少信息或未完成检查',missing);
@@ -863,11 +876,16 @@ async function detailAction(action) {
   if(manualAction&&!needsManual(i)&&!prior)return;
   if(manualAction&&decision!=null&&!['passed','excluded'].includes(decision))return;
   if(manualAction&&decision==='passed'&&decision!==prior?.decision&&!canManualPass(i))return toast('这条记录不符合通过条件，请核对资料后重新审核');
+  if(action==='recopy'){
+    if(!copyAuthorized(i))return;
+    updateDetailDirty();
+    if(detailDirty)return toast('请先保存或放弃当前修改，再重新清理文案');
+  }
   if(action==='reaudit'&&(['auditing','unconfirmed'].includes(i.reviewStatus)||i.auditRecoveryBlocked)&&!confirm('原审核结果尚未确认。重新审核会发起一次新的AI调用；建议先再次查询原结果。仍要重新审核？'))return;
   if(action==='recollect'&&!confirm('这会提交新的采集任务，取得新资料后重新审核。旧资料留作历史；当前导出资格立即失效。继续？'))return;
   const previous=JSON.parse(JSON.stringify(i)),previousCollection=b.collection?JSON.parse(JSON.stringify(b.collection)):b.collection,previousRunStatus=b.runStatus;let committed=false;app.detailBusy=true;lockDetailInputs(true);renderDetailFooter(i);
   try {
-  if(action==='recopy') {if(i.reviewStatus!=='passed')return;invalidate(i);await copyItem(b,i);committed=true;clearCurrentDetailDirty(b.id,i.itemId);refreshCurrentDetail(b.id,i.itemId);render();return;}
+  if(action==='recopy') {invalidate(i);await copyItem(b,i);committed=true;clearCurrentDetailDirty(b.id,i.itemId);refreshCurrentDetail(b.id,i.itemId);render();return;}
   if(action==='edit') {
     archive(i);(i.dataHistory??=[]).push({data:i.collected,revision:i.dataRevision,time:now()});
     i.collected={...i.collected,title:$('editTitle').value,bullets:$('editBullets').value,description:$('editDesc').value};
@@ -908,8 +926,8 @@ function exportRows(b,selected=false) {
   const scope=selected?b.items.filter(i=>app.selected.has(i.itemId)):b.items, good=scope.filter(ready);
   if(!good.length)throw new Error('没有审核通过、文案检查完成且保存成功的商品');
   const cols=[['SKU',i=>i.asin]];
-  if(exportPrefs.brand)cols.push(['品牌',brandOf]);cols.push(['链接',amazon]);if(exportPrefs.title)cols.push(['标题',i=>i.copyData.title]);
-  if(exportPrefs.bullets)cols.push(['五点',i=>i.copyData.bullets]);if(exportPrefs.desc)cols.push(['长描述',i=>i.copyData.description]);
+  if(exportPrefs.brand)cols.push(['品牌',brandOf]);cols.push(['链接',amazon]);if(exportPrefs.title)cols.push(['标题',i=>stripBrandLabelLines(i.copyData.title,brandOf(i))]);
+  if(exportPrefs.bullets)cols.push(['五点',i=>stripBrandLabelLines(i.copyData.bullets,brandOf(i))]);if(exportPrefs.desc)cols.push(['长描述',i=>stripBrandLabelLines(i.copyData.description,brandOf(i))]);
   const rows=[cols.map(c=>c[0]),...good.map(i=>cols.map(c=>text(c[1](i))))];
   if(rows.some(r=>r.some(v=>v.length>32767)))throw new Error('存在超过Excel单元格32767字符上限的字段，未截断或导出；请先处理长文本');
   return {rows,count:good.length,omitted:scope.length-good.length,legacy:good.filter(i=>exportCheck(i).legacy).length};
