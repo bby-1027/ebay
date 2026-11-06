@@ -157,7 +157,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
 // Connection settings are copied from the inspected deployment by build.py.
 const WORKER_URL = 'https://scraper-proxy.1172743763.workers.dev';
 const TOKEN = 'ebay1031';
-const BUILD = '2026-11-06-compact-progress1';
+const BUILD = '2026-11-06-d1';
 const PROHIBITION_REVIEW_VERSION=1;
 const MISSING_SOURCE_NOTICE='AI 审核结果缺少能对应到商品原文的证据';
 const AUDIT_CONCURRENCY = 2;
@@ -386,15 +386,21 @@ async function fetchData() {
   try {
     const d=await api('/api/data'); if(app.saving||app.processing||app.detailBusy||readEpoch!==(app.saveEpoch||0))return; if(Number(d.version||0)<Number(app.serverVersion||0)){toast('云端状态正在同步，请稍后刷新');return;} app.batches=Array.isArray(d.batches)?d.batches:[];app.serverVersion=d.version??0;
     app.batches.forEach(b=>{b.items=b.items||[];b.items.forEach(i=>{if(i.dataRevision==null&&i.auditRevision==null&&i.copyRevision==null)i.legacyUnversioned=true;i.dataRevision=i.dataRevision||0;});});
-    app.readAt=now();app.stopping=false;render();
+    app.storage=d.storage;app.readAt=now();app.stopping=false;render();
   } finally {app.fetching=false;$('refreshState').disabled=false;$('refreshState').textContent='刷新状态';}
 }
 // All writes in the supported single processing window are serialized. KV is not a cross-device lock.
-function saveData() {
+function saveData(activeBatch) {
   app.saveEpoch=(app.saveEpoch||0)+1;app.saving=(app.saving||0)+1;
   const work=async()=>{
     try {
-      const persist=async()=>{const wait=1100-(Date.now()-(app.lastWrite||0));if(wait>0)await sleep(wait);const d=await api('/api/data',{method:'POST',body:{version:app.serverVersion,batches:app.batches}});app.serverVersion=d.version;app.lastWrite=Date.now();app.readAt=now();app.stopping=false;return true;};
+      const persist=async()=>{
+        const useD1=app.storage==='d1';
+        if(!useD1){const wait=1100-(Date.now()-(app.lastWrite||0));if(wait>0)await sleep(wait);}
+        const changes=useD1&&activeBatch?{batch:activeBatch}:{batches:app.batches};
+        const d=await api('/api/data',{method:'POST',body:{version:app.serverVersion,...changes}});
+        app.serverVersion=d.version;app.lastWrite=Date.now();app.readAt=now();app.stopping=false;return true;
+      };
       if(app.processing)return await persist();
       if(!navigator.locks)throw new Error('当前浏览器无法保护写入，请使用新版Chrome');
       return await navigator.locks.request('ebay-workbench-processing-v1',{ifAvailable:true},async lock=>{if(!lock)throw new Error('另一个页面正在处理，本页暂时只读，请刷新查看');return persist();});
@@ -466,10 +472,10 @@ function enterBatch(id){app.currentBatchId=id;app.view='items';app.selected.clea
 function returnHome(){app.view='home';sessionStorage.setItem('audit_view','home');render();}
 function archive(i){if(i.audit)(i.auditHistory??=[]).push({audit:i.audit,dataRevision:i.auditRevision,manual:i.manualDecision||null});}
 function invalidate(i){if(i.copyData)(i.copyHistory??=[]).push({data:i.copyData,revision:i.copyRevision,time:now()});i.copyStatus='pending';i.copyData=null;i.copyRevision=null;}
-async function setPaused(){const b=batch(app.activeId);if(!b)return;b.runStatus='paused';await saveData();render();toast('已暂停后续步骤；已提交任务保留，返回结果会保存');}
+async function setPaused(){const b=batch(app.activeId);if(!b)return;b.runStatus='paused';await saveData(b);render();toast('已暂停后续步骤；已提交任务保留，返回结果会保存');}
 async function submitCollection(b,items) {
   const attempt={name:`wb_${Date.now()}_${uid().slice(0,8)}`,remoteId:null,startedAt:now(),state:'submitting',members:items.map(i=>({id:i.itemId,revision:i.dataRevision||0})),errors:0};
-  b.collection=attempt;items.forEach(i=>{i.collectStatus='collecting';i.reason='正在提交本次采集';});await saveData();
+  b.collection=attempt;items.forEach(i=>{i.collectStatus='collecting';i.reason='正在提交本次采集';});await saveData(b);
   try {
     const d=await api('/api/batches',{method:'POST',body:{asins:items.map(i=>i.asin),batch_name:attempt.name},timeout:20000});
     attempt.remoteId=validRemoteId(d);attempt.state='polling';
@@ -477,7 +483,7 @@ async function submitCollection(b,items) {
     // Submission may have succeeded remotely. Never convert this into an automatic new POST.
     attempt.state='submission_unknown';attempt.note='提交响应未确认，将按原任务名称查询，禁止自动重提：'+e.message;
   }
-  await saveData();
+  await saveData(b);
 }
 async function readResults(remoteId) {
   if(!/^\d+$/.test(text(remoteId)))throw new Error('尚未取得数字采集任务编号，不能使用任务名称代替');
@@ -508,6 +514,7 @@ function collectionSpecifications(f){
   return Object.entries(values).map(([key,value])=>[key,factText(value).normalize('NFKC').toLowerCase().replace(/\s+/g,' ')]).filter(([,value])=>value);
 }
 function applyRows(b,attempt,rows,terminal,onlyIds) {
+  let changed=false;
   for(const member of attempt.members) {
     if(onlyIds&&!onlyIds.has(member.id))continue;
     const i=b.items.find(x=>x.itemId===member.id);if(!i||(i.dataRevision||0)!==member.revision)continue;
@@ -526,6 +533,7 @@ function applyRows(b,attempt,rows,terminal,onlyIds) {
     const r=preferred.find(({row})=>text(row.batch_has_asin_data).trim().toLowerCase()==='true')
       ||preferred.find(({row})=>collectionTaskMatch(row,attempt)>0)||preferred[0];
     if(r&&!conflict) {
+      changed=true;
       i.collected=r.fields;i.collectedAt=now();i.collectionRef={name:attempt.name,id:attempt.remoteId};
       delete i.collectionIssue;
       i.collectStatus='collected';i.reviewStatus='pending';invalidate(i);
@@ -533,13 +541,18 @@ function applyRows(b,attempt,rows,terminal,onlyIds) {
     } else if(terminal) {
       const issues=candidates.map(x=>collectionRowIssue(x,attempt));
       const issue=conflict?'conflicting_rows':issues.find(v=>v!=='wrong_task'&&v!=='upstream_failed')||issues[0]||'missing_row';
-      i.collectionIssue=issue;i.collectStatus=issue==='upstream_failed'?'error':'sync_error';
+      const status=issue==='upstream_failed'?'error':'sync_error';
+      if(i.collectionIssue!==issue||i.collectStatus!==status||i.reason!==COLLECTION_ISSUES[issue])changed=true;
+      i.collectionIssue=issue;i.collectStatus=status;
       i.reason=COLLECTION_ISSUES[issue];
     }
   }
+  return changed;
 }
 async function pollCollection(b,onlyIds) {
   const a=b.collection;if(!a||a.state==='completed')return;
+  const previousId=a.remoteId,previousState=a.state;
+  let changed=false;
   try {
     let s=null;
     if(a.name) {
@@ -552,10 +565,10 @@ async function pollCollection(b,onlyIds) {
     }
     if(!a.remoteId)throw new Error('无法确认本次任务编号。请接回已有任务，不能自动重新采集');
     const rows=await readResults(a.remoteId), terminal=s?taskDone(s):rows.length>0&&rows.every(r=>['completed','done','failed','success','succeeded','cancelled'].includes(text(r.batch_task_status).trim().toLowerCase()));
-    applyRows(b,a,rows,terminal,onlyIds);a.errors=0;a.state=terminal?'completed':'polling';a.lastReadAt=now();
+    changed=applyRows(b,a,rows,terminal,onlyIds);a.errors=0;a.state=terminal?'completed':'polling';a.lastReadAt=now();
     if(terminal&&b.items.some(i=>i.collectStatus==='sync_error'))a.state='sync_error';
   } catch(e) {a.errors=(a.errors||0)+1;a.note=e.message;a.state='sync_error';for(const m of a.members){if(onlyIds&&!onlyIds.has(m.id))continue;const i=b.items.find(x=>x.itemId===m.id);if(i&&(i.dataRevision||0)===m.revision&&i.collectStatus!=='collected'&&i.collectionIssue!=='upstream_failed'){i.collectStatus='sync_error';i.collectionIssue='read_error';i.reason='暂时无法读取本次结果：'+e.message;}}}
-  await saveData();
+  if(changed||previousId!==a.remoteId||previousState!==a.state||onlyIds)await saveData(b);
 }
 function auditElapsedMs(i,serverStartedAt){
  const nowMs=Date.now();
@@ -586,15 +599,15 @@ function blockAuditRecovery(i,reason){
 }
 
 async function auditItem(b,i,recover=false){
- const check=inputCheck({...i.collected,requestedAsin:i.asin});if(!check.ok){i.reviewStatus='skipped';i.reason='资料不足，未进行AI审核：'+check.reason;await saveData();return;}
+  const check=inputCheck({...i.collected,requestedAsin:i.asin});if(!check.ok){i.reviewStatus='skipped';i.reason='资料不足，未进行AI审核：'+check.reason;await saveData(b);return;}
    const rev=i.dataRevision||0,decisionRevision=i.decisionRevision||0,fields=JSON.parse(JSON.stringify(i.collected||{}));
   const priorNote=recover?i.auditRequestReviewNote:manualSuggestion(i);
   const note=typeof priorNote==='string'?priorNote.trim().slice(0,500).trimEnd():'';
   const expectedHash=await auditInputHash(fields,i.asin,rev,note);
   if((i.dataRevision||0)!==rev||(i.decisionRevision||0)!==decisionRevision)return;
   if(!recover&&(b.runStatus==='paused'||app.stopping))return;
- if(!recover){i.reviewStatus='auditing';i.reason='正在提交审核';i.auditRequestId=uid();i.auditWaitSince=now();i.auditNextCheckAt=0;i.auditReceiptConfirmed=false;i.auditRecoveryBlocked=false;i.auditRequestHash=expectedHash;i.auditRequestReviewNote=note;await saveData();}
-   if(recover&&(!i.auditRequestId||(i.auditRequestHash&&i.auditRequestHash!==expectedHash))){blockAuditRecovery(i,'原任务编号缺失或商品资料已经变化，不能使用旧审核结果');await saveData();return;}
+ if(!recover){i.reviewStatus='auditing';i.reason='正在提交审核';i.auditRequestId=uid();i.auditWaitSince=now();i.auditNextCheckAt=0;i.auditReceiptConfirmed=false;i.auditRecoveryBlocked=false;i.auditRequestHash=expectedHash;i.auditRequestReviewNote=note;await saveData(b);}
+   if(recover&&(!i.auditRequestId||(i.auditRequestHash&&i.auditRequestHash!==expectedHash))){blockAuditRecovery(i,'原任务编号缺失或商品资料已经变化，不能使用旧审核结果');await saveData(b);return;}
   const requestId=i.auditRequestId;
   const changedClock=!Number.isFinite(Date.parse(i.auditWaitSince))||Date.parse(i.auditWaitSince)>Date.now();
  if(changedClock)i.auditWaitSince=now();
@@ -620,7 +633,7 @@ async function auditItem(b,i,recover=false){
  if(beforeStatus!==i.reviewStatus||beforeReceipt!==!!i.auditReceiptConfirmed)mustSave=true;
  // Pending reads update local timing only. Do not rewrite the entire workbench
  // on every poll and leave a misleading "saving" banner during model waiting.
- if(mustSave)await saveData();
+  if(mustSave)await saveData(b);
 }
 
 function cleanText(value){
@@ -694,10 +707,9 @@ function settleManualBatch(b){
 }
 async function copyItem(b,i) {
   if(!copyAuthorized(i)||(!auditCurrent(i)&&!legacyAudit(i)))return;
-  i.copyStatus='processing';await saveData();
     try{i.copyData=prepareCopy(i.collected||{},brandOf(i));i.copyRevision=i.dataRevision||0;i.copyStatus='completed';i.copyCheckedAt=now();i.reason='审核通过，文案检查及清理已完成';}
   catch(e){i.copyStatus='verify';i.reason='文案待核验：'+e.message;}
-  settleManualBatch(b);await saveData();
+  settleManualBatch(b);await saveData(b);
 }
 async function runLoop(bid,{recheckVerification=false,resyncCollection=false,recheckProhibition=false}={}) {
   const b=batch(bid);if(!b)return;
@@ -722,7 +734,7 @@ async function runLoop(bid,{recheckVerification=false,resyncCollection=false,rec
       for(const i of b.items){if(i.reviewStatus==='passed'&&(!sellerAuditCurrent(i)||(!auditCurrent(i)&&!legacyAudit(i)))){archive(i);i.reviewStatus='pending';i.auditRequestId=null;i.auditRecoverCount=0;i.auditWaitSince=null;i.auditNextCheckAt=0;invalidate(i);i.reason='资料与旧结果无法对应，已保留历史，等待重新审核';}}
     }
     for(const i of scopedItems())if(i.reviewStatus==='auditing'&&!i.auditRequestId)blockAuditRecovery(i,'审核记录缺少原任务编号，已停止等待；请人工决定是否重新审核');
-    if(!checkSelection&&!resyncIds)await saveData();
+    if(!checkSelection&&!resyncIds)await saveData(b);
     while(b.runStatus==='running'&&!app.stopping) {
       if(!scopedIds&&b.collection&&!['completed','sync_error'].includes(b.collection.state)){await pollCollection(b);render();}
       if(b.runStatus!=='running')break;
@@ -753,7 +765,7 @@ async function runLoop(bid,{recheckVerification=false,resyncCollection=false,rec
       if(b.items.some(i=>i.collectStatus==='collecting')&&!b.collection){b.runStatus='paused';b.note='旧版未保存任务编号，请先接回本次结果';}
       else if(scopedIds&&['采集资料','审核中','文案处理中'].includes(stage(b)))b.runStatus='paused';
       else b.runStatus=counts(b).failures?'blocked':counts(b).verify?'waiting_review':'completed';
-      await saveData();break;
+      await saveData(b);break;
     }
   } finally {
     // Keep the processing lock until submitted results have finished saving.
@@ -1085,7 +1097,7 @@ function toggleBatchManagement(){
   batchAdmin.mode=!batchAdmin.mode;if(!batchAdmin.mode)batchAdmin.selected.clear();renderHome();
 }
 function applyAdminData(data){
-  app.batches=data.batches||[];app.serverVersion=data.version??0;app.readAt=now();app.stopping=false;
+  app.batches=data.batches||[];app.serverVersion=data.version??0;app.storage=data.storage;app.readAt=now();app.stopping=false;
   if(!batch(app.currentBatchId)){app.currentBatchId=null;app.view='home';app.selected.clear();}
   batchAdmin.selected.clear();render();
 }
