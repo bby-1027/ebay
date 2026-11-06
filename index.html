@@ -499,7 +499,7 @@ async function auditItem(b,i,recover=false){
   if((i.dataRevision||0)!==rev||(i.decisionRevision||0)!==decisionRevision||i.auditRequestId!==requestId)return;
    if(d.pending){if((d.input_hash&&d.input_hash!==expectedHash)||(d.data_revision!=null&&d.data_revision!==rev)){blockAuditRecovery(i,'原任务接收的商品资料与本次资料不一致，已停止恢复');mustSave=true;}else waitForOriginal(d.detail,d.started_at,d.receipt_confirmed,d.overdue);}
   else if(d.error){i.reviewStatus='error';i.auditFailureKnown=true;i.auditNextCheckAt=0;i.reason='审核未完成：'+(d.detail||d.error);i.auditError={code:d.error,detail:d.detail,request_id:i.auditRequestId,time:now(),diagnostic_summary:d.diagnostic_summary||null};mustSave=true;}
-  else if(d.success&&d.audit){if(d.input_hash!==expectedHash||d.audit.data_revision!==rev||(d.audit._request_id&&d.audit._request_id!==requestId)||(d.audit._asin&&d.audit._asin!==i.asin)){blockAuditRecovery(i,'原审核结果与本次商品资料或任务编号不一致，已阻止使用');mustSave=true;}else{archive(i);i.manualDecision=null;i.auditFailureKnown=false;i.auditRecoverCount=0;i.auditWaitSince=null;i.auditNextCheckAt=0;i.audit=d.audit;i.auditInputHash=expectedHash;i.auditRevision=rev;i.reviewStatus=d.audit.decision;i.reason=d.audit.reason;invalidate(i);mustSave=true;}}
+  else if(d.success&&d.audit){if(d.input_hash!==expectedHash||d.audit.data_revision!==rev||(d.audit._request_id&&d.audit._request_id!==requestId)||(d.audit._asin&&d.audit._asin!==i.asin)){blockAuditRecovery(i,'原审核结果与本次商品资料或任务编号不一致，已阻止使用');mustSave=true;}else{archive(i);i.manualDecision=null;i.auditFailureKnown=false;i.auditRecoverCount=0;i.auditWaitSince=null;i.auditNextCheckAt=0;i.audit=d.audit;i.auditInputHash=expectedHash;i.auditRevision=rev;i.reviewStatus=d.audit.review_hold?'verify':d.audit.decision;i.reason=d.audit.reason;invalidate(i);mustSave=true;}}
    else throw new Error('审核返回结构不完整');
  }catch(e){if((i.dataRevision||0)!==rev||(i.decisionRevision||0)!==decisionRevision||i.auditRequestId!==requestId)return;waitForOriginal('审核响应尚未确认：'+e.message);}
  if(beforeStatus!==i.reviewStatus||beforeReceipt!==!!i.auditReceiptConfirmed)mustSave=true;
@@ -746,7 +746,7 @@ function detailNavigationFooter(){
   return `<div class="detail-navigation"><button data-action="detail-prev" ${busy||index<=0?'disabled':''}>上一条</button><span>${index>=0?index+1:0} / ${nav.ids.length}</span><button data-action="detail-next" ${busy||index<0||index>=nav.ids.length-1?'disabled':''}>下一条</button></div>`;
 }
 function renderDetailFooter(i){const busy=!!app.detailBusy,blocked=busy||app.processing;
-  $('dtFooter').innerHTML=detailNavigationFooter()+`<div class="detail-main-actions">${needsManual(i)?`${i.reviewStatus==='verify'?`<button class="primary" data-action="manual-pass" ${blocked?'disabled':''}>人工通过</button>`:''}<button data-action="manual-exclude" ${blocked?'disabled':''}>人工淘汰</button>`:''}${ready(i)?'<button class="primary" data-action="export-one">导出此商品</button>':''}<button data-close>关闭</button></div>`;
+  $('dtFooter').innerHTML=detailNavigationFooter()+`<div class="detail-main-actions">${needsManual(i)?`${i.reviewStatus==='verify'&&!i.audit?.review_hold?`<button class="primary" data-action="manual-pass" ${blocked?'disabled':''}>人工通过</button>`:''}<button data-action="manual-exclude" ${blocked?'disabled':''}>人工淘汰</button>`:''}${ready(i)?'<button class="primary" data-action="export-one">导出此商品</button>':''}<button data-close>关闭</button></div>`;
 }
 function openDetail(iid,{preserveNavigation=false}={}) {
   const b=batch(),i=b?.items.find(x=>x.itemId===iid);if(!i)return false;
@@ -771,6 +771,7 @@ function openDetail(iid,{preserveNavigation=false}={}) {
   if(i.reviewStatus==='skipped')html+='<p class="muted">资料不足，未调用AI。</p>';
   if(currentResult&&a.manual_questions?.length)html+=`<div class="review-questions">${field('待人工确认',a.manual_questions)}</div>`;
   if(needsManual(i))html+='<div class="review-note"><label for="manualReason">人工建议（选填）</label><textarea id="manualReason" rows="3" maxlength="500" aria-describedby="manualReasonHint" placeholder="例如：已查商品规格，12.5 英寸为外部宽度"></textarea><small id="manualReasonHint" class="muted">提交人工结论时保存。填写的建议可供这条 SKU 的同版资料再次 AI 审核时参考。</small></div>';
+  if(currentResult&&a.review_hold)html+='<p class="muted">请核实待确认项。可在更多操作修正资料或重新审核，也可直接人工淘汰。</p>';
   if(missing.length)html+=field('缺少信息或未完成检查',missing);
   if(currentResult&&a.seller_review?.materials?.requirements?.length)html+=field('销售材料',a.seller_review.materials.requirements);
   if(currentResult)html+=renderAuditBasis(i);
@@ -802,6 +803,7 @@ async function detailAction(action) {
   if(app.processing)return toast('请先暂停，等待当前步骤保存后再修改商品');
   if(action==='expand-text'){return;}
   if(!['recopy','edit','manual-pass','manual-exclude','reaudit','recollect'].includes(action))return;
+  if(action==='manual-pass'&&i.audit?.review_hold)return toast('审核依据仍待核验，请核对资料后重新审核');
   if(action==='manual-pass'&&(!sellerAuditCurrent(i)||!auditCurrent(i)||i.reviewStatus!=='verify'))return toast('请先按最新标准重新审核，再进行人工核验');
   if(action==='manual-pass'&&['excluded','not_selected'].includes(i.audit?.decision))return toast('本批已筛除，需修正事实后重新审核，不能直接放行');
   if(action==='manual-pass'&&i.audit?.exclusion_reason_type==='official_prohibited')return toast('明确禁售不能直接人工放行，请纠正资料后重审');
@@ -1032,7 +1034,7 @@ async function init() {
 }
 async function checkBackend(){
   if(app.backendCompatible)return true;
-  try{const info=await api('/api/workbench_info',{timeout:10000});if(info.audit_contract!==2||info.audit_protocol!==3||!(info.audit_model_protocol>=7)||info.seller_policy_version!==SELLER_POLICY_VERSION)throw new Error('版本不对应');app.backendCompatible=true;return true;}
+  try{const info=await api('/api/workbench_info',{timeout:10000});if(info.audit_contract!==2||info.audit_protocol!==3||!(info.audit_model_protocol>=8)||info.seller_policy_version!==SELLER_POLICY_VERSION)throw new Error('版本不对应');app.backendCompatible=true;return true;}
   catch{toast('审核后台版本未配套，请同时部署本次 worker.js 和 index.html。旧数据仍保留，需按新标准审核后导出。');return false;}
 }
 if(!window.__AUDIT_TEST__)fail(init());
