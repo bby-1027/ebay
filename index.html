@@ -246,15 +246,21 @@ function collectionRowIssue(r,attempt){
   const hasBatchData=text(r.batch_has_asin_data).trim().toLowerCase();
   const id=text(r.batch_task_batch_id??r.batch_id).trim(),name=text(r.batch_name).trim();
   if((id&&attempt.remoteId&&id!==text(attempt.remoteId))||(name&&attempt.name&&name!==attempt.name))return 'wrong_task';
-  if(['failed','failure','error','cancelled','canceled'].includes(status))return 'upstream_failed';
+  
+  // 放宽状态匹配，只要包含 fail/error/cancel 就视为失败
+  if (status.includes('fail') || status.includes('error') || status.includes('cancel')) return 'upstream_failed';
+  
   const complete=['completed','done','success','succeeded'].includes(status);
   if(status&&!complete)return 'task_unconfirmed';
   if(['false','0'].includes(hasBatchData))return 'no_batch_data';
   if(hasBatchData==='true'||(complete&&((id&&id===text(attempt.remoteId))||(name&&name===attempt.name))))return '';
   const stamp=r.batch_asin_data_updated_at||r.crawl_time;
   if(!stamp||!attempt.startedAt)return 'missing_timestamp';
-  const iso=text(stamp).replace(' ','T'); const ms=Date.parse(/[zZ]|[+-]\d\d:\d\d$/.test(iso)?iso:iso+'Z');
-  return !Number.isFinite(ms)||!Number.isFinite(Date.parse(attempt.startedAt))?'invalid_timestamp':ms<Date.parse(attempt.startedAt)-2000?'old_timestamp':'';
+  const iso=text(stamp).replace(' ','T'); 
+  const ms=Date.parse(/[zZ]|[+-]\d\d:\d\d$/.test(iso)?iso:iso+'Z');
+  
+  // 放宽时间戳对比容差，从 2 秒放宽到 1 小时，防止服务器时差导致误判
+  return !Number.isFinite(ms)||!Number.isFinite(Date.parse(attempt.startedAt))?'invalid_timestamp':ms<Date.parse(attempt.startedAt)-3600000?'old_timestamp':'';
 }
 function sellerAuditCurrent(i){return i.audit?._seller_policy_version===SELLER_POLICY_VERSION;}
 function copyAuthorized(i){return (auditCurrent(i)||legacyAudit(i))&&i.reviewStatus==='passed'&&sellerAuditCurrent(i)&&(
@@ -476,7 +482,7 @@ function applyRows(b,attempt,rows,terminal,onlyIds) {
     if(onlyIds&&!onlyIds.has(member.id))continue;
     const i=b.items.find(x=>x.itemId===member.id);if(!i||(i.dataRevision||0)!==member.revision)continue;
     if(i.collectStatus==='collected'||i.reviewStatus==='skipped')continue;
-    const candidates=rows.filter(x=>asin(x.asin||x.ASIN)===i.asin);
+    const candidates=rows.filter(x=>asin(x.asin||x.ASIN||x['ASIN']||x['asin']||'')===i.asin.toUpperCase());
     const r=candidates.find(x=>!collectionRowIssue(x,attempt));
     if(r) {
       i.collected=normalizeCollectedData(r);i.collected.requestedAsin=i.asin;i.collectedAt=now();i.collectionRef={name:attempt.name,id:attempt.remoteId};
