@@ -245,7 +245,15 @@ function freshRow(r, attempt) {
   return Number.isFinite(ms)&&ms>=Date.parse(attempt.startedAt)-2000;
 }
 function sellerAuditCurrent(i){return i.audit?._seller_policy_version===SELLER_POLICY_VERSION;}
-function copyAuthorized(i){return (auditCurrent(i)||legacyAudit(i))&&i.reviewStatus==='passed'&&sellerAuditCurrent(i)&&!['excluded','not_selected','skipped','system_incomplete'].includes(i.audit?.decision)&&(['passed'].includes(i.audit?.decision)||i.manualDecision?.decision==='passed');}
+function copyAuthorized(i){
+  if(!auditCurrent(i)&&!legacyAudit(i))return false;
+  if(!sellerAuditCurrent(i))return false;
+  if(i.reviewStatus!=='passed')return false;
+  if(i.manualDecision?.decision==='passed')return true;
+  const d=i.audit?.decision;
+  if(['excluded','not_selected','skipped','system_incomplete'].includes(d))return false;
+  return d==='passed';
+}
 function auditCurrent(i){return i.auditRevision!=null&&i.auditRevision===(i.dataRevision||0)&&(i.audit?.data_revision==null||i.audit.data_revision===(i.dataRevision||0))&&(!i.audit?._input_hash||!i.auditInputHash||i.audit._input_hash===i.auditInputHash);}
 function legacyAudit(i){
   const unversioned=i.legacyUnversioned || (i.dataRevision==null&&i.auditRevision==null&&i.copyRevision==null);
@@ -264,10 +272,22 @@ function exportCheck(i){
   return {ok:false,reason:'资料已变化或审核与文案版本不对应，请重新审核'};
 }
 function ready(i){return !app.stopping&&!app.saving&&exportCheck(i).ok;}
-function needsManual(i){return i.reviewStatus==='verify'||(i.reviewStatus==='passed'&&i.copyStatus==='verify');}
+function needsManual(i){
+  if(i.reviewStatus==='verify')return true;
+  if(i.reviewStatus==='passed'&&i.copyStatus==='verify')return true;
+  if(i.manualDecision&&(i.audit?.decision==='verify'||i.audit?.decision==='system_incomplete'))return true;
+  return false;
+}
 function canManualPass(i){
-  return i.reviewStatus==='verify'&&i.audit?.decision==='verify'&&i.audit.manual_approval_allowed===true
-    &&i.audit.exclusion_reason_type==='none'&&sellerAuditCurrent(i)&&auditCurrent(i);
+  if(i.reviewStatus!=='verify')return false;
+  if(!sellerAuditCurrent(i)||!auditCurrent(i))return false;
+  const a=i.audit||{};
+  const checks=Array.isArray(a.review_checks)?a.review_checks:[];
+  if(checks.some(c=>['blocked','unresolved_risk'].includes(c.status)))return false;
+  if(Array.isArray(a.required_checks_not_completed)&&a.required_checks_not_completed.length)return false;
+  if(Array.isArray(a.required_unverified)&&a.required_unverified.length)return false;
+  if(a.exclusion_reason_type&&a.exclusion_reason_type!=='none')return false;
+  return a.decision==='verify'||a.decision==='system_incomplete'||a.manual_approval_allowed===true;
 }
 function canRecheckVerification(i){return i.collectStatus==='collected'&&i.reviewStatus==='verify';}
 function hasFailure(i) {return ['error','sync_error'].includes(i.collectStatus)||['error','unconfirmed'].includes(i.reviewStatus)||i.copyStatus==='error';}
@@ -853,7 +873,8 @@ async function detailAction(action) {
     if(b.collection)b.collection.members=b.collection.members.filter(m=>m.id!==i.itemId);
   }
   settleManualBatch(b);await saveData();committed=true;clearCurrentDetailDirty(b.id,i.itemId);refreshCurrentDetail(b.id,i.itemId);render();
-  if(action==='manual-pass'){await copyItem(b,i);refreshCurrentDetail(b.id,i.itemId);render();}
+    if(action==='manual-pass'){await copyItem(b,i);refreshCurrentDetail(b.id,i.itemId);render();}
+  else if(action==='manual-exclude'){refreshCurrentDetail(b.id,i.itemId);render();}
   else if(['reaudit','recollect'].includes(action)){closeDialog($('detailDialog'));await startBatch(b.id);}
   } catch(e){
     if(!committed){b.items[b.items.findIndex(x=>x.itemId===i.itemId)]=previous;b.collection=previousCollection;if(app.currentBatchId===b.id&&app.detailItemId===i.itemId)detailDirty=true;}
