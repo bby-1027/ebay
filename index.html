@@ -713,7 +713,7 @@ async function runLoop(bid,{recheckVerification=false,resyncCollection=false,rec
   const resyncIds=resyncCollection?new Set(b.items.filter(i=>canResyncCollection(b,i)).map(i=>i.itemId)):null;
   if(resyncIds&&(!resyncIds.size||app.saving||app.detailBusy))return;
   const checkSelection=recheckProhibition?pendingProhibitionRefresh:recheckVerification?canRecheckVerification:null;
-   const scopedIds=resyncIds||(targetIds?new Set(targetIds):(checkSelection?new Set(b.items.filter(checkSelection).map(i=>i.itemId)):null));
+    const scopedIds=resyncIds||(targetIds?new Set(targetIds):(checkSelection?new Set(b.items.filter(checkSelection).map(i=>i.itemId)):null));
   if(checkSelection&&!scopedIds.size)return;
   const scopedItems=()=>scopedIds?b.items.filter(i=>scopedIds.has(i.itemId)):b.items;
   const previousRunStatus=b.runStatus;
@@ -779,7 +779,7 @@ async function startBatch(bid,{recheckVerification=false,resyncCollection=false,
   if(!navigator.locks)return toast('此浏览器不支持处理窗口保护，请使用新版Chrome');
   await navigator.locks.request('ebay-workbench-processing-v1',{ifAvailable:true},async lock=>{
     if(!lock)return toast('同一浏览器另一个页面正在处理，此页仅查看');
-    try{await runLoop(bid,{recheckVerification,resyncCollection,recheckProhibition,targetIds});}catch(e){toast('处理已停止：'+e.message);}
+        try{await runLoop(bid,{recheckVerification,resyncCollection,recheckProhibition,targetIds});}catch(e){toast('处理已停止：'+e.message);}
   });
   if(!recheckVerification&&!resyncCollection&&!recheckProhibition&&['completed','waiting_review'].includes(batch(bid)?.runStatus)&&!app.stopping){const queued=app.batches.find(b=>b.runStatus==='queued');if(queued)await startBatch(queued.id);}
 }
@@ -1015,7 +1015,7 @@ async function detailAction(action) {
     $('detailDialog').close();render();
     if(decisionChanged&&decision==='passed'){await copyItem(b,i);render();}
     return;
-       } else if(action==='reaudit') {archive(i);i.auditRetrySource=i.audit?.review_hold?i.auditRequestId||i.audit._request_id:null;i.reviewStatus='pending';i.auditRequestId=null;i.auditRequestHash=null;i.auditRecoveryBlocked=false;i.auditRecoverCount=0;i.auditWaitSince=null;i.auditNextCheckAt=0;invalidate(i);i.reason='等待重新审核';}
+      } else if(action==='reaudit') {archive(i);i.auditRetrySource=i.audit?.review_hold?i.auditRequestId||i.audit._request_id:null;i.reviewStatus='pending';i.auditRequestId=null;i.auditRequestHash=null;i.auditRecoveryBlocked=false;i.auditRecoverCount=0;i.auditWaitSince=null;i.auditNextCheckAt=0;invalidate(i);i.reason='等待重新审核';}
   else if(action==='recollect') {
     archive(i);(i.dataHistory??=[]).push({data:i.collected,revision:i.dataRevision,time:now()});
     i.dataRevision=(i.dataRevision||0)+1;i.collectStatus='pending';i.reviewStatus='pending';i.auditRequestId=null;delete i.auditRetrySource;invalidate(i);i.reason='等待本次新采集';
