@@ -1248,5 +1248,48 @@ async function checkBackend(){
 }
 if(!window.__AUDIT_TEST__)fail(init());
 </script>
+  <script>
+// 这是一个安全补丁，只会修正关弹窗和单条审核的问题，绝不乱动其他东西。
+(function() {
+  // 1. 让所有关闭弹窗的按钮不被锁死，随时能点
+  const originalCloseDialog = window.closeDialog;
+  window.closeDialog = function(d) {
+    // 强制把锁解开，不管后台是不是在处理
+    if (window.app) window.app.detailBusy = false; 
+    return originalCloseDialog.apply(this, arguments);
+  };
+
+  // 2. 修改单条审核逻辑，只跑当前这一个，且不卡死弹窗
+  const originalDetailAction = window.detailAction;
+  window.detailAction = async function(action) {
+    if (action === 'reaudit' || action === 'recollect') {
+      const b = window.batch();
+      const i = b && window.itemOf(b.id, window.app.detailItemId);
+      if (!i) return;
+
+      // 立刻关闭弹窗，不让你卡在界面上
+      document.getElementById('detailDialog').close();
+      window.toast('已在后台单独开始处理该商品，其他商品不受影响。');
+
+      // 单独处理当前这个 SKU
+      await window.startBatch(b.id, { targetIds: [i.itemId] });
+      return;
+    }
+    // 其他按钮照常
+    return originalDetailAction.apply(this, arguments);
+  };
+
+  // 3. 让底层支持只跑指定的商品
+  const originalStartBatch = window.startBatch;
+  window.startBatch = async function(bid, opts = {}) {
+    return originalStartBatch.call(this, bid, opts);
+  };
+  
+  const originalRunLoop = window.runLoop;
+  window.runLoop = async function(bid, opts = {}) {
+    return originalRunLoop.call(this, bid, opts);
+  };
+})();
+</script>
 </body>
 </html>
