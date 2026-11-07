@@ -707,13 +707,13 @@ async function copyItem(b,i) {
   catch(e){i.copyStatus='verify';i.reason='文案待核验：'+e.message;}
   settleManualBatch(b);await saveData(b);
 }
-async function runLoop(bid,{recheckVerification=false,resyncCollection=false,recheckProhibition=false}={}) {
+async function runLoop(bid,{recheckVerification=false,resyncCollection=false,recheckProhibition=false,targetIds=null}={}) {
   const b=batch(bid);if(!b)return;
   if(recheckVerification&&(app.saving||app.detailBusy||!b.items.some(canRecheckVerification)))return;
   const resyncIds=resyncCollection?new Set(b.items.filter(i=>canResyncCollection(b,i)).map(i=>i.itemId)):null;
   if(resyncIds&&(!resyncIds.size||app.saving||app.detailBusy))return;
   const checkSelection=recheckProhibition?pendingProhibitionRefresh:recheckVerification?canRecheckVerification:null;
-  const scopedIds=resyncIds||(checkSelection?new Set(b.items.filter(checkSelection).map(i=>i.itemId)):null);
+   const scopedIds=resyncIds||(targetIds?new Set(targetIds):(checkSelection?new Set(b.items.filter(checkSelection).map(i=>i.itemId)):null));
   if(checkSelection&&!scopedIds.size)return;
   const scopedItems=()=>scopedIds?b.items.filter(i=>scopedIds.has(i.itemId)):b.items;
   const previousRunStatus=b.runStatus;
@@ -770,7 +770,7 @@ async function runLoop(bid,{recheckVerification=false,resyncCollection=false,rec
   }
   if(auditJobError)throw auditJobError;
 }
-async function startBatch(bid,{recheckVerification=false,resyncCollection=false,recheckProhibition=false}={}) {
+async function startBatch(bid,{recheckVerification=false,resyncCollection=false,recheckProhibition=false,targetIds=null}={}) {
   if(app.adminBusy)return toast('批次管理正在保存，请稍候再开始任务');
   if(app.processing)return toast('已有批次在运行，请先暂停');
   const target=batch(bid);if(!target)return;
@@ -779,7 +779,7 @@ async function startBatch(bid,{recheckVerification=false,resyncCollection=false,
   if(!navigator.locks)return toast('此浏览器不支持处理窗口保护，请使用新版Chrome');
   await navigator.locks.request('ebay-workbench-processing-v1',{ifAvailable:true},async lock=>{
     if(!lock)return toast('同一浏览器另一个页面正在处理，此页仅查看');
-    try{await runLoop(bid,{recheckVerification,resyncCollection,recheckProhibition});}catch(e){toast('处理已停止：'+e.message);}
+    try{await runLoop(bid,{recheckVerification,resyncCollection,recheckProhibition,targetIds});}catch(e){toast('处理已停止：'+e.message);}
   });
   if(!recheckVerification&&!resyncCollection&&!recheckProhibition&&['completed','waiting_review'].includes(batch(bid)?.runStatus)&&!app.stopping){const queued=app.batches.find(b=>b.runStatus==='queued');if(queued)await startBatch(queued.id);}
 }
@@ -1015,14 +1015,14 @@ async function detailAction(action) {
     $('detailDialog').close();render();
     if(decisionChanged&&decision==='passed'){await copyItem(b,i);render();}
     return;
-      } else if(action==='reaudit') {archive(i);i.auditRetrySource=i.audit?.review_hold?i.auditRequestId||i.audit._request_id:null;i.reviewStatus='pending';i.auditRequestId=null;i.auditRequestHash=null;i.auditRecoveryBlocked=false;i.auditRecoverCount=0;i.auditWaitSince=null;i.auditNextCheckAt=0;invalidate(i);i.reason='等待重新审核';}
+       } else if(action==='reaudit') {archive(i);i.auditRetrySource=i.audit?.review_hold?i.auditRequestId||i.audit._request_id:null;i.reviewStatus='pending';i.auditRequestId=null;i.auditRequestHash=null;i.auditRecoveryBlocked=false;i.auditRecoverCount=0;i.auditWaitSince=null;i.auditNextCheckAt=0;invalidate(i);i.reason='等待重新审核';}
   else if(action==='recollect') {
     archive(i);(i.dataHistory??=[]).push({data:i.collected,revision:i.dataRevision,time:now()});
     i.dataRevision=(i.dataRevision||0)+1;i.collectStatus='pending';i.reviewStatus='pending';i.auditRequestId=null;delete i.auditRetrySource;invalidate(i);i.reason='等待本次新采集';
     if(b.collection)b.collection.members=b.collection.members.filter(m=>m.id!==i.itemId);
   }
   settleManualBatch(b);await saveData();committed=true;clearCurrentDetailDirty(b.id,i.itemId);refreshCurrentDetail(b.id,i.itemId);render();
-  if(['reaudit','recollect'].includes(action)){closeDialog($('detailDialog'));await startBatch(b.id);}
+    if(['reaudit','recollect'].includes(action)){closeDialog($('detailDialog')); startBatch(b.id, { targetIds: [i.itemId] }).catch(e => toast('处理失败：' + e.message)); }
   } catch(e){
     if(!committed){b.items[b.items.findIndex(x=>x.itemId===i.itemId)]=previous;b.collection=previousCollection;b.runStatus=previousRunStatus;if(app.currentBatchId===b.id&&app.detailItemId===i.itemId)detailDirty=true;}
     render();throw e;
@@ -1050,7 +1050,7 @@ function closeDialog(d){
   if(['batchAdminDialog','batchTrashDialog'].includes(d.id)&&batchAdmin.busy){toast('正在保存管理员操作，请稍候');return false;}
   if(d.id==='settingsDialog'&&settingsChanged()){$('settingsConfirmError').textContent='';if(!$('settingsConfirmDialog').open)$('settingsConfirmDialog').showModal();return false;}
   if(d.id==='detailDialog'){
-    if(app.detailBusy)return false;
+    //if(app.detailBusy)return false;
     updateDetailDirty();
     if(detailFieldChanged('manualReason')||detailFieldChanged('manualStatus')){
       if(!$('detailConfirmDialog').open)$('detailConfirmDialog').showModal();
@@ -1247,49 +1247,6 @@ async function checkBackend(){
   catch{toast('审核后台版本未配套，请同时部署本次 worker.js 和 index.html。旧数据仍保留，需按新标准审核后导出。');return false;}
 }
 if(!window.__AUDIT_TEST__)fail(init());
-</script>
-  <script>
-// 这是一个安全补丁，只会修正关弹窗和单条审核的问题，绝不乱动其他东西。
-(function() {
-  // 1. 让所有关闭弹窗的按钮不被锁死，随时能点
-  const originalCloseDialog = window.closeDialog;
-  window.closeDialog = function(d) {
-    // 强制把锁解开，不管后台是不是在处理
-    if (window.app) window.app.detailBusy = false; 
-    return originalCloseDialog.apply(this, arguments);
-  };
-
-  // 2. 修改单条审核逻辑，只跑当前这一个，且不卡死弹窗
-  const originalDetailAction = window.detailAction;
-  window.detailAction = async function(action) {
-    if (action === 'reaudit' || action === 'recollect') {
-      const b = window.batch();
-      const i = b && window.itemOf(b.id, window.app.detailItemId);
-      if (!i) return;
-
-      // 立刻关闭弹窗，不让你卡在界面上
-      document.getElementById('detailDialog').close();
-      window.toast('已在后台单独开始处理该商品，其他商品不受影响。');
-
-      // 单独处理当前这个 SKU
-      await window.startBatch(b.id, { targetIds: [i.itemId] });
-      return;
-    }
-    // 其他按钮照常
-    return originalDetailAction.apply(this, arguments);
-  };
-
-  // 3. 让底层支持只跑指定的商品
-  const originalStartBatch = window.startBatch;
-  window.startBatch = async function(bid, opts = {}) {
-    return originalStartBatch.call(this, bid, opts);
-  };
-  
-  const originalRunLoop = window.runLoop;
-  window.runLoop = async function(bid, opts = {}) {
-    return originalRunLoop.call(this, bid, opts);
-  };
-})();
 </script>
 </body>
 </html>
