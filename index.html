@@ -193,7 +193,7 @@ function batch(id=app.currentBatchId) {return app.batches.find(b=>b.id===id);}
 function itemOf(bid,iid) {return batch(bid)?.items.find(i=>i.itemId===iid);}
 function amazon(i) {return `https://www.amazon.com/dp/${i.asin}`;}
 function badge(label,type='gray') {return `<span class="badge b-${type}">${esc(label)}</span>`;}
-async function api(path, {method='GET',body,timeout=20000}={}) {
+async function api(path, {method='GET',body,timeout=120000}={}) {
   const controller=new AbortController(); const timer=setTimeout(()=>controller.abort(),timeout);
   try {
     const r=await fetch(WORKER_URL+path,{method,cache:method==='GET'?'no-store':'default',headers:{'Content-Type':'application/json','X-Workbench-Token':TOKEN},
@@ -966,6 +966,7 @@ function refreshCurrentDetail(bid,iid){if($('detailDialog').open&&app.currentBat
 function clearCurrentDetailDirty(bid,iid){if(app.currentBatchId===bid&&app.detailItemId===iid)detailDirty=false;}
 function lockDetailInputs(locked){for(const id of ['manualStatus','manualReason','editTitle','editBullets','editDesc']){const el=$(id);if(el)el.disabled=locked;}}
 async function detailAction(action) {
+    if(typeof app === 'undefined') { toast('页面数据丢失，请刷新重试'); return; }
   const b=batch(),i=b&&itemOf(b.id,app.detailItemId);if(!i)return;
   if(app.detailBusy)return;
   if(action==='detail-prev'||action==='detail-next')return navigateDetail(action==='detail-prev'?-1:1);
