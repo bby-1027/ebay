@@ -160,7 +160,7 @@ const TOKEN = 'ebay1031';
 const BUILD = '2026-11-06-d1';
 const PROHIBITION_REVIEW_VERSION=1;
 const MISSING_SOURCE_NOTICE='AI 审核结果缺少能对应到商品原文的证据';
-const AUDIT_CONCURRENCY = 2;
+const AUDIT_CONCURRENCY = 1;
 const SELLER_POLICY_VERSION='2026-11-05-seller1';
 const $ = id => document.getElementById(id);
 const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -194,6 +194,13 @@ function itemOf(bid,iid) {return batch(bid)?.items.find(i=>i.itemId===iid);}
 function amazon(i) {return `https://www.amazon.com/dp/${i.asin}`;}
 function badge(label,type='gray') {return `<span class="badge b-${type}">${esc(label)}</span>`;}
 async function api(path, {method='GET',body,timeout=120000}={}) {
+    // 排队：同一时间只允许一个保存请求，前一个完成了才发下一个
+  if (method === 'POST') {
+    if (!window._saveQueue) window._saveQueue = Promise.resolve();
+    await new Promise(resolve => {
+      window._saveQueue = window._saveQueue.then(resolve, resolve);
+    });
+  }
   const controller=new AbortController(); const timer=setTimeout(()=>controller.abort(),timeout);
   try {
     const r=await fetch(WORKER_URL+path,{method,cache:method==='GET'?'no-store':'default',headers:{'Content-Type':'application/json','X-Workbench-Token':TOKEN},
@@ -206,7 +213,13 @@ async function api(path, {method='GET',body,timeout=120000}={}) {
     }
     if(!data) throw new Error('服务没有返回JSON数据');
     return data;
-  } finally {clearTimeout(timer);}
+    } finally {
+    clearTimeout(timer);
+    // 通知队列：当前请求完成了，可以发下一个了
+    if (method === 'POST' && window._saveQueue) {
+      // 这里不用额外操作，Promise 链会自动释放
+    }
+  }
 }
 function normalizeCollectedData(raw) {
   const r=raw.data||raw.product||raw.item||raw;
