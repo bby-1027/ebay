@@ -295,7 +295,6 @@ function exportCheck(i){
 }
 function ready(i){return !app.stopping&&!app.saving&&exportCheck(i).ok;}
 function needsManual(i){return i.reviewStatus==='verify'||(i.reviewStatus==='passed'&&i.copyStatus==='verify');}
-function aiAnswerIncomplete(i){return i.reviewStatus==='verify'&&['policy_fields_missing','checks_incomplete','seller_checks_incomplete'].includes(i.audit?.audit_issue);}
 function existingManual(i){
   const m=i.manualDecision;
   return m&&['passed','excluded'].includes(m.decision)&&i.reviewStatus===m.decision&&m.dataRevision===(i.dataRevision||0)?m:null;
@@ -324,9 +323,7 @@ function counts(b) {
     collectEnded:a.filter(i=>['collected','error','sync_error'].includes(i.collectStatus)).length,
     auditEligible:a.filter(i=>i.collectStatus==='collected' && i.reviewStatus!=='skipped').length,
     audited:a.filter(i=>i.collectStatus==='collected'&&['passed','verify','excluded','not_selected'].includes(i.reviewStatus)).length,
-    passed:a.filter(i=>i.reviewStatus==='passed').length,verify:a.filter(needsManual).length,aiIncomplete:a.filter(aiAnswerIncomplete).length,
-    productVerify:a.filter(i=>i.reviewStatus==='verify'&&!aiAnswerIncomplete(i)).length,
-    copyVerify:a.filter(i=>i.reviewStatus==='passed'&&i.copyStatus==='verify').length,
+    passed:a.filter(i=>i.reviewStatus==='passed').length,verify:a.filter(needsManual).length,
     prohibitionRefresh:a.filter(pendingProhibitionRefresh).length,
     screened:a.filter(i=>i.reviewStatus==='skipped').length,excluded:a.filter(i=>i.reviewStatus==='excluded').length,risk:a.filter(i=>i.reviewStatus==='not_selected').length,
     failures:a.filter(hasFailure).length,auditFailed:a.filter(i=>i.collectStatus==='collected'&&i.reviewStatus==='error').length,
@@ -348,7 +345,7 @@ function stage(b) {
 }
 function progress(b) {const c=counts(b);return `采集结束 ${c.collectEnded}/${c.total}（成功${c.collected}） · 审核 ${c.auditEligible?c.audited+'/'+c.auditEligible:'无需处理'} · 文案 ${c.passed?c.copyEnded+'/'+c.passed:'无需处理'}`;}
 function briefProgress(b,{compact=false}={}){const c=counts(b);
-  const notes=(compact?[[c.auditFailed,'未完成']]:[[c.auditFailed,'审核未完成'],[c.aiIncomplete,'AI 漏答或格式缺项'],[c.productVerify,'商品待核验'],[c.copyVerify,'文案待确认'],[c.prohibitionRefresh,'禁售待补审']])
+  const notes=(compact?[[c.auditFailed,'未完成']]:[[c.auditFailed,'审核未完成'],[c.verify,'待核验'],[c.prohibitionRefresh,'禁售待补审']])
     .filter(([n])=>n).map(([n,label])=>` · ${label} ${n} 条`).join('');
   if(b.items.some(i=>['pending','collecting','sync_error'].includes(i.collectStatus)))return `采集 ${c.collected}/${c.total}`+notes;
   if(b.items.some(i=>i.collectStatus==='collected'&&['pending','auditing'].includes(i.reviewStatus))){
@@ -368,11 +365,10 @@ function itemStatus(i){
   if(i.collectStatus==='pending')return ['待采集','gray'];if(i.collectStatus==='collecting')return ['采集中','run'];
   if(i.reviewStatus==='skipped')return ['资料不足','gray'];if(['excluded','not_selected'].includes(i.reviewStatus))return ['淘汰','err'];
   if(i.reviewStatus==='unconfirmed')return ['结果未确认','warn'];
-  if(aiAnswerIncomplete(i))return [i.audit.audit_issue==='policy_fields_missing'?'AI 格式缺项':'AI 漏答','warn'];
-  if(i.reviewStatus==='verify')return ['待核验','warn'];
+  if(needsManual(i))return ['待核验','warn'];
   if(i.reviewStatus==='error')return ['审核未完成','err'];
   if(i.reviewStatus==='auditing')return ['审核中','run'];if(i.reviewStatus==='pending')return ['待审核','gray'];
-  if(i.reviewStatus==='passed')return i.copyStatus==='completed'?['文案待确认','warn']:i.copyStatus==='verify'?['文案待确认','warn']:i.copyStatus==='error'?['文案失败','err']:['文案处理中','run'];
+  if(i.reviewStatus==='passed')return i.copyStatus==='completed'?['文案待确认','warn']:i.copyStatus==='error'?['文案失败','err']:['文案处理中','run'];
   return ['待处理','gray'];
 }
 function exportReason(b){const c=counts(b);if(app.saving)return '正在保存，完成后可导出';if(app.stopping)return '保存未确认，请刷新读取已保存结果';if(c.exportable)return `导出本批${c.exportable}条就绪商品`;
