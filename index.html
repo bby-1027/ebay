@@ -13,9 +13,6 @@ main{max-width:1260px;padding:30px 24px 64px;margin:auto}
 .card{background:white;border:1px solid var(--line);border-radius:12px;overflow:hidden;margin-bottom:20px}
 .tablewrap{overflow-x:auto}table{border-collapse:collapse;width:100%;text-align:left;white-space:normal}th{background:#f7f9f7;color:#75817b;font-weight:500;font-size:12px}th,td{padding:14px 16px;border-bottom:1px solid #edf0ed;vertical-align:middle}td{font-size:13px}
 #itemRows tr:hover>td{background:#edf7f1}
-#itemRows tr.last-viewed>td{background:#e1f0e7}
-#itemRows tr.last-viewed>td:first-child{box-shadow:inset 3px 0 #216b52}
-#itemRows tr.last-viewed:hover>td{background:#d6eadd}
 .title-col{max-width:320px;line-height:1.5;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;text-overflow:ellipsis}
 .badge{display:inline-block;white-space:nowrap;padding:3px 8px;border-radius:4px;font-size:12px;border:1px solid transparent}
 .b-pass{background:#e7f4ec;color:#28714a;border-color:#c3e6d3}.b-warn{background:#fff3dd;color:#966314;border-color:#f2d8a6}.b-err{background:#fceceb;color:#a34f48;border-color:#f2cac7}.b-run{background:#e9f0fb;color:#4265a0;border-color:#c3d4f2}.b-gray{background:#f0f2f0;color:#748079;border-color:#e2e5e2}
@@ -160,7 +157,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
 // Connection settings are copied from the inspected deployment by build.py.
 const WORKER_URL = 'https://scraper-proxy.1172743763.workers.dev';
 const TOKEN = 'ebay1031';
-const BUILD = '2026-11-07-queue1';
+const BUILD = '2026-11-07-queue2';
 const PROHIBITION_REVIEW_VERSION=1;
 const MISSING_SOURCE_NOTICE='AI 审核结果缺少能对应到商品原文的证据';
 const AUDIT_CONCURRENCY = 2;
@@ -370,7 +367,7 @@ function briefProgress(b,{compact=false}={}){const c=counts(b);
 function itemStatus(i){
   if(pendingProhibitionRefresh(i))return ['禁售待补审','warn'];
   if(i.reviewStatus==='passed'&&!sellerAuditCurrent(i))return ['需重新审核','warn'];
-  if(exportCheck(i).ok)return app.stopping?['保存待确认','warn']:app.saving?['保存中','run']:['可导出','pass'];
+  if(exportCheck(i).ok)return ready(i)?['可导出','pass']:['审核通过','pass'];
   if(i.collectStatus==='sync_error'||(i.collectStatus==='error'&&i.collectionIssue!=='upstream_failed'))return ['采集结果待确认','warn'];
   if(i.collectStatus==='error')return ['采集失败','err'];
   if(i.collectStatus==='pending')return ['待采集','gray'];if(i.collectStatus==='collecting')return ['采集中','run'];
@@ -384,7 +381,7 @@ function itemStatus(i){
 }
 function exportReason(b){const c=counts(b);if(app.saving)return '正在保存，完成后可导出';if(app.stopping)return '保存未确认，请刷新读取已保存结果';if(c.exportable)return `导出本批${c.exportable}条就绪商品`;
   const candidate=b.items.find(i=>i.reviewStatus==='passed');return candidate?exportCheck(candidate).reason:'本批暂无审核通过的商品';}
-async function fetchData() {
+async function fetchData({automatic=false}={}) {
   if(app.adminBusy)return toast('管理员操作正在保存，请稍候再刷新');
   if(app.processing) {render();toast('当前进度已更新，没有重新提交任务');return;}
   if(app.saving||app.detailBusy)return toast('正在保存，完成后再刷新状态');
@@ -398,7 +395,10 @@ async function fetchData() {
           await api('/api/data',{method:'POST',body:app.pendingSave});
           d=await api('/api/data');
           if(!savedPayloadMatches(d,app.pendingSave))throw new Error('服务器尚未确认保存，请稍后再刷新');
-        }else if(!confirm('服务器记录与本地未确认的保存不同。是否读取服务器记录？本地尚未确认的修改将被放弃。'))return;
+        }else{
+          if(automatic){app.resumeAfterSave=null;toast('服务器记录与本地保存不同，请点击刷新状态核对');return;}
+          if(!confirm('服务器记录与本地未确认的保存不同。是否读取服务器记录？本地尚未确认的修改将被放弃。'))return;
+        }
       }
       app.pendingSave=null;
     }
@@ -453,7 +453,16 @@ function saveData(activeBatch) {
       if(!navigator.locks)throw new Error('当前浏览器无法保护写入，请使用新版Chrome');
       return await navigator.locks.request('ebay-workbench-processing-v1',{ifAvailable:true},async lock=>{if(!lock)throw new Error('另一个页面正在处理，本页暂时只读，请刷新查看');return persist();});
     }
-      catch(e){app.stopping=true;const b=batch(app.activeId);if(b)b.runStatus='paused';toast(e.status===409?'数据已被其他页面修改，请刷新核对后继续。':`保存尚未确认，处理已暂停：${e.message}`);throw e;}
+      catch(e){
+        const b=batch(app.activeId);
+        app.resumeAfterSave=!e.status||e.status>=500?{
+          batchId:b?.runStatus==='running'?b.id:null,
+          queueId:b?.workQueue?.state==='running'?b.workQueue.id:null
+        }:null;
+        app.stopping=true;if(b)b.runStatus='paused';
+        toast(e.status===409?'数据已被其他页面修改，请刷新核对后继续。':`保存尚未确认，处理已暂停：${e.message}`);
+        throw e;
+      }
     finally{app.saving--;if(!app.saving)render();}
   };
   app.writeTail=app.writeTail.then(work,work);return app.writeTail;
@@ -927,6 +936,7 @@ async function startBatch(bid,{recheckVerification=false,resyncCollection=false,
   if(app.stopping){await fetchData();if(app.stopping)return;}
   if(!await checkBackend())return;
   const target=batch(bid);if(!target)return;
+  app.resumeAfterSave=null;
   scopedRun=!!(singleItem||recheckVerification||resyncCollection||recheckProhibition||target.suspendedQueue
     ||(target.workQueue&&target.workQueue.state!=='completed'));
   if(!scopedRun&&target.items.some(i=>i.reviewStatus==='passed'&&!auditCurrent(i)&&!legacyAudit(i))&&!confirm('本批部分资料与原审核不能对应，继续需要重新审核。旧结论会保留。是否继续？'))return;
@@ -1351,6 +1361,24 @@ function initBatchAdmin(){
   });
 }
 
+async function recoverInterruptedSave(){
+  const resume=app.resumeAfterSave;
+  if(!resume||document.hidden||navigator.onLine===false||app.recoveringSave||app.processing||app.starting
+    ||app.saving||app.detailBusy||app.adminBusy||app.fetching||detailDirty||document.querySelector('dialog[open]'))return;
+  app.recoveringSave=true;
+  try{
+    const pending=app.pendingSave;
+    await fetchData({automatic:true});
+    if(app.stopping||app.pendingSave)return;
+    app.resumeAfterSave=null;
+    if(pending&&!savedPayloadMatches({version:app.serverVersion,batches:app.batches},pending))return;
+    const b=batch(resume.batchId);
+    if(!b)return;
+    if(resume.queueId&&(b.workQueue?.id!==resume.queueId||b.workQueue.state==='completed'||b.workQueue.note))return;
+    if(['running','paused'].includes(b.runStatus))await startBatch(b.id);
+  }catch(error){toast('连接尚未恢复，请稍后再试：'+error.message);}
+  finally{app.recoveringSave=false;}
+}
 async function init() {
   initBatchAdmin();
   try{exportPrefs={...exportPrefs,...JSON.parse(localStorage.getItem('ebay_export_prefs')||'{}')};}catch{}
@@ -1398,7 +1426,13 @@ async function init() {
   const interrupted=app.batches.find(b=>b.runStatus==='running'&&b.flowVersion===1);
   if(interrupted)fail(startBatch(interrupted.id));
   else if(app.batches.some(b=>b.runStatus==='running'))toast('已读取旧版运行记录；请先接回本轮结果再继续。不会自动重新采集。');
-  setInterval(()=>{if(!app.processing&&!app.starting&&!document.querySelector('dialog[open]'))fail(fetchData());},15000);
+  document.addEventListener('visibilitychange',()=>{if(!document.hidden)fail(recoverInterruptedSave());});
+  window.addEventListener('online',()=>fail(recoverInterruptedSave()));
+  setInterval(()=>{
+    if(document.hidden)return;
+    if(app.resumeAfterSave)fail(recoverInterruptedSave());
+    else if(!app.processing&&!app.starting&&!document.querySelector('dialog[open]'))fail(fetchData());
+  },15000);
 }
 async function checkBackend(){
   if(app.backendCompatible)return true;
