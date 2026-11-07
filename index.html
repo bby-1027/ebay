@@ -126,6 +126,10 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
 </head>
 <body>
 <header><div class="brand"><div class="logo">✓</div><div><h1>商品审核工作台</h1><small>批次管理 · 风险审核 · 导出</small></div></div><button id="btnSettings">设置</button></header>
+<div id="connectionBanner" role="status" aria-live="polite" style="max-width:1212px;margin:16px auto 0;padding:12px 16px;border:1px solid #e2e8e4;border-radius:8px;background:#fff">
+  <span id="connectionMessage">正在连接并读取已保存批次…</span>
+  <button id="connectionRetry" type="button" style="margin-left:12px" hidden>重新连接</button>
+</div>
 <main>
 <section id="homeView">
   <div class="batch-heading"><h2>批次列表</h2><div class="right"><button id="batchManageBtn">批次管理</button><button id="refreshState">刷新状态</button><button id="importBtn" class="primary">＋ 导入新批次</button></div></div>
@@ -157,7 +161,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
 // Connection settings are copied from the inspected deployment by build.py.
 const WORKER_URL = 'https://scraper-proxy.1172743763.workers.dev';
 const TOKEN = 'ebay1031';
-const BUILD = '2026-11-07-strict-queue1';
+const BUILD = '2026-11-07-connection1';
 const PROHIBITION_REVIEW_VERSION=2;
 const MISSING_SOURCE_NOTICE='AI 审核结果缺少能对应到商品原文的证据';
 const AUDIT_CONCURRENCY = 2;
@@ -193,24 +197,88 @@ function batch(id=app.currentBatchId) {return app.batches.find(b=>b.id===id);}
 function itemOf(bid,iid) {return batch(bid)?.items.find(i=>i.itemId===iid);}
 function amazon(i) {return `https://www.amazon.com/dp/${i.asin}`;}
 function badge(label,type='gray') {return `<span class="badge b-${type}">${esc(label)}</span>`;}
-async function api(path, {method='GET',body,timeout=20000}={}) {
-  const controller=new AbortController();let timer;
-  // A frozen/background tab must not abort a request just as it becomes visible.
-  const arm=()=>{clearTimeout(timer);if(!document.hidden)timer=setTimeout(()=>{if(!document.hidden)controller.abort();},timeout);};
-  document.addEventListener('visibilitychange',arm);arm();
-  try {
+function requestOperation(path,method){
+  const route=path.split('?')[0];
+  if(route==='/api/data')return method==='GET'?'读取已保存批次':'保存批次';
+  if(route==='/api/data_version')return '检查批次版本';
+  if(route==='/api/data_receipt')return '查询原保存回执';
+  if(route==='/api/audit_result')return '查询原审核任务';
+  if(route==='/api/audit')return '提交审核任务';
+  if(/\/status$/.test(route)||route.includes('/results'))return '查询原采集任务';
+  return '连接后台';
+}
+async function api(path,{method='GET',body,timeout=20000}={}){
+  const controller=new AbortController(),operation=requestOperation(path,method);
+  // Every request has a deadline, including requests begun in a background tab.
+  // An expired write is recovered by its existing receipt, never by a new task ID.
+  const timer=setTimeout(()=>controller.abort(),timeout);
+  try{
     const r=await fetch(WORKER_URL+path,{method,cache:method==='GET'?'no-store':'default',headers:{'Content-Type':'application/json','X-Workbench-Token':TOKEN},
       ...(body!==undefined?{body:JSON.stringify(body)}:{}),signal:controller.signal});
     const data=await r.json().catch(()=>null);
-    if(!r.ok) {const e=new Error(data?.detail||`请求失败 (${r.status})`);e.status=r.status;throw e;}
-    if(!data) throw new Error('服务没有返回JSON数据');
+    if(!r.ok){const e=new Error(operation+'失败：'+(r.status===401?'身份校验失败，请核对前后端连接配置':r.status===403?'后台拒绝访问':data?.detail||'后台返回 HTTP '+r.status));e.status=r.status;throw e;}
+    if(!data){const e=new Error(operation+'失败：后台未返回有效JSON');e.code='invalid_response';throw e;}
     return data;
-  } catch(error){
-    if(controller.signal.aborted){const e=new Error('请求超时，正在确认原任务或保存结果');e.code='request_timeout';throw e;}
-    if(error instanceof TypeError){const e=new Error('连接中断，正在确认原任务或保存结果');e.code='connection_lost';throw e;}
+  }catch(error){
+    if(controller.signal.aborted){const e=new Error(operation+'超时');e.code='request_timeout';throw e;}
+    if(error instanceof TypeError){const e=new Error(operation+'失败：浏览器无法连接后台（网络、跨域或服务异常，尚未确定具体原因）');e.code='connection_lost';throw e;}
     throw error;
-  } finally {clearTimeout(timer);document.removeEventListener?.('visibilitychange',arm);}
+  }finally{clearTimeout(timer);}
 }
+function readConnectionSucceeded(){
+  app.readError=null;app.readFailures=0;app.readRetryBlocked=false;
+  app.nextReadRetryAt=Date.now()+15000;app.saveError=null;
+}
+function readConnectionFailed(error){
+  app.readError=error.message;app.readFailures=(app.readFailures||0)+1;
+  app.readRetryBlocked=!!(error.status&&error.status<500);
+  app.nextReadRetryAt=Date.now()+Math.min(60000,5000*2**Math.min(app.readFailures-1,4));
+}
+function renderConnectionState(){
+  const message=$('connectionMessage'),retry=$('connectionRetry');
+  if(!message||!retry)return;
+  const unconfirmed=!!app.pendingSave;
+  const paused=app.stopping&&!unconfirmed;
+  const error=app.readError;
+  let label;
+  if(unconfirmed)label='上次保存结果尚未确认。正在保留本地记录；重新连接后查询原保存回执，不新建任务。';
+  else if(paused)label='写入已暂停，请刷新核对服务器记录后继续。'+(app.saveError||'');
+  else if(error)label=(app.readAt?'连接暂时中断，当前显示上次读取的记录。':'批次读取失败，尚未取得服务器记录。')+error;
+  else if(app.fetching)label=app.readAt?'正在检查已保存批次…':'正在连接并读取已保存批次…';
+  else label=app.readAt?'批次连接正常，已读取服务器记录。':'正在连接并读取已保存批次…';
+  if(error&&!app.readRetryBlocked)label+=' 将自动重试；也可点击重新连接。';
+  if(error&&app.readRetryBlocked)label+=' 请处理上述错误后点击重新连接。';
+  message.textContent=label;
+  retry.hidden=!(error||unconfirmed||paused);
+  retry.disabled=!!(app.fetching||app.processing||app.starting||app.saving||app.detailBusy||app.adminBusy);
+  retry.textContent=unconfirmed?'查询原保存结果':'重新连接';
+}
+async function loadWorkbench({automatic=false}={}){
+  await fetchData({automatic});
+  if(!app.readAt||app.initialReadRestored)return;
+  app.initialReadRestored=true;
+  const old=sessionStorage.getItem('audit_batch'),view=sessionStorage.getItem('audit_view');
+  if(view==='items'&&batch(old))enterBatch(old);else{app.view='home';render();}
+  const interrupted=app.batches.find(b=>b.runStatus==='running'&&b.flowVersion===1);
+  if(interrupted)fail(startBatch(interrupted.id));
+  else if(app.batches.some(b=>b.runStatus==='running'))toast('已读取旧版运行记录；请先接回本轮结果再继续。不会自动重新采集。');
+}
+async function maintainConnection(force=false){
+  if(document.hidden||navigator.onLine===false||app.processing||app.starting||app.fetching||app.saving
+    ||app.detailBusy||app.adminBusy||detailDirty||document.querySelector('dialog[open]'))return;
+  if(force){app.nextReadRetryAt=0;app.nextRecoveryAt=0;}
+  if(app.resumeAfterSave)return recoverInterruptedSave();
+  if(!force&&(app.readRetryBlocked||(app.nextReadRetryAt||0)>Date.now()))return;
+  return loadWorkbench({automatic:true});
+}
+function installConnectionRecovery(){
+  if(app.connectionRecoveryInstalled)return;
+  app.connectionRecoveryInstalled=true;
+  document.addEventListener('visibilitychange',()=>{if(!document.hidden)fail(maintainConnection(true));});
+  window.addEventListener('online',()=>fail(maintainConnection(true)));
+  setInterval(()=>fail(maintainConnection()),5000);
+}
+
 function normalizeCollectedData(raw) {
   const r=raw.data||raw.product||raw.item||raw;
   return {title:text(r.title||r['商品标题']||r['标题']),brand:text(r.brand||r['品牌']),
@@ -391,14 +459,14 @@ async function fetchData({automatic=false}={}) {
   if(app.processing) {render();toast('当前进度已更新，没有重新提交任务');return;}
   if(app.saving||app.detailBusy)return toast('正在保存，完成后再刷新状态');
   if(app.fetching)return;const readEpoch=app.saveEpoch||0;app.fetching=true;
-  $('refreshState').disabled=true;$('refreshState').textContent='刷新中…';
+  $('refreshState').disabled=true;$('refreshState').textContent='刷新中…';renderConnectionState();
   try {
     if(app.pendingSave?.operationId&&app.dataContract===2){
       try{
         const pending=app.pendingSave,receipt=await recoverSaveReceipt(pending);
         rememberSavedPayload(pending);app.pendingSave=null;app.serverVersion=receipt.version;
         if(receipt.current_version!=null&&receipt.current_version!==receipt.version){const e=new Error('保存已完成，但其他页面又修改了记录，请刷新核对');e.status=409;throw e;}
-        app.stopping=false;app.readAt=now();render();return;
+        app.stopping=false;app.readAt=now();readConnectionSucceeded();render();return;
       }catch(error){
         if(error.status!==409||automatic)throw error;
         if(!confirm('服务器记录已变化。是否读取服务器记录？本地尚未保存的修改将被放弃。'))return;
@@ -408,9 +476,9 @@ async function fetchData({automatic=false}={}) {
     if(app.dataContract===2&&app.readAt&&!app.pendingSave&&!app.stopping){
       const current=await api('/api/data_version');
       if(app.saving||app.processing||app.detailBusy||readEpoch!==(app.saveEpoch||0))return;
-      if(current.version===app.serverVersion){app.readAt=now();render();return;}
+      if(current.version===app.serverVersion){app.readAt=now();readConnectionSucceeded();render();return;}
     }
-    let d=await api('/api/data'); if(app.saving||app.processing||app.detailBusy||readEpoch!==(app.saveEpoch||0))return;
+    let d=await api('/api/data'); if(!d||d.version==null||!Number.isFinite(Number(d.version))||!Array.isArray(d.batches)||!d.batches.every(b=>b&&typeof b==='object'&&typeof b.id==='string'&&(b.items==null||Array.isArray(b.items)))){const e=new Error('批次响应格式不完整，已保留当前记录');e.code='invalid_data';throw e;} if(app.saving||app.processing||app.detailBusy||readEpoch!==(app.saveEpoch||0))return;
     if(app.pendingSave){
       if(!savedPayloadMatches(d,app.pendingSave)){
         if(d.storage==='d1'&&d.version===app.pendingSave.version){
@@ -426,8 +494,12 @@ async function fetchData({automatic=false}={}) {
     }
     if(Number(d.version||0)<Number(app.serverVersion||0)){toast('云端状态正在同步，请稍后刷新');return;} app.batches=Array.isArray(d.batches)?d.batches:[];app.serverVersion=d.version??0;
     app.batches.forEach(b=>{b.items=b.items||[];b.items.forEach(i=>{if(i.dataRevision==null&&i.auditRevision==null&&i.copyRevision==null)i.legacyUnversioned=true;i.dataRevision=i.dataRevision||0;});});
-    app.storage=d.storage;app.dataContract=d.data_contract||0;rememberSavedPayload({batches:app.batches});app.readAt=now();app.stopping=false;render();
-  } finally {app.fetching=false;$('refreshState').disabled=false;$('refreshState').textContent='刷新状态';}
+    app.storage=d.storage;app.dataContract=d.data_contract||0;rememberSavedPayload({batches:app.batches});app.readAt=now();app.stopping=false;readConnectionSucceeded();render();
+  } catch(error) {
+    readConnectionFailed(error);
+    if(!app.readAt)renderHome();
+    throw error;
+  } finally {app.fetching=false;$('refreshState').disabled=false;$('refreshState').textContent='刷新状态';renderConnectionState();}
 }
 function savedBatchSnapshot(b){const {items=[],...fields}=b;return {fields,items:new Map(items.map(i=>[i.itemId,JSON.stringify(i)]))};}
 function rememberSavedPayload(payload){
@@ -462,6 +534,14 @@ function savedPayloadMatches(saved,payload){
     if(Array.isArray(value))return value.map(canonical);
     if(value&&typeof value==='object')return Object.fromEntries(Object.keys(value).sort().map(key=>[key,canonical(value[key])]));
     return value;
+  }
+  if(payload.patch){
+    const p=payload.patch,b=saved.batches.find(b=>b.id===p.batchId);
+    if(!b||!Array.isArray(b.items)||!Array.isArray(p.items))return false;
+    const {items,...fields}=b;
+    const current=new Map(items.map(i=>[i.itemId,i]));
+    return JSON.stringify(canonical(fields))===JSON.stringify(canonical(p.fields))
+      &&p.items.every(i=>current.has(i.itemId)&&JSON.stringify(canonical(current.get(i.itemId)))===JSON.stringify(canonical(i)));
   }
   const expected=payload.batch?[payload.batch]:payload.batches;
   const actual=payload.batch?saved.batches.filter(b=>b.id===payload.batch.id):saved.batches;
@@ -502,7 +582,7 @@ function saveData(activeBatch) {
         rememberSavedPayload(payload);
         app.pendingSave=null;
         if(d.current_version!=null&&d.current_version!==d.version){const e=new Error('保存已完成，但其他页面又修改了记录，请刷新核对');e.status=409;throw e;}
-        app.serverVersion=d.version;app.lastWrite=Date.now();app.readAt=now();app.stopping=false;return true;
+        app.serverVersion=d.version;app.lastWrite=Date.now();app.readAt=now();app.stopping=false;readConnectionSucceeded();renderConnectionState();return true;
       };
       if(app.processing)return await persist();
       if(!navigator.locks)throw new Error('当前浏览器无法保护写入，请使用新版Chrome');
@@ -514,7 +594,7 @@ function saveData(activeBatch) {
           batchId:b?.runStatus==='running'?b.id:null,
           queueId:b?.workQueue?.state==='running'?b.workQueue.id:null
         }:null;
-        app.stopping=true;if(b)b.runStatus='paused';
+        app.stopping=true;app.saveError=e.message;if(b)b.runStatus='paused';renderConnectionState();
         toast(e.status===409?'数据已被其他页面修改，请刷新核对后继续。':`保存尚未确认，处理已暂停：${e.message}`);
         throw e;
       }
@@ -532,7 +612,7 @@ function renderHome() {
       <td class="home-progress">${esc(briefProgress(b,{compact:true}))}</td><td>${c.passed}</td><td>${c.verify}</td><td>${app.saving&&c.passed?'保存中':c.exportable}</td>
       <td class="row-actions"><button class="linkbtn" data-action="enter" data-bid="${esc(b.id)}">明细</button>
       <button class="linkbtn" data-action="export" data-bid="${esc(b.id)}" title="${esc(exportReason(b))}" ${c.exportable?'':'disabled'}>导出${c.exportable?'('+c.exportable+')':''}</button>${batchManagementDelete(b)}</td></tr>`;
-  }).join('')||'<tr><td colspan="8" class="muted">暂无批次，可导入新批次。</td></tr>';
+  }).join('')||('<tr><td colspan="8" class="muted">'+(!app.readAt?(app.readError?'批次读取失败，请点击上方“重新连接”。现有数据未被删除。':'正在读取已保存批次…'):'暂无批次，可导入新批次。')+'</td></tr>');
 }
 function searchTerms(v){return text(v).trim().toLowerCase().split(/[\s,;，；、]+/).filter(Boolean);}
 function filtered(b) {const terms=searchTerms(app.searchQuery);return b.items.filter(i=>{
@@ -582,6 +662,7 @@ function renderItems() {
 }
 function badgeText(b){return b.runStatus==='paused'?'已暂停':stage(b);}
 function render() {
+  renderConnectionState();
   if(app.view==='home')renderHome();else renderItems();
 }
 function enterBatch(id){app.currentBatchId=id;app.view='items';app.selected.clear();app.page=0;app.searchQuery='';app.filterStatus='all';$('searchInput').value='';$('filterStatus').value='all';sessionStorage.setItem('audit_batch',id);sessionStorage.setItem('audit_view','items');render();}
@@ -992,6 +1073,7 @@ async function startBatch(bid,{recheckVerification=false,resyncCollection=false,
   app.starting=true;
   let scopedRun=true;
   try{
+  if(!app.readAt)await loadWorkbench();
   if(app.stopping){await fetchData();if(app.stopping)return;}
   if(!await checkBackend())return;
   const target=batch(bid);if(!target)return;
@@ -1308,6 +1390,8 @@ function parseImportRows(rows) {
 }
 function importSummary(){const v=$('skuInput').value.split(/[\s,;，；]+/).filter(Boolean);const unique=new Set([...v.map(asin).filter(Boolean),...app.fileAsins]);$('importSummary').textContent=`粘贴 ${v.length} 条，文件 ${app.fileAsins.length} 条；合并去重后有效SKU ${unique.size} 条。${app.fileError}`;}
 async function confirmImport(){
+  if(!app.readAt)throw new Error('尚未读取已有批次，请先重新连接；当前输入仍保留。');
+  if(app.stopping||app.pendingSave)throw new Error('上次保存尚未确认，请先查询原保存结果；当前输入仍保留。');
   if(app.adminBusy)throw new Error('批次管理正在保存，请稍候再导入');
   if(app.fileError)throw new Error(app.fileError);const values=$('skuInput').value.split(/[\s,;，；]+/).filter(Boolean);
   if(values.some(v=>!asin(v)))throw new Error('粘贴内容存在无效SKU，请修正');const ids=[...new Set([...values.map(asin),...app.fileAsins])];if(!ids.length)throw new Error('请提供SKU');
@@ -1442,7 +1526,17 @@ async function recoverInterruptedSave(){
     await fetchData({automatic:true});
     if(app.stopping||app.pendingSave)return;
     app.resumeAfterSave=null;app.nextRecoveryAt=0;app.recoveryFailures=0;
-    if(pending&&!savedPayloadMatches({version:app.serverVersion,batches:app.batches},pending))return;
+    if(pending){
+      // A lost save response pauses the local runner after taking its snapshot.
+      // Ignore only that known transient pause; all product/task fields must still match.
+      const batches=app.batches.map(b=>{
+        if(b.id!==resume.batchId||b.runStatus!=='paused')return b;
+        const expected=pending.patch?.batchId===b.id?pending.patch.fields
+          :pending.batch?.id===b.id?pending.batch:pending.batches?.find(x=>x.id===b.id);
+        return expected?.runStatus==='running'?{...b,runStatus:'running'}:b;
+      });
+      if(!savedPayloadMatches({version:app.serverVersion,batches},pending))return;
+    }
     const b=batch(resume.batchId);
     if(!b)return;
     if(resume.queueId&&(b.workQueue?.id!==resume.queueId||b.workQueue.state==='completed'||b.workQueue.note))return;
@@ -1457,7 +1551,8 @@ async function init() {
   initBatchAdmin();
   try{exportPrefs={...exportPrefs,...JSON.parse(localStorage.getItem('ebay_export_prefs')||'{}')};}catch{}
   syncSettingsControls();
-  $('backHomeBtn').onclick=returnHome;$('refreshState').onclick=()=>fail(fetchData());
+  $('backHomeBtn').onclick=returnHome;$('refreshState').onclick=()=>fail(loadWorkbench());
+  $('connectionRetry').onclick=()=>fail(loadWorkbench());
   $('btnSettings').onclick=openSettings;$('settingsSave').onclick=saveSettings;
   $('settingsConfirmSave').onclick=saveSettings;$('settingsDiscard').onclick=discardSettings;$('settingsContinue').onclick=()=>$('settingsConfirmDialog').close();
   $('detailConfirmSave').onclick=()=>fail(detailAction('manual-save'));
@@ -1497,17 +1592,10 @@ async function init() {
   $('detailConfirmDialog').addEventListener('cancel',e=>{e.preventDefault();if(!app.detailBusy)$('detailConfirmDialog').close();});
   $('settingsDialog').addEventListener('cancel',e=>{e.preventDefault();closeDialog($('settingsDialog'));});
   $('settingsConfirmDialog').addEventListener('cancel',e=>{e.preventDefault();$('settingsConfirmDialog').close();});
-  await fetchData();const old=sessionStorage.getItem('audit_batch'),view=sessionStorage.getItem('audit_view');if(view==='items'&&batch(old))enterBatch(old);else{app.view='home';render();}
-  const interrupted=app.batches.find(b=>b.runStatus==='running'&&b.flowVersion===1);
-  if(interrupted)fail(startBatch(interrupted.id));
-  else if(app.batches.some(b=>b.runStatus==='running'))toast('已读取旧版运行记录；请先接回本轮结果再继续。不会自动重新采集。');
-  document.addEventListener('visibilitychange',()=>{if(!document.hidden)fail(recoverInterruptedSave());});
-  window.addEventListener('online',()=>fail(recoverInterruptedSave()));
-  setInterval(()=>{
-    if(document.hidden)return;
-    if(app.resumeAfterSave)fail(recoverInterruptedSave());
-    else if(!app.processing&&!app.starting&&!document.querySelector('dialog[open]'))fail(fetchData());
-  },15000);
+  // Install recovery before the first awaited read: a failed boot must remain recoverable.
+  installConnectionRecovery();
+  render();
+  await loadWorkbench();
 }
 async function checkBackend(){
   if(app.backendCompatible)return true;
