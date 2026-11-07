@@ -913,7 +913,7 @@ function renderDetailFooter(i){const busy=!!app.detailBusy,blocked=busy||app.pro
     :i.reviewStatus==='verify'?`<button class="primary" data-action="manual-pass" ${blocked||!canManualPass(i)?'disabled':''}>通过</button><button data-action="manual-exclude" ${blocked?'disabled':''}>淘汰</button>`
     :needsManual(i)?`<button data-action="manual-exclude" ${blocked?'disabled':''}>淘汰</button>`
     :ready(i)?'<button class="primary" data-action="export-one">导出此商品</button>':'';
-  $('dtFooter').innerHTML=detailNavigationFooter()+`<div class="detail-main-actions">${actions}<button data-close ${busy?'disabled':''}>关闭</button></div>`;
+   $('dtFooter').innerHTML=detailNavigationFooter()+`<div class="detail-main-actions">${actions}<button data-close>关闭</button></div>`;
 }
 function openDetail(iid,{preserveNavigation=false}={}) {
   const b=batch(),i=b?.items.find(x=>x.itemId===iid);if(!i)return false;
