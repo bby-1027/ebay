@@ -1107,7 +1107,16 @@ function openDetail(iid,{preserveNavigation=false}={}) {
   if(i.reviewStatus==='skipped')html+='<p class="muted">资料不足，未调用AI。</p>';
   if(currentResult&&a.prohibited_recheck_incomplete)html+=`<p class="danger-text" role="note">${manual?'原 AI 提醒：复查后仍未给出禁售与限售结论。':'AI 复查后仍未给出禁售与限售结论，请人工核对后再决定是否通过。'}</p>`;
   if(currentResult&&a.missing_source_evidence?.length)html+=field(MISSING_SOURCE_NOTICE,'无原文引用：'+a.missing_source_evidence.join('、'));
-  if(currentResult&&a.manual_questions?.length)html+=`<div class="review-questions">${field(manual?'原 AI 提醒':'待人工确认',friendlyAuditReason(a.manual_questions))}</div>`;
+  if(currentResult&&a.manual_questions?.length){
+  const normalize=value=>friendlyAuditReason(value)
+    .replace(/请人工核对后(?:再)?决定(?:是否通过|通过或淘汰)[。！!]?$/,'')
+    .trim().replace(/[。！!]+$/,'');
+  const reason=normalize(a.reason||i.reason||'');
+  const questions=[...new Set([].concat(a.manual_questions)
+    .map(q=>friendlyAuditReason(q).trim()))]
+    .filter(q=>normalize(q)&&normalize(q)!==reason);
+  if(questions.length)html+=`<div class="review-questions">${field(manual?'原 AI 提醒':'待人工确认',questions)}</div>`;
+}
   if(needsManual(i)||manual)html+=`<div class="review-note"><label for="manualReason">人工建议（选填）</label><textarea id="manualReason" rows="3" maxlength="500" aria-describedby="manualReasonHint" placeholder="例如：已查商品规格，12.5 英寸为外部宽度">${esc(manualSuggestion(i))}</textarea><small id="manualReasonHint" class="muted">保存后的建议可供同版商品资料再次审核时参考。</small></div>`;
   if(currentResult&&i.reviewStatus==='verify'&&!canManualPass(i))html+='<p class="muted">这条记录与当前商品资料或审核版本不对应，请先重新审核。</p>';
   if(missing.length)html+=field('缺少信息或未完成检查',missing);
