@@ -383,7 +383,13 @@ async function fetchData() {
     const d=await api('/api/data'); if(app.saving||app.processing||app.detailBusy||readEpoch!==(app.saveEpoch||0))return; if(Number(d.version||0)<Number(app.serverVersion||0)){toast('云端状态正在同步，请稍后刷新');return;} app.batches=Array.isArray(d.batches)?d.batches:[];app.serverVersion=d.version??0;
     app.batches.forEach(b=>{b.items=b.items||[];b.items.forEach(i=>{if(i.dataRevision==null&&i.auditRevision==null&&i.copyRevision==null)i.legacyUnversioned=true;i.dataRevision=i.dataRevision||0;});});
     app.storage=d.storage;app.readAt=now();app.stopping=false;render();
-  } finally {app.fetching=false;$('refreshState').disabled=false;$('refreshState').textContent='刷新状态';}
+  } catch(e) {
+    // 新增的容错：如果后台坏了，页面不再卡死，直接提示
+    $('batchRows').innerHTML=`<tr><td colspan="8"><span class="danger-text">读取失败：${e.message} (如果显示503，说明你的D1数据库出问题了，请检查后台绑定或建表SQL)</span></td></tr>`;
+    toast('读取云端数据失败：'+e.message);
+  } finally {
+    app.fetching=false;$('refreshState').disabled=false;$('refreshState').textContent='刷新状态';
+  }
 }
 // All writes in the supported single processing window are serialized. KV is not a cross-device lock.
 function saveData(activeBatch) {
