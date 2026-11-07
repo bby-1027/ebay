@@ -198,8 +198,12 @@ async function api(path, {method='GET',body,timeout=120000}={}) {
   try {
     const r=await fetch(WORKER_URL+path,{method,cache:method==='GET'?'no-store':'default',headers:{'Content-Type':'application/json','X-Workbench-Token':TOKEN},
       ...(body!==undefined?{body:JSON.stringify(body)}:{}),signal:controller.signal});
-    const data=await r.json().catch(()=>null);
-    if(!r.ok) {const e=new Error(data?.detail||`请求失败 (${r.status})`);e.status=r.status;throw e;}
+        const data=await r.json().catch(()=>null);
+    if(!r.ok) {
+      // 如果是503，把后台的真实报错文字揪出来
+      const msg = data?.detail || (r.status === 503 ? '服务器不可用(D1数据库异常)，请检查云端后台' : `请求失败 (${r.status})`);
+      const e=new Error(msg); e.status=r.status; throw e;
+    }
     if(!data) throw new Error('服务没有返回JSON数据');
     return data;
   } finally {clearTimeout(timer);}
