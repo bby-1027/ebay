@@ -968,6 +968,7 @@ function lockDetailInputs(locked){for(const id of ['manualStatus','manualReason'
 async function detailAction(action) {
     if(typeof app === 'undefined') { toast('页面数据丢失，请刷新重试'); return; }
   const b=batch(),i=b&&itemOf(b.id,app.detailItemId);if(!i)return;
+    if(action==='reaudit'||action==='recollect'){ if($('detailDialog').open) $('detailDialog').close(); }
   if(app.detailBusy)return;
   if(action==='detail-prev'||action==='detail-next')return navigateDetail(action==='detail-prev'?-1:1);
   if(action==='tab-source'||action==='tab-copy'){app.detailTab=action==='tab-copy'?'copy':'source';renderDetailSource(i);return;}
@@ -1016,15 +1017,30 @@ async function detailAction(action) {
     $('detailDialog').close();render();
     if(decisionChanged&&decision==='passed'){await copyItem(b,i);render();}
     return;
-      } else if(action==='reaudit') {archive(i);i.auditRetrySource=i.audit?.review_hold?i.auditRequestId||i.audit._request_id:null;i.reviewStatus='pending';i.auditRequestId=null;i.auditRequestHash=null;i.auditRecoveryBlocked=false;i.auditRecoverCount=0;i.auditWaitSince=null;i.auditNextCheckAt=0;invalidate(i);i.reason='等待重新审核';}
-  else if(action==='recollect') {
-    archive(i);(i.dataHistory??=[]).push({data:i.collected,revision:i.dataRevision,time:now()});
-    i.dataRevision=(i.dataRevision||0)+1;i.collectStatus='pending';i.reviewStatus='pending';i.auditRequestId=null;delete i.auditRetrySource;invalidate(i);i.reason='等待本次新采集';
-    if(b.collection)b.collection.members=b.collection.members.filter(m=>m.id!==i.itemId);
-  }
-      if(['reaudit','recollect'].includes(action)) {
-      closeDialog($('detailDialog'));
-      startBatch(b.id, { targetIds: [i.itemId] }).catch(e => toast('处理失败：' + e.message));
+          } else if(action==='reaudit') {
+      archive(i);i.auditRetrySource=i.audit?.review_hold?i.auditRequestId||i.audit._request_id:null;i.reviewStatus='pending';i.auditRequestId=null;i.auditRequestHash=null;i.auditRecoveryBlocked=false;i.auditRecoverCount=0;i.auditWaitSince=null;i.auditNextCheckAt=0;invalidate(i);i.reason='等待重新审核';
+      saveData().catch(e => toast('保存状态失败：' + e.message));
+      startBatch(b.id, { targetIds: [i.itemId] }).catch(e => toast('启动任务失败：' + e.message));
+      return;
+    } else if(action==='recollect') {
+      archive(i);(i.dataHistory??=[]).push({data:i.collected,revision:i.dataRevision,time:now()});
+      i.dataRevision=(i.dataRevision||0)+1;i.collectStatus='pending';i.reviewStatus='pending';i.auditRequestId=null;delete i.auditRetrySource;invalidate(i);i.reason='等待本次新采集';
+      if(b.collection)b.collection.members=b.collection.members.filter(m=>m.id!==i.itemId);
+      saveData().catch(e => toast('保存状态失败：' + e.message));
+      startBatch(b.id, { targetIds: [i.itemId] }).catch(e => toast('启动任务失败：' + e.message));
+      return;
+    }
+          if(['reaudit','recollect'].includes(action)) {
+      // 1. 瞬间关掉弹窗，不管网络死活
+      if ($('detailDialog').open) $('detailDialog').close();
+      
+      // 2. 在后台默默保存状态，如果断网了，只在底部弹个提示，不会卡死
+      saveData().catch(e => toast('状态保存失败（不影响界面）：' + e.message));
+      
+      // 3. 立刻启动单条审核，也放到后台跑
+      startBatch(b.id, { targetIds: [i.itemId] }).catch(e => toast('启动任务失败：' + e.message));
+      
+      // 4. 直接结束这个函数，不执行底下的保存逻辑
       return;
     }
     settleManualBatch(b);await saveData();committed=true;clearCurrentDetailDirty(b.id,i.itemId);refreshCurrentDetail(b.id,i.itemId);render();
