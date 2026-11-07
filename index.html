@@ -1027,16 +1027,24 @@ async function detailAction(action) {
     $('detailDialog').close();render();
     if(decisionChanged&&decision==='passed'){await copyItem(b,i);render();}
     return;
-          } else if(action==='reaudit') {
+              } else if(action==='reaudit') {
       archive(i);i.auditRetrySource=i.audit?.review_hold?i.auditRequestId||i.audit._request_id:null;i.reviewStatus='pending';i.auditRequestId=null;i.auditRequestHash=null;i.auditRecoveryBlocked=false;i.auditRecoverCount=0;i.auditWaitSince=null;i.auditNextCheckAt=0;invalidate(i);i.reason='等待重新审核';
-      saveData().catch(e => toast('保存状态失败：' + e.message));
+      
+      // 1. 先在本地内存把状态改了，立刻刷新界面！不管网通不通，界面马上变
+      if(typeof render === 'function') render(); 
+      
+      // 2. 把保存和启动丢给后台，不管死活，不等待
+      saveData().catch(e => toast('状态保存失败：' + e.message));
       startBatch(b.id, { targetIds: [i.itemId] }).catch(e => toast('启动任务失败：' + e.message));
       return;
-    } else if(action==='recollect') {
+        } else if(action==='recollect') {
       archive(i);(i.dataHistory??=[]).push({data:i.collected,revision:i.dataRevision,time:now()});
       i.dataRevision=(i.dataRevision||0)+1;i.collectStatus='pending';i.reviewStatus='pending';i.auditRequestId=null;delete i.auditRetrySource;invalidate(i);i.reason='等待本次新采集';
       if(b.collection)b.collection.members=b.collection.members.filter(m=>m.id!==i.itemId);
-      saveData().catch(e => toast('保存状态失败：' + e.message));
+      
+      if(typeof render === 'function') render();
+      
+      saveData().catch(e => toast('状态保存失败：' + e.message));
       startBatch(b.id, { targetIds: [i.itemId] }).catch(e => toast('启动任务失败：' + e.message));
       return;
     }
@@ -1252,6 +1260,7 @@ async function init() {
   document.addEventListener('click',e=>{
     const close=e.target.closest('[data-close]');if(close){closeDialog(close.closest('dialog'));return;}
     const el=e.target.closest('[data-action]');if(!el)return;const a=el.dataset.action;
+    if((a==='reaudit'||a==='recollect') && $('detailDialog').open) $('detailDialog').close();
     if(a==='delete-batch'){fail(openBatchAdmin('delete',[el.dataset.bid]));return;}
     if(a==='restore-batch'){fail(openBatchAdmin('restore',[el.dataset.bid]));return;}
     if(a==='image-preview'){openImagePreview(el.dataset.src);return;}
