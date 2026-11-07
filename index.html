@@ -1022,8 +1022,12 @@ async function detailAction(action) {
     i.dataRevision=(i.dataRevision||0)+1;i.collectStatus='pending';i.reviewStatus='pending';i.auditRequestId=null;delete i.auditRetrySource;invalidate(i);i.reason='等待本次新采集';
     if(b.collection)b.collection.members=b.collection.members.filter(m=>m.id!==i.itemId);
   }
-  settleManualBatch(b);await saveData();committed=true;clearCurrentDetailDirty(b.id,i.itemId);refreshCurrentDetail(b.id,i.itemId);render();
-    if(['reaudit','recollect'].includes(action)){closeDialog($('detailDialog')); startBatch(b.id, { targetIds: [i.itemId] }).catch(e => toast('处理失败：' + e.message)); }
+      if(['reaudit','recollect'].includes(action)) {
+      closeDialog($('detailDialog'));
+      startBatch(b.id, { targetIds: [i.itemId] }).catch(e => toast('处理失败：' + e.message));
+      return;
+    }
+    settleManualBatch(b);await saveData();committed=true;clearCurrentDetailDirty(b.id,i.itemId);refreshCurrentDetail(b.id,i.itemId);render();
   } catch(e){
     if(!committed){b.items[b.items.findIndex(x=>x.itemId===i.itemId)]=previous;b.collection=previousCollection;b.runStatus=previousRunStatus;if(app.currentBatchId===b.id&&app.detailItemId===i.itemId)detailDirty=true;}
     render();throw e;
