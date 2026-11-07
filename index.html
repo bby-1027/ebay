@@ -1030,17 +1030,16 @@ async function detailAction(action) {
       startBatch(b.id, { targetIds: [i.itemId] }).catch(e => toast('启动任务失败：' + e.message));
       return;
     }
-          if(['reaudit','recollect'].includes(action)) {
-      // 1. 瞬间关掉弹窗，不管网络死活
-      if ($('detailDialog').open) $('detailDialog').close();
+        if(['reaudit','recollect'].includes(action)) {
+      // 直接拔电源！不管后台忙不忙，强制关掉弹窗
+      $('detailDialog').close(); 
       
-      // 2. 在后台默默保存状态，如果断网了，只在底部弹个提示，不会卡死
-      saveData().catch(e => toast('状态保存失败（不影响界面）：' + e.message));
+      // 让后台在稍微等一下再启动，绝不卡住你的界面
+      setTimeout(() => {
+        saveData().catch(e => toast('状态保存失败：' + e.message));
+        startBatch(b.id, { targetIds: [i.itemId] }).catch(e => toast('启动失败：' + e.message));
+      }, 200);
       
-      // 3. 立刻启动单条审核，也放到后台跑
-      startBatch(b.id, { targetIds: [i.itemId] }).catch(e => toast('启动任务失败：' + e.message));
-      
-      // 4. 直接结束这个函数，不执行底下的保存逻辑
       return;
     }
     settleManualBatch(b);await saveData();committed=true;clearCurrentDetailDirty(b.id,i.itemId);refreshCurrentDetail(b.id,i.itemId);render();
