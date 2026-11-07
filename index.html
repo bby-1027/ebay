@@ -12,6 +12,10 @@ main{max-width:1260px;padding:30px 24px 64px;margin:auto}
 .actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
 .card{background:white;border:1px solid var(--line);border-radius:12px;overflow:hidden;margin-bottom:20px}
 .tablewrap{overflow-x:auto}table{border-collapse:collapse;width:100%;text-align:left;white-space:normal}th{background:#f7f9f7;color:#75817b;font-weight:500;font-size:12px}th,td{padding:14px 16px;border-bottom:1px solid #edf0ed;vertical-align:middle}td{font-size:13px}
+#itemRows tr:hover>td{background:#edf7f1}
+#itemRows tr.last-viewed>td{background:#e1f0e7}
+#itemRows tr.last-viewed>td:first-child{box-shadow:inset 3px 0 #216b52}
+#itemRows tr.last-viewed:hover>td{background:#d6eadd}
 .title-col{max-width:320px;line-height:1.5;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;text-overflow:ellipsis}
 .badge{display:inline-block;white-space:nowrap;padding:3px 8px;border-radius:4px;font-size:12px;border:1px solid transparent}
 .b-pass{background:#e7f4ec;color:#28714a;border-color:#c3e6d3}.b-warn{background:#fff3dd;color:#966314;border-color:#f2d8a6}.b-err{background:#fceceb;color:#a34f48;border-color:#f2cac7}.b-run{background:#e9f0fb;color:#4265a0;border-color:#c3d4f2}.b-gray{background:#f0f2f0;color:#748079;border-color:#e2e5e2}
@@ -152,15 +156,14 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
 <dialog id="batchTrashDialog" aria-labelledby="batchTrashTitle"><div class="dialoghead"><h3 id="batchTrashTitle">回收站 · 保留7天</h3><button class="close" data-close aria-label="关闭回收站">×</button></div><div class="dialogbody"><p id="batchTrashNotice" class="muted"></p><div class="batch-trash-tools"><button id="selectAllTrash" class="linkbtn">全选</button><span id="trashSelectedCount"></span><button id="restoreSelectedBatches" disabled>恢复已选批次</button><button id="refreshBatchTrash">刷新回收站</button></div><div class="tablewrap"><table><thead><tr><th>选择</th><th>批次</th><th>删除时间</th><th>到期时间</th><th>操作</th></tr></thead><tbody id="batchTrashRows"></tbody></table></div></div><div class="dialogfoot"><button data-close>关闭</button></div></dialog>
 <div id="toast"></div>
 <script>
-
 'use strict';
 // Connection settings are copied from the inspected deployment by build.py.
 const WORKER_URL = 'https://scraper-proxy.1172743763.workers.dev';
 const TOKEN = 'ebay1031';
-const BUILD = '2026-11-06-d1';
+const BUILD = '2026-11-07-queue1';
 const PROHIBITION_REVIEW_VERSION=1;
 const MISSING_SOURCE_NOTICE='AI 审核结果缺少能对应到商品原文的证据';
-const AUDIT_CONCURRENCY = 1;
+const AUDIT_CONCURRENCY = 2;
 const SELLER_POLICY_VERSION='2026-11-05-seller1';
 const $ = id => document.getElementById(id);
 const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -193,33 +196,20 @@ function batch(id=app.currentBatchId) {return app.batches.find(b=>b.id===id);}
 function itemOf(bid,iid) {return batch(bid)?.items.find(i=>i.itemId===iid);}
 function amazon(i) {return `https://www.amazon.com/dp/${i.asin}`;}
 function badge(label,type='gray') {return `<span class="badge b-${type}">${esc(label)}</span>`;}
-async function api(path, {method='GET',body,timeout=120000}={}) {
-    // 排队：同一时间只允许一个保存请求，前一个完成了才发下一个
-  if (method === 'POST') {
-    if (!window._saveQueue) window._saveQueue = Promise.resolve();
-    await new Promise(resolve => {
-      window._saveQueue = window._saveQueue.then(resolve, resolve);
-    });
-  }
+async function api(path, {method='GET',body,timeout=20000}={}) {
   const controller=new AbortController(); const timer=setTimeout(()=>controller.abort(),timeout);
   try {
     const r=await fetch(WORKER_URL+path,{method,cache:method==='GET'?'no-store':'default',headers:{'Content-Type':'application/json','X-Workbench-Token':TOKEN},
       ...(body!==undefined?{body:JSON.stringify(body)}:{}),signal:controller.signal});
-        const data=await r.json().catch(()=>null);
-    if(!r.ok) {
-      // 如果是503，把后台的真实报错文字揪出来
-      const msg = data?.detail || (r.status === 503 ? '服务器不可用(D1数据库异常)，请检查云端后台' : `请求失败 (${r.status})`);
-      const e=new Error(msg); e.status=r.status; throw e;
-    }
+    const data=await r.json().catch(()=>null);
+    if(!r.ok) {const e=new Error(data?.detail||`请求失败 (${r.status})`);e.status=r.status;throw e;}
     if(!data) throw new Error('服务没有返回JSON数据');
     return data;
-    } finally {
-    clearTimeout(timer);
-    // 通知队列：当前请求完成了，可以发下一个了
-    if (method === 'POST' && window._saveQueue) {
-      // 这里不用额外操作，Promise 链会自动释放
-    }
-  }
+  } catch(error){
+    if(controller.signal.aborted){const e=new Error('请求超时，正在确认原任务或保存结果');e.code='request_timeout';throw e;}
+    if(error instanceof TypeError){const e=new Error('连接中断，正在确认原任务或保存结果');e.code='connection_lost';throw e;}
+    throw error;
+  } finally {clearTimeout(timer);}
 }
 function normalizeCollectedData(raw) {
   const r=raw.data||raw.product||raw.item||raw;
@@ -326,7 +316,7 @@ function canManualPass(i){
     &&!['official_prohibited','necessary_condition','data_insufficient','business_preference','risk_unresolved'].includes(i.audit?.exclusion_reason_type)
     &&!needsProhibitionRefresh(i)&&sellerAuditCurrent(i)&&auditCurrent(i);
 }
-function canRecheckVerification(i){return i.collectStatus==='collected'&&i.reviewStatus==='verify';}
+function canRecheckVerification(i){return i.collectStatus==='collected'&&needsManual(i);}
 function hasFailure(i) {return ['error','sync_error'].includes(i.collectStatus)||['error','unconfirmed'].includes(i.reviewStatus)||i.copyStatus==='error';}
 function canResyncCollection(b,i){
   return ['error','sync_error'].includes(i.collectStatus)&&i.collectionIssue!=='upstream_failed'
@@ -362,6 +352,10 @@ function stage(b) {
 }
 function progress(b) {const c=counts(b);return `采集结束 ${c.collectEnded}/${c.total}（成功${c.collected}） · 审核 ${c.auditEligible?c.audited+'/'+c.auditEligible:'无需处理'} · 文案 ${c.passed?c.copyEnded+'/'+c.passed:'无需处理'}`;}
 function briefProgress(b,{compact=false}={}){const c=counts(b);
+  if(b.workQueue&&b.workQueue.state!=='completed'){
+    const q=b.workQueue,label=q.kind==='single'?'单个处理':'重审';
+    return `${label} ${q.cursor}/${q.entries.length}${q.note?' · '+q.note:''}`;
+  }
   const notes=(compact?[[c.auditFailed,'未完成']]:[[c.auditFailed,'审核未完成'],[c.verify,'待核验'],[c.prohibitionRefresh,'禁售待补审']])
     .filter(([n])=>n).map(([n,label])=>` · ${label} ${n} 条`).join('');
   if(b.items.some(i=>['pending','collecting','sync_error'].includes(i.collectStatus)))return `采集 ${c.collected}/${c.total}`+notes;
@@ -376,7 +370,7 @@ function briefProgress(b,{compact=false}={}){const c=counts(b);
 function itemStatus(i){
   if(pendingProhibitionRefresh(i))return ['禁售待补审','warn'];
   if(i.reviewStatus==='passed'&&!sellerAuditCurrent(i))return ['需重新审核','warn'];
-  if(ready(i))return ['可导出','pass'];
+  if(exportCheck(i).ok)return app.stopping?['保存待确认','warn']:app.saving?['保存中','run']:['可导出','pass'];
   if(i.collectStatus==='sync_error'||(i.collectStatus==='error'&&i.collectionIssue!=='upstream_failed'))return ['采集结果待确认','warn'];
   if(i.collectStatus==='error')return ['采集失败','err'];
   if(i.collectStatus==='pending')return ['待采集','gray'];if(i.collectStatus==='collecting')return ['采集中','run'];
@@ -397,18 +391,34 @@ async function fetchData() {
   if(app.fetching)return;const readEpoch=app.saveEpoch||0;app.fetching=true;
   $('refreshState').disabled=true;$('refreshState').textContent='刷新中…';
   try {
-    const d=await api('/api/data'); if(app.saving||app.processing||app.detailBusy||readEpoch!==(app.saveEpoch||0))return; if(Number(d.version||0)<Number(app.serverVersion||0)){toast('云端状态正在同步，请稍后刷新');return;} app.batches=Array.isArray(d.batches)?d.batches:[];app.serverVersion=d.version??0;
+    let d=await api('/api/data'); if(app.saving||app.processing||app.detailBusy||readEpoch!==(app.saveEpoch||0))return;
+    if(app.pendingSave){
+      if(!savedPayloadMatches(d,app.pendingSave)){
+        if(d.storage==='d1'&&d.version===app.pendingSave.version){
+          await api('/api/data',{method:'POST',body:app.pendingSave});
+          d=await api('/api/data');
+          if(!savedPayloadMatches(d,app.pendingSave))throw new Error('服务器尚未确认保存，请稍后再刷新');
+        }else if(!confirm('服务器记录与本地未确认的保存不同。是否读取服务器记录？本地尚未确认的修改将被放弃。'))return;
+      }
+      app.pendingSave=null;
+    }
+    if(Number(d.version||0)<Number(app.serverVersion||0)){toast('云端状态正在同步，请稍后刷新');return;} app.batches=Array.isArray(d.batches)?d.batches:[];app.serverVersion=d.version??0;
     app.batches.forEach(b=>{b.items=b.items||[];b.items.forEach(i=>{if(i.dataRevision==null&&i.auditRevision==null&&i.copyRevision==null)i.legacyUnversioned=true;i.dataRevision=i.dataRevision||0;});});
     app.storage=d.storage;app.readAt=now();app.stopping=false;render();
-  } catch(e) {
-    // 新增的容错：如果后台坏了，页面不再卡死，直接提示
-    $('batchRows').innerHTML=`<tr><td colspan="8"><span class="danger-text">读取失败：${e.message} (如果显示503，说明你的D1数据库出问题了，请检查后台绑定或建表SQL)</span></td></tr>`;
-    toast('读取云端数据失败：'+e.message);
-  } finally {
-    app.fetching=false;$('refreshState').disabled=false;$('refreshState').textContent='刷新状态';
-  }
+  } finally {app.fetching=false;$('refreshState').disabled=false;$('refreshState').textContent='刷新状态';}
 }
 // All writes in the supported single processing window are serialized. KV is not a cross-device lock.
+function savedPayloadMatches(saved,payload){
+  if(!Array.isArray(saved.batches)||Number(saved.version)<Number(payload.version))return false;
+  function canonical(value){
+    if(Array.isArray(value))return value.map(canonical);
+    if(value&&typeof value==='object')return Object.fromEntries(Object.keys(value).sort().map(key=>[key,canonical(value[key])]));
+    return value;
+  }
+  const expected=payload.batch?[payload.batch]:payload.batches;
+  const actual=payload.batch?saved.batches.filter(b=>b.id===payload.batch.id):saved.batches;
+  return JSON.stringify(canonical(expected))===JSON.stringify(canonical(actual));
+}
 function saveData(activeBatch) {
   app.saveEpoch=(app.saveEpoch||0)+1;app.saving=(app.saving||0)+1;
   const work=async()=>{
@@ -416,15 +426,34 @@ function saveData(activeBatch) {
       const persist=async()=>{
         const useD1=app.storage==='d1';
         if(!useD1){const wait=1100-(Date.now()-(app.lastWrite||0));if(wait>0)await sleep(wait);}
+        if(app.pendingSave)throw new Error('上次保存尚未确认，请先刷新核对');
         const changes=useD1&&activeBatch?{batch:activeBatch}:{batches:app.batches};
-        const d=await api('/api/data',{method:'POST',body:{version:app.serverVersion,...changes}});
+        const payload=JSON.parse(JSON.stringify({version:app.serverVersion,...changes}));
+        app.pendingSave=payload;
+        let d;
+        try{d=await api('/api/data',{method:'POST',body:payload});}
+        catch(error){
+          if(error.status&&error.status!==409&&error.status<500){app.pendingSave=null;throw error;}
+          toast('正在查询服务器，确认刚才的保存结果');
+          const saved=await api('/api/data');
+          if(savedPayloadMatches(saved,payload))d={version:saved.version};
+          else if(useD1&&saved.version===payload.version&&!error.status){
+            try{d=await api('/api/data',{method:'POST',body:payload});}
+            catch(retryError){
+              const confirmed=await api('/api/data');
+              if(!savedPayloadMatches(confirmed,payload))throw retryError;
+              d={version:confirmed.version};
+            }
+          }else{if(saved.version!==payload.version)error.status=409;throw error;}
+        }
+        app.pendingSave=null;
         app.serverVersion=d.version;app.lastWrite=Date.now();app.readAt=now();app.stopping=false;return true;
       };
       if(app.processing)return await persist();
       if(!navigator.locks)throw new Error('当前浏览器无法保护写入，请使用新版Chrome');
       return await navigator.locks.request('ebay-workbench-processing-v1',{ifAvailable:true},async lock=>{if(!lock)throw new Error('另一个页面正在处理，本页暂时只读，请刷新查看');return persist();});
     }
-    catch(e){app.stopping=true;const b=batch(app.activeId);if(b)b.runStatus='paused';toast(e.status===409?'云端数据已变化，已停止后续处理。请保存当前页面并刷新核对。':`保存失败，已停止后续处理：${e.message}`);throw e;}
+      catch(e){app.stopping=true;const b=batch(app.activeId);if(b)b.runStatus='paused';toast(e.status===409?'数据已被其他页面修改，请刷新核对后继续。':`保存尚未确认，处理已暂停：${e.message}`);throw e;}
     finally{app.saving--;if(!app.saving)render();}
   };
   app.writeTail=app.writeTail.then(work,work);return app.writeTail;
@@ -459,7 +488,7 @@ function renderItems() {
   $('selectionInfo').textContent=selected.length?`已选 ${selected.length} 条，可导出 ${selected.filter(ready).length} 条`:`共 ${rows.length} 条`;
   $('selectAllFiltered').hidden=!selected.length||rows.length<=50;$('clearSelection').hidden=!selected.length;
   $('itemRows').innerHTML=rows.slice(app.page*50,app.page*50+50).map(i=>{
-    return `<tr><td><input type="checkbox" data-select="${esc(i.itemId)}" ${app.selected.has(i.itemId)?'checked':''}></td><td><span class="sku">${esc(i.asin)}</span></td>
+    return `<tr class="${app.lastViewed?.batchId===b.id&&app.lastViewed.itemId===i.itemId?'last-viewed':''}" data-item-row="${esc(i.itemId)}"><td><input type="checkbox" data-select="${esc(i.itemId)}" ${app.selected.has(i.itemId)?'checked':''}></td><td><span class="sku">${esc(i.asin)}</span></td>
       <td><a href="${amazon(i)}" target="_blank" rel="noopener">打开商品 ↗</a></td><td>${badge(...itemStatus(i))}</td>
       <td><div class="short-reason" title="${esc(itemReason(i))}">${esc(itemReason(i))}</div></td><td><button class="linkbtn" data-action="detail" data-iid="${esc(i.itemId)}">查看详情</button></td></tr>`;
   }).join('');
@@ -474,7 +503,8 @@ function renderItems() {
   const verificationCount=b.items.filter(canRecheckVerification).length;
   $('btnBatchRecheck').hidden=!verificationCount;
   $('btnBatchRecheck').disabled=app.processing||!!app.saving||!!app.detailBusy||!!app.adminBusy;
-  $('btnBatchRecheck').textContent=`批量重审待核验（${verificationCount}）`;
+  $('btnBatchRecheck').textContent=b.workQueue?.kind==='verification'&&b.workQueue.state!=='completed'
+    ?`继续重审（${b.workQueue.cursor}/${b.workQueue.entries.length}）`:`批量重审待核验（${verificationCount}）`;
   $('btnRunBatch').disabled=app.processing&&app.activeId!==b.id;
   $('btnRunBatch').textContent=app.processing&&app.activeId===b.id?'暂停处理':stage(b)==='需要复审'&&c.prohibitionRefresh?`补审旧记录禁售（${c.prohibitionRefresh}）`:b.runStatus==='paused'||b.flowVersion===1?'继续批量处理':'开始批量处理';
   $('btnRunBatch').hidden=['已完成','有失败项','有审核未完成'].includes(stage(b))&&!app.processing;
@@ -492,9 +522,10 @@ function returnHome(){app.view='home';sessionStorage.setItem('audit_view','home'
 function archive(i){if(i.audit)(i.auditHistory??=[]).push({audit:i.audit,dataRevision:i.auditRevision,manual:i.manualDecision||null});}
 function invalidate(i){if(i.copyData)(i.copyHistory??=[]).push({data:i.copyData,revision:i.copyRevision,time:now()});i.copyStatus='pending';i.copyData=null;i.copyRevision=null;}
 async function setPaused(){const b=batch(app.activeId);if(!b)return;b.runStatus='paused';await saveData(b);render();toast('已暂停后续步骤；已提交任务保留，返回结果会保存');}
-async function submitCollection(b,items) {
+async function submitCollection(b,items,entry=null) {
   const attempt={name:`wb_${Date.now()}_${uid().slice(0,8)}`,remoteId:null,startedAt:now(),state:'submitting',members:items.map(i=>({id:i.itemId,revision:i.dataRevision||0})),errors:0};
-  b.collection=attempt;items.forEach(i=>{i.collectStatus='collecting';i.reason='正在提交本次采集';});await saveData(b);
+  if(entry)entry.collection=attempt;else b.collection=attempt;
+  items.forEach(i=>{i.collectStatus='collecting';i.reason='正在提交本次采集';});await saveData(b);
   try {
     const d=await api('/api/batches',{method:'POST',body:{asins:items.map(i=>i.asin),batch_name:attempt.name},timeout:20000});
     attempt.remoteId=validRemoteId(d);attempt.state='polling';
@@ -568,8 +599,8 @@ function applyRows(b,attempt,rows,terminal,onlyIds) {
   }
   return changed;
 }
-async function pollCollection(b,onlyIds) {
-  const a=b.collection;if(!a||a.state==='completed')return;
+async function pollCollection(b,onlyIds,attempt=b.collection) {
+  const a=attempt;if(!a||a.state==='completed')return;
   const previousId=a.remoteId,previousState=a.state;
   let changed=false;
   try {
@@ -730,13 +761,106 @@ async function copyItem(b,i) {
   catch(e){i.copyStatus='verify';i.reason='文案待核验：'+e.message;}
   settleManualBatch(b);await saveData(b);
 }
-async function runLoop(bid,{recheckVerification=false,resyncCollection=false,recheckProhibition=false,targetIds=null}={}) {
+function prepareQueueEntry(i,entry){
+  if(entry.action==='copy'){invalidate(i);i.reason='等待重新检查文案';return;}
+  if(entry.action==='retrieve'){i.reviewStatus='auditing';i.auditNextCheckAt=0;return;}
+  archive(i);
+  i.auditRetrySource=entry.action==='reaudit'&&i.audit?.review_hold?i.auditRequestId||i.audit._request_id:null;
+  if(entry.action==='recollect'){
+    (i.dataHistory??=[]).push({data:i.collected,revision:i.dataRevision,time:now()});
+    i.dataRevision=(i.dataRevision||0)+1;i.collectStatus='pending';
+  }
+  Object.assign(i,{reviewStatus:'pending',audit:null,manualDecision:null,auditRequestId:null,auditRequestHash:null,
+    auditReceiptConfirmed:false,auditRecoveryBlocked:false,auditFailureKnown:false,auditRecoverCount:0,
+    auditWaitSince:null,auditNextCheckAt:0,reason:entry.action==='recollect'?'等待本次新采集':'等待重新审核'});
+  invalidate(i);
+}
+async function runWorkQueue(b,{singleItem,recheckVerification}){
+  let q=b.workQueue;
+  const unfinished=q&&q.state!=='completed';
+  if(recheckVerification&&unfinished&&q.kind==='single')throw new Error('单个商品任务尚未结束，请先点击继续处理接回原任务');
+  if(singleItem&&unfinished){
+    if(q.kind==='single'&&q.entries[0].itemId!==singleItem.itemId)throw new Error('还有单个商品任务未结束，请先接续原任务');
+    if(q.kind!=='single')b.suspendedQueue=q;
+  }
+  if(singleItem||(!unfinished&&recheckVerification)){
+    const items=singleItem?b.items.filter(i=>i.itemId===singleItem.itemId):b.items.filter(canRecheckVerification);
+    if(!items.length)return;
+    q={id:uid(),kind:singleItem?'single':'verification',state:'running',cursor:0,createdAt:now(),
+      entries:items.map(i=>({itemId:i.itemId,revision:i.dataRevision||0,
+        action:singleItem?.action||(copyAuthorized(i)&&i.copyStatus==='verify'?'copy':'reaudit')}))};
+    b.workQueue=q;
+  }
+  if(!q||q.state==='completed')return;
+  app.activeId=b.id;app.processing=true;b.runStatus='running';b.flowVersion=1;
+  q.state='running';q.note='';q.repeatedIssue=null;render();
+  try{
+    await saveData(b);
+    while(q.cursor<q.entries.length&&b.runStatus==='running'&&!app.stopping){
+      const entry=q.entries[q.cursor],i=b.items.find(item=>item.itemId===entry.itemId);
+      if(entry.completedAt){q.cursor++;await saveData(b);continue;}
+      if(!i||(i.dataRevision||0)!==entry.revision){
+        entry.outcome='资料已变化，已跳过';q.cursor++;await saveData(b);continue;
+      }
+      if(!entry.prepared){
+        prepareQueueEntry(i,entry);entry.revision=i.dataRevision||0;entry.prepared=true;
+        await saveData(b);
+      }
+      if(entry.action==='recollect'){
+        if(i.collectStatus==='pending')await submitCollection(b,[i],entry);
+        if(entry.collection?.state==='sync_error')entry.collection.state='polling';
+        while(i.collectStatus==='collecting'&&b.runStatus==='running'&&!app.stopping){
+          await pollCollection(b,new Set([i.itemId]),entry.collection);
+          render();
+          if(i.collectStatus==='collecting')await sleep(2500);
+        }
+        if(i.collectStatus==='sync_error'){
+          q.note='采集结果待确认，可继续查询原任务';q.state='paused';b.runStatus='paused';
+          await saveData(b);break;
+        }
+      }
+      while(i.collectStatus==='collected'&&['pending','auditing'].includes(i.reviewStatus)
+        &&b.runStatus==='running'&&!app.stopping){
+        if(i.reviewStatus==='auditing'&&i.auditNextCheckAt>Date.now()){await sleep(1000);continue;}
+        await auditItem(b,i,i.reviewStatus==='auditing');render();
+      }
+      if(b.runStatus!=='running'||app.stopping)break;
+      if(copyAuthorized(i)&&['pending','processing'].includes(i.copyStatus))await copyItem(b,i);
+      entry.outcome=i.reviewStatus;entry.completedAt=now();q.cursor++;
+      const issue=i.audit?.review_hold&&['policy_fields_missing','checks_incomplete','seller_checks_incomplete'].includes(i.audit.audit_issue)
+        ?i.audit.audit_issue:null;
+      q.repeatedIssue=issue?{code:issue,count:q.repeatedIssue?.code===issue?q.repeatedIssue.count+1:1}:null;
+      if(q.repeatedIssue?.count>=3&&q.cursor<q.entries.length){
+        q.note='连续3条出现同类AI漏答，已暂停';q.state='paused';b.runStatus='paused';
+      }
+      await saveData(b);render();
+    }
+    if(q.cursor===q.entries.length){
+      q.state='completed';q.note='';
+      if(b.suspendedQueue&&q.kind==='single'){
+        for(const entry of b.suspendedQueue.entries){
+          if(entry.itemId===q.entries[0].itemId&&entry.revision===q.entries[0].revision)entry.completedAt=now();
+        }
+      }
+      const remaining=b.items.some(i=>['pending','collecting'].includes(i.collectStatus)||['pending','auditing'].includes(i.reviewStatus)
+        ||(copyAuthorized(i)&&['pending','processing'].includes(i.copyStatus)));
+      b.runStatus=b.suspendedQueue||remaining?'paused':counts(b).failures?'blocked':counts(b).verify?'waiting_review':'completed';
+      await saveData(b);
+    }else if(!app.stopping){q.state='paused';await saveData(b);}
+  }finally{app.processing=false;app.activeId=null;render();}
+}
+async function runLoop(bid,{recheckVerification=false,resyncCollection=false,recheckProhibition=false,singleItem=null}={}) {
   const b=batch(bid);if(!b)return;
+  if(!singleItem&&b.suspendedQueue&&b.workQueue?.state==='completed'){
+    b.workQueue=b.suspendedQueue;delete b.suspendedQueue;
+  }
+  if(singleItem||recheckVerification||b.workQueue?.state==='running'||b.workQueue?.state==='paused')
+    return runWorkQueue(b,{singleItem,recheckVerification});
   if(recheckVerification&&(app.saving||app.detailBusy||!b.items.some(canRecheckVerification)))return;
   const resyncIds=resyncCollection?new Set(b.items.filter(i=>canResyncCollection(b,i)).map(i=>i.itemId)):null;
   if(resyncIds&&(!resyncIds.size||app.saving||app.detailBusy))return;
   const checkSelection=recheckProhibition?pendingProhibitionRefresh:recheckVerification?canRecheckVerification:null;
-    const scopedIds=resyncIds||(targetIds?new Set(targetIds):(checkSelection?new Set(b.items.filter(checkSelection).map(i=>i.itemId)):null));
+  const scopedIds=resyncIds||(checkSelection?new Set(b.items.filter(checkSelection).map(i=>i.itemId)):null);
   if(checkSelection&&!scopedIds.size)return;
   const scopedItems=()=>scopedIds?b.items.filter(i=>scopedIds.has(i.itemId)):b.items;
   const previousRunStatus=b.runStatus;
@@ -793,18 +917,26 @@ async function runLoop(bid,{recheckVerification=false,resyncCollection=false,rec
   }
   if(auditJobError)throw auditJobError;
 }
-async function startBatch(bid,{recheckVerification=false,resyncCollection=false,recheckProhibition=false,targetIds=null}={}) {
+async function startBatch(bid,{recheckVerification=false,resyncCollection=false,recheckProhibition=false,singleItem=null}={}) {
   if(app.adminBusy)return toast('批次管理正在保存，请稍候再开始任务');
-  if(app.processing)return toast('已有批次在运行，请先暂停');
-  const target=batch(bid);if(!target)return;
+  if(app.processing||app.starting)return toast('已有任务在处理，请等待或暂停');
+  if(app.saving||app.detailBusy)return toast('正在保存，请稍候');
+  app.starting=true;
+  let scopedRun=true;
+  try{
+  if(app.stopping){await fetchData();if(app.stopping)return;}
   if(!await checkBackend())return;
-  if(!recheckVerification&&!resyncCollection&&!recheckProhibition&&target.items.some(i=>i.reviewStatus==='passed'&&!auditCurrent(i)&&!legacyAudit(i))&&!confirm('本批部分资料与原审核不能对应，继续需要重新审核。旧结论会保留。是否继续？'))return;
+  const target=batch(bid);if(!target)return;
+  scopedRun=!!(singleItem||recheckVerification||resyncCollection||recheckProhibition||target.suspendedQueue
+    ||(target.workQueue&&target.workQueue.state!=='completed'));
+  if(!scopedRun&&target.items.some(i=>i.reviewStatus==='passed'&&!auditCurrent(i)&&!legacyAudit(i))&&!confirm('本批部分资料与原审核不能对应，继续需要重新审核。旧结论会保留。是否继续？'))return;
   if(!navigator.locks)return toast('此浏览器不支持处理窗口保护，请使用新版Chrome');
   await navigator.locks.request('ebay-workbench-processing-v1',{ifAvailable:true},async lock=>{
     if(!lock)return toast('同一浏览器另一个页面正在处理，此页仅查看');
-        try{await runLoop(bid,{recheckVerification,resyncCollection,recheckProhibition,targetIds});}catch(e){toast('处理已停止：'+e.message);}
+    try{await runLoop(bid,{recheckVerification,resyncCollection,recheckProhibition,singleItem});}catch(e){toast('处理已暂停：'+e.message);}
   });
-  if(!recheckVerification&&!resyncCollection&&!recheckProhibition&&['completed','waiting_review'].includes(batch(bid)?.runStatus)&&!app.stopping){const queued=app.batches.find(b=>b.runStatus==='queued');if(queued)await startBatch(queued.id);}
+  }finally{app.starting=false;render();}
+  if(!scopedRun&&['completed','waiting_review'].includes(batch(bid)?.runStatus)&&!app.stopping){const queued=app.batches.find(b=>b.runStatus==='queued');if(queued)await startBatch(queued.id);}
 }
 async function queueVerification(b,prohibition=false){
   const eligible=prohibition?pendingProhibitionRefresh:canRecheckVerification;
@@ -936,7 +1068,7 @@ function renderDetailFooter(i){const busy=!!app.detailBusy,blocked=busy||app.pro
     :i.reviewStatus==='verify'?`<button class="primary" data-action="manual-pass" ${blocked||!canManualPass(i)?'disabled':''}>通过</button><button data-action="manual-exclude" ${blocked?'disabled':''}>淘汰</button>`
     :needsManual(i)?`<button data-action="manual-exclude" ${blocked?'disabled':''}>淘汰</button>`
     :ready(i)?'<button class="primary" data-action="export-one">导出此商品</button>':'';
-   $('dtFooter').innerHTML=detailNavigationFooter()+`<div class="detail-main-actions">${actions}<button data-close>关闭</button></div>`;
+  $('dtFooter').innerHTML=detailNavigationFooter()+`<div class="detail-main-actions">${actions}<button data-close ${busy?'disabled':''}>关闭</button></div>`;
 }
 function openDetail(iid,{preserveNavigation=false}={}) {
   const b=batch(),i=b?.items.find(x=>x.itemId===iid);if(!i)return false;
@@ -946,6 +1078,7 @@ function openDetail(iid,{preserveNavigation=false}={}) {
     const ids=filtered(b).map(x=>x.itemId);app.detailNav={batchId:b.id,ids:ids.includes(iid)?ids:[iid]};
   }
   if(changed){app.detailExpanded={};app.detailTab='source';}app.detailItemId=iid;detailDirty=false;
+  app.lastViewed={batchId:b.id,itemId:iid};renderItems();
   $('dtTitle').textContent=i.asin;$('dtStatus').textContent=itemStatus(i)[0];$('dtStatus').className='badge b-'+itemStatus(i)[1];
   $('detailMeta').innerHTML=`<span>品牌：<strong>${esc(brandOf(i)||'未提供')}</strong></span><a href="${amazon(i)}" target="_blank" rel="noopener">Amazon ↗</a>`;
   const a=i.audit||{},currentResult=hasCurrentDisplayedAudit(i);
@@ -989,17 +1122,18 @@ function refreshCurrentDetail(bid,iid){if($('detailDialog').open&&app.currentBat
 function clearCurrentDetailDirty(bid,iid){if(app.currentBatchId===bid&&app.detailItemId===iid)detailDirty=false;}
 function lockDetailInputs(locked){for(const id of ['manualStatus','manualReason','editTitle','editBullets','editDesc']){const el=$(id);if(el)el.disabled=locked;}}
 async function detailAction(action) {
-    if(typeof app === 'undefined') { toast('页面数据丢失，请刷新重试'); return; }
   const b=batch(),i=b&&itemOf(b.id,app.detailItemId);if(!i)return;
-    if(action==='reaudit'||action==='recollect'){ if($('detailDialog').open) $('detailDialog').close(); }
   if(app.detailBusy)return;
   if(action==='detail-prev'||action==='detail-next')return navigateDetail(action==='detail-prev'?-1:1);
   if(action==='tab-source'||action==='tab-copy'){app.detailTab=action==='tab-copy'?'copy':'source';renderDetailSource(i);return;}
   if(action==='export-one'){const before=app.selected;app.selected=new Set([i.itemId]);try{doExport(b.id,true);}finally{app.selected=before;}return;}
   if(action==='image-preview')return;
   if(action==='toggle-edit'){const panel=$('detailEditPanel');panel.hidden=!panel.hidden;return;}
-  if(action==='retrieve'){if(app.processing)return toast('当前仍在处理，请等待原结果');i.auditNextCheckAt=0;i.reviewStatus='auditing';await saveData();closeDialog($('detailDialog'));return startBatch(b.id);}
-  if(app.processing)return toast('请先暂停，等待当前步骤保存后再修改商品');
+  if(app.processing||app.starting)return toast('请先暂停，等待当前步骤保存后再修改商品');
+  if(action==='retrieve'){
+    detailDirty=false;$('detailDialog').close();render();
+    return startBatch(b.id,{singleItem:{itemId:i.itemId,action:'retrieve'}});
+  }
   if(action==='expand-text'){return;}
   const manualAction=['manual-pass','manual-exclude','manual-save'].includes(action),prior=existingManual(i);
   const decision=action==='manual-pass'?'passed':action==='manual-exclude'?'excluded':prior?$('manualStatus')?.value:null;
@@ -1014,6 +1148,12 @@ async function detailAction(action) {
   }
   if(action==='reaudit'&&(['auditing','unconfirmed'].includes(i.reviewStatus)||i.auditRecoveryBlocked)&&!confirm('原审核结果尚未确认。重新审核会发起一次新的AI调用；建议先再次查询原结果。仍要重新审核？'))return;
   if(action==='recollect'&&!confirm('这会提交新的采集任务，取得新资料后重新审核。旧资料留作历史；当前导出资格立即失效。继续？'))return;
+  if(['reaudit','recollect'].includes(action)){
+    updateDetailDirty();
+    if(detailDirty&&!confirm('有未保存的输入，是否放弃这些输入并执行本次操作？'))return;
+    detailDirty=false;$('detailDialog').close();render();
+    return startBatch(b.id,{singleItem:{itemId:i.itemId,action}});
+  }
   const previous=JSON.parse(JSON.stringify(i)),previousCollection=b.collection?JSON.parse(JSON.stringify(b.collection)):b.collection,previousRunStatus=b.runStatus;let committed=false;app.detailBusy=true;lockDetailInputs(true);renderDetailFooter(i);
   try {
   if(action==='recopy') {invalidate(i);await copyItem(b,i);committed=true;clearCurrentDetailDirty(b.id,i.itemId);refreshCurrentDetail(b.id,i.itemId);render();return;}
@@ -1040,40 +1180,8 @@ async function detailAction(action) {
     $('detailDialog').close();render();
     if(decisionChanged&&decision==='passed'){await copyItem(b,i);render();}
     return;
-              } else if(action==='reaudit') {
-      archive(i);i.auditRetrySource=i.audit?.review_hold?i.auditRequestId||i.audit._request_id:null;i.reviewStatus='pending';i.auditRequestId=null;i.auditRequestHash=null;i.auditRecoveryBlocked=false;i.auditRecoverCount=0;i.auditWaitSince=null;i.auditNextCheckAt=0;invalidate(i);i.reason='等待重新审核';
-      
-      // 1. 先在本地内存把状态改了，立刻刷新界面！不管网通不通，界面马上变
-      if(typeof render === 'function') render(); 
-      
-      // 2. 把保存和启动丢给后台，不管死活，不等待
-      saveData().catch(e => toast('状态保存失败：' + e.message));
-      startBatch(b.id, { targetIds: [i.itemId] }).catch(e => toast('启动任务失败：' + e.message));
-      return;
-        } else if(action==='recollect') {
-      archive(i);(i.dataHistory??=[]).push({data:i.collected,revision:i.dataRevision,time:now()});
-      i.dataRevision=(i.dataRevision||0)+1;i.collectStatus='pending';i.reviewStatus='pending';i.auditRequestId=null;delete i.auditRetrySource;invalidate(i);i.reason='等待本次新采集';
-      if(b.collection)b.collection.members=b.collection.members.filter(m=>m.id!==i.itemId);
-      
-      if(typeof render === 'function') render();
-      
-      saveData().catch(e => toast('状态保存失败：' + e.message));
-      startBatch(b.id, { targetIds: [i.itemId] }).catch(e => toast('启动任务失败：' + e.message));
-      return;
-    }
-        if(['reaudit','recollect'].includes(action)) {
-      // 直接拔电源！不管后台忙不忙，强制关掉弹窗
-      $('detailDialog').close(); 
-      
-      // 让后台在稍微等一下再启动，绝不卡住你的界面
-      setTimeout(() => {
-        saveData().catch(e => toast('状态保存失败：' + e.message));
-        startBatch(b.id, { targetIds: [i.itemId] }).catch(e => toast('启动失败：' + e.message));
-      }, 200);
-      
-      return;
-    }
-    settleManualBatch(b);await saveData();committed=true;clearCurrentDetailDirty(b.id,i.itemId);refreshCurrentDetail(b.id,i.itemId);render();
+      }
+  settleManualBatch(b);await saveData();committed=true;clearCurrentDetailDirty(b.id,i.itemId);refreshCurrentDetail(b.id,i.itemId);render();
   } catch(e){
     if(!committed){b.items[b.items.findIndex(x=>x.itemId===i.itemId)]=previous;b.collection=previousCollection;b.runStatus=previousRunStatus;if(app.currentBatchId===b.id&&app.detailItemId===i.itemId)detailDirty=true;}
     render();throw e;
@@ -1101,7 +1209,7 @@ function closeDialog(d){
   if(['batchAdminDialog','batchTrashDialog'].includes(d.id)&&batchAdmin.busy){toast('正在保存管理员操作，请稍候');return false;}
   if(d.id==='settingsDialog'&&settingsChanged()){$('settingsConfirmError').textContent='';if(!$('settingsConfirmDialog').open)$('settingsConfirmDialog').showModal();return false;}
   if(d.id==='detailDialog'){
-    //if(app.detailBusy)return false;
+    if(app.detailBusy)return false;
     updateDetailDirty();
     if(detailFieldChanged('manualReason')||detailFieldChanged('manualStatus')){
       if(!$('detailConfirmDialog').open)$('detailConfirmDialog').showModal();
@@ -1273,7 +1381,6 @@ async function init() {
   document.addEventListener('click',e=>{
     const close=e.target.closest('[data-close]');if(close){closeDialog(close.closest('dialog'));return;}
     const el=e.target.closest('[data-action]');if(!el)return;const a=el.dataset.action;
-    if((a==='reaudit'||a==='recollect') && $('detailDialog').open) $('detailDialog').close();
     if(a==='delete-batch'){fail(openBatchAdmin('delete',[el.dataset.bid]));return;}
     if(a==='restore-batch'){fail(openBatchAdmin('restore',[el.dataset.bid]));return;}
     if(a==='image-preview'){openImagePreview(el.dataset.src);return;}
@@ -1291,12 +1398,13 @@ async function init() {
   const interrupted=app.batches.find(b=>b.runStatus==='running'&&b.flowVersion===1);
   if(interrupted)fail(startBatch(interrupted.id));
   else if(app.batches.some(b=>b.runStatus==='running'))toast('已读取旧版运行记录；请先接回本轮结果再继续。不会自动重新采集。');
-  setInterval(()=>{if(!app.processing&&!document.querySelector('dialog[open]'))fail(fetchData());},15000);
+  setInterval(()=>{if(!app.processing&&!app.starting&&!document.querySelector('dialog[open]'))fail(fetchData());},15000);
 }
 async function checkBackend(){
   if(app.backendCompatible)return true;
   try{const info=await api('/api/workbench_info',{timeout:10000});if(info.audit_contract!==2||info.audit_protocol!==3||!(info.audit_model_protocol>=13)||info.seller_policy_version!==SELLER_POLICY_VERSION)throw new Error('版本不对应');app.backendCompatible=true;return true;}
-  catch{toast('审核后台版本未配套，请同时部署本次 worker.js 和 index.html。旧数据仍保留，需按新标准审核后导出。');return false;}
+  catch(error){toast(error.code==='request_timeout'||error.code==='connection_lost'
+    ?'暂时无法连接审核后台，请稍后重试。':'审核后台版本未配套，请同时部署本次 worker.js 和 index.html。旧数据仍保留，需按新标准审核后导出。');return false;}
 }
 if(!window.__AUDIT_TEST__)fail(init());
 </script>
