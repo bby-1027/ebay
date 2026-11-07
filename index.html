@@ -241,22 +241,71 @@ function readConnectionFailed(error){
   app.nextReadRetryAt=Date.now()+Math.min(60000,5000*2**Math.min(app.readFailures-1,4));
 }
 function renderConnectionState(){
-  const message=$('connectionMessage'),retry=$('connectionRetry');
-  if(!message||!retry)return;
+  const banner=$('connectionBanner');
+  const message=$('connectionMessage');
+  const retry=$('connectionRetry');
+  if(!banner||!message||!retry)return;
+
   const unconfirmed=!!app.pendingSave;
   const paused=app.stopping&&!unconfirmed;
   const error=app.readError;
+  const problem=!!(error||unconfirmed||paused);
+
+  if(error||paused||app.saveError){
+    renderConnectionState.hadError=true;
+  }
+
+  if(problem){
+    clearTimeout(renderConnectionState.hideTimer);
+    renderConnectionState.recoveredUntil=0;
+  }else if(app.readAt&&renderConnectionState.hadError){
+    renderConnectionState.hadError=false;
+    renderConnectionState.recoveredUntil=Date.now()+3000;
+    clearTimeout(renderConnectionState.hideTimer);
+    renderConnectionState.hideTimer=setTimeout(
+      ()=>renderConnectionState(),
+      3000
+    );
+  }
+
+  const recovered=(
+    !problem&&
+    app.readAt&&
+    Date.now()<(renderConnectionState.recoveredUntil||0)
+  );
+
+  banner.hidden=!!app.readAt&&!problem&&!recovered;
+
   let label;
-  if(unconfirmed)label='上次保存结果尚未确认。正在保留本地记录；重新连接后查询原保存回执，不新建任务。';
-  else if(paused)label='写入已暂停，请刷新核对服务器记录后继续。'+(app.saveError||'');
-  else if(error)label=(app.readAt?'连接暂时中断，当前显示上次读取的记录。':'批次读取失败，尚未取得服务器记录。')+error;
-  else if(app.fetching)label=app.readAt?'正在检查已保存批次…':'正在连接并读取已保存批次…';
-  else label=app.readAt?'批次连接正常，已读取服务器记录。':'正在连接并读取已保存批次…';
-  if(error&&!app.readRetryBlocked)label+=' 将自动重试；也可点击重新连接。';
-  if(error&&app.readRetryBlocked)label+=' 请处理上述错误后点击重新连接。';
+  if(unconfirmed){
+    label='上次保存结果尚未确认。正在保留本地记录；重新连接后查询原保存回执，不新建任务。';
+  }else if(paused){
+    label='写入已暂停，请刷新核对服务器记录后继续。'+(app.saveError||'');
+  }else if(error){
+    label=(
+      app.readAt
+        ?'连接暂时中断，当前显示上次读取的记录。'
+        :'批次读取失败，尚未取得服务器记录。'
+    )+error;
+  }else if(recovered){
+    label='连接已恢复';
+  }else{
+    label=app.readAt?'':'正在连接并读取已保存批次…';
+  }
+
+  if(error&&!app.readRetryBlocked){
+    label+=' 将自动重试；也可点击重新连接。';
+  }
+  if(error&&app.readRetryBlocked){
+    label+=' 请处理上述错误后点击重新连接。';
+  }
+
   message.textContent=label;
-  retry.hidden=!(error||unconfirmed||paused);
-  retry.disabled=!!(app.fetching||app.processing||app.starting||app.saving||app.detailBusy||app.adminBusy);
+  retry.hidden=!problem;
+  retry.disabled=!!(
+    app.fetching||app.processing||app.starting||
+    app.saving||app.detailBusy||app.adminBusy
+  );
   retry.textContent=unconfirmed?'查询原保存结果':'重新连接';
 }
 async function loadWorkbench({automatic=false}={}){
