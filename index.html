@@ -723,8 +723,14 @@ async function submitCollection(b,items,entry=null) {
     const d=await api('/api/batches',{method:'POST',body:{asins:items.map(i=>i.asin),batch_name:attempt.name},timeout:20000});
     attempt.remoteId=validRemoteId(d);attempt.state='polling';
   } catch(e) {
-    // Submission may have succeeded remotely. Never convert this into an automatic new POST.
-    attempt.state='submission_unknown';attempt.note='提交响应未确认，将按原任务名称查询，禁止自动重提：'+e.message;
+    // 把真实报错写进商品原因里，不再隐藏
+    attempt.state='submission_unknown';
+    attempt.note='提交响应未确认：'+e.message;
+    items.forEach(i => {
+        i.collectStatus = 'error';
+        i.reason = '创建采集任务失败：' + e.message;
+    });
+    toast('后台拒绝创建采集任务：' + e.message);
   }
   await saveData(b);
 }
@@ -1262,7 +1268,7 @@ async function queueVerification(b,prohibition=false){
   try{await saveData();}
   catch(e){entries.forEach(({index},n)=>{b.items[index]=previous[n];});render();throw e;}
 }
- async function retryFailures() {
+async function retryFailures() {
   const b=batch();if(!b)return;
   
   if(app.processing) {
@@ -1271,7 +1277,6 @@ async function queueVerification(b,prohibition=false){
     await sleep(1000);
   }
   
-  // 强行重置所有可能卡死的标志位
   app.stopping = false; 
   app.pendingSave = null;
   app.saving = 0; 
@@ -1279,17 +1284,10 @@ async function queueVerification(b,prohibition=false){
   app.processing = false;
   app.starting = false;
   
-  const errItems = b.items.filter(i => 
-    hasFailure(i) || 
-    i.reviewStatus === 'error' || 
-    (!app.processing && ['pending','collecting','auditing','processing'].includes(i.collectStatus))
-  );
-  
+  const errItems = b.items.filter(i => hasFailure(i) || i.reviewStatus === 'error');
   if(!errItems.length) return toast('当前没有可重试的系统异常项');
   
   let processed = 0;
-  let needCollection = false; // 标记是否需要重新激活采集
-
   for (const item of errItems) {
     item.auditRequestId = null; 
     item.auditRequestHash = null; 
@@ -1297,35 +1295,25 @@ async function queueVerification(b,prohibition=false){
     item.auditNextCheckAt = 0;
     item.auditError = null;
     item.reason = '等待重新处理';
-    
-    // 如果是采集或同步报错，重置采集状态，并标记需要重新激活采集队列
-    if (['error', 'sync_error'].includes(item.collectStatus)) {
-      item.collectStatus = 'pending';
-      item.reviewStatus = 'pending';
-      item.copyStatus = 'pending';
-      if (b.collection) b.collection.members = b.collection.members.filter(m => m.id !== item.itemId);
-      needCollection = true;
-    } 
-    // 如果是审核报错
-    else if (['error', 'unconfirmed'].includes(item.reviewStatus)) {
-      item.reviewStatus = 'pending';
-      item.copyStatus = 'pending';
-    } 
-    // 如果是文案报错
-    else if (item.copyStatus === 'error') {
-      item.copyStatus = 'pending';
-    }
+    item.collectStatus = 'pending';
+    item.reviewStatus = 'pending';
+    item.copyStatus = 'pending';
     processed++;
   }
 
-  // 【关键】如果之前采集卡死在报错状态，必须强行把它拉回正常，否则任务会瞬间报错退出
-  if (b.collection && needCollection) {
-    b.collection.state = 'polling'; 
+  // 强制把整个批次的采集状态归零，当作全新任务来处理
+  b.collection = null; 
+  b.runStatus = 'idle';
+  
+  toast(`已重置 ${processed} 个异常项，正在提交任务...`);
+  
+  try {
+    await saveData(b);
+  } catch(e) {
+    console.log("保存重置状态超时，强制继续");
   }
   
-  toast(`已重置 ${processed} 个异常项，强行唤醒任务...`);
-  
-  // 强行启动批量处理（内部已经加了防卡死逻辑）
+  // 强行启动
   await startBatch(b.id);
 }
 function field(label,value){return `<div class="field"><div class="label">${esc(label)}</div><div class="text">${esc(text(value)||'未提供')}</div></div>`;}
