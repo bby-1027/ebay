@@ -1259,34 +1259,54 @@ async function queueVerification(b,prohibition=false){
 async function retryFailures() {
   const b=batch();if(!b)return;
   
-  // 如果当前有任务在跑，先暂停，避免冲突
   if(app.processing) {
     app.stopping = true;
     toast('已暂停当前任务，准备重试异常项...');
     await sleep(1000);
   }
   
-  // 解除可能卡死的假死状态
-  app.stopping = false;
+  app.stopping = false; 
   app.pendingSave = null;
   
-  let changed = 0;
-  for(const i of b.items){
-    const isErr = hasFailure(i) || i.reviewStatus === 'error' || (!app.processing && ['pending','collecting','auditing','processing'].includes(i.collectStatus));
-    if(isErr) {
-      // 彻底重置状态，但不打包旧数据，防止撑爆网络请求
-      i.auditRequestId=null; i.auditRequestHash=null; i.auditWaitSince=null; i.auditNextCheckAt=0;
-      i.reviewStatus='pending'; i.collectStatus='pending'; i.copyStatus='pending';
-      i.reason='等待重新处理';
-      if(b.collection) b.collection.members = b.collection.members.filter(m=>m.id!==i.itemId);
-      changed++;
+  const errItems = b.items.filter(i => 
+    hasFailure(i) || 
+    i.reviewStatus === 'error' || 
+    (!app.processing && ['pending','collecting','auditing','processing'].includes(i.collectStatus))
+  );
+  
+  if(!errItems.length) return toast('当前没有可重试的系统异常项');
+  
+  const btn = $('btnBatchRetry');
+  btn.disabled = true;
+  let processed = 0;
+  const chunkSize = 10; // 每次处理10个，防止数据包过大导致超时
+
+  for (let i = 0; i < errItems.length; i += chunkSize) {
+    const chunk = errItems.slice(i, i + chunkSize);
+    
+    for (const item of chunk) {
+      item.auditRequestId = null; 
+      item.auditRequestHash = null; 
+      item.auditWaitSince = null; 
+      item.auditNextCheckAt = 0;
+      item.reviewStatus = 'pending'; 
+      item.collectStatus = 'pending'; 
+      item.copyStatus = 'pending';
+      item.reason = '等待重新处理';
+      if (b.collection) b.collection.members = b.collection.members.filter(m => m.id !== item.itemId);
+      processed++;
     }
+    
+    btn.textContent = `正在恢复(${processed}/${errItems.length})...`;
+    
+    // 每处理完10个，就保存一次，减轻网络压力
+    await saveData(b);
+    // 稍微停顿一下，给网络喘息的时间
+    await sleep(300);
   }
-  
-  if(!changed) return toast('没有需要重试的异常项');
-  
-  toast(`正在重新发起 ${changed} 个异常项`);
-  await saveData();
+
+  btn.disabled = false;
+  toast(`已成功重置 ${processed} 个异常项，系统开始排队处理`);
   await startBatch(b.id);
 }
 function field(label,value){return `<div class="field"><div class="label">${esc(label)}</div><div class="text">${esc(text(value)||'未提供')}</div></div>`;}
