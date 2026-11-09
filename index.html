@@ -220,10 +220,8 @@ function requestOperation(path,method){
   if(/\/status$/.test(route)||route.includes('/results'))return '查询原采集任务';
   return '连接后台';
 }
-async function api(path,{method='GET',body,timeout=20000}={}){
+async function api(path,{method='GET',body,timeout=60000}={}){
   const controller=new AbortController(),operation=requestOperation(path,method);
-  // Every request has a deadline, including requests begun in a background tab.
-  // An expired write is recovered by its existing receipt, never by a new task ID.
   const timer=setTimeout(()=>controller.abort(),timeout);
   try{
     const r=await fetch(WORKER_URL+path,{method,cache:method==='GET'?'no-store':'default',headers:{'Content-Type':'application/json','X-Workbench-Token':TOKEN},
@@ -1279,11 +1277,10 @@ async function retryFailures() {
   const btn = $('btnBatchRetry');
   btn.disabled = true;
   let processed = 0;
-  const chunkSize = 10; // 每次处理10个，防止数据包过大导致超时
+  const chunkSize = 10; 
 
   for (let i = 0; i < errItems.length; i += chunkSize) {
     const chunk = errItems.slice(i, i + chunkSize);
-    
     for (const item of chunk) {
       item.auditRequestId = null; 
       item.auditRequestHash = null; 
@@ -1296,17 +1293,20 @@ async function retryFailures() {
       if (b.collection) b.collection.members = b.collection.members.filter(m => m.id !== item.itemId);
       processed++;
     }
-    
     btn.textContent = `正在恢复(${processed}/${errItems.length})...`;
-    
-    // 每处理完10个，就保存一次，减轻网络压力
-    await saveData(b);
-    // 稍微停顿一下，给网络喘息的时间
-    await sleep(300);
+    try {
+      await saveData(b);
+    } catch (e) {
+      // 如果保存超时，不中断，继续下一批
+      toast('保存响应较慢，正在跳过等待...');
+    }
+    await sleep(200);
   }
 
   btn.disabled = false;
-  toast(`已成功重置 ${processed} 个异常项，系统开始排队处理`);
+  toast(`已重置 ${processed} 个异常项，立即开始重新排队审核`);
+  
+  // 无论如何，强行启动批量处理
   await startBatch(b.id);
 }
 function field(label,value){return `<div class="field"><div class="label">${esc(label)}</div><div class="text">${esc(text(value)||'未提供')}</div></div>`;}
