@@ -1254,7 +1254,7 @@ async function queueVerification(b,prohibition=false){
   try{await saveData();}
   catch(e){entries.forEach(({index},n)=>{b.items[index]=previous[n];});render();throw e;}
 }
-async function retryFailures() {
+ async function retryFailures() {
   const b=batch();if(!b)return;
   
   if(app.processing) {
@@ -1281,39 +1281,39 @@ async function retryFailures() {
   
   const btn = $('btnBatchRetry');
   btn.disabled = true;
-  btn.textContent = `正在恢复(0/${errItems.length})...`;
-  let processed = 0;
-  const chunkSize = 10; 
+  btn.textContent = `正在重置状态...`;
 
-  // 内存状态先重置，保证界面立刻刷新
-  for (let i = 0; i < errItems.length; i += chunkSize) {
-    const chunk = errItems.slice(i, i + chunkSize);
-    for (const item of chunk) {
-      item.auditRequestId = null; 
-      item.auditRequestHash = null; 
-      item.auditWaitSince = null; 
-      item.auditNextCheckAt = 0;
-      item.reviewStatus = 'pending'; 
-      item.collectStatus = 'pending'; 
+  // 全部在内存中瞬间重置完毕
+  for (const item of errItems) {
+    item.auditRequestId = null; 
+    item.auditRequestHash = null; 
+    item.auditWaitSince = null; 
+    item.auditNextCheckAt = 0;
+    item.auditError = null;
+    item.reason = '等待重新处理';
+    
+    // 只有真正采集报错的，才重置采集状态；如果是审核或文案报错，不要动它的采集结果！
+    if (['error', 'sync_error'].includes(item.collectStatus)) {
+      item.collectStatus = 'pending';
+      item.reviewStatus = 'pending';
       item.copyStatus = 'pending';
-      item.reason = '等待重新处理';
-      item.auditError = null;
       if (b.collection) b.collection.members = b.collection.members.filter(m => m.id !== item.itemId);
-      processed++;
-    }
-    btn.textContent = `正在恢复(${processed}/${errItems.length})...`;
-    try {
-      await saveData(b);
-    } catch (e) {
-      // 如果保存超时，不中断，继续下一批
+    } else if (['error', 'unconfirmed'].includes(item.reviewStatus)) {
+      item.reviewStatus = 'pending';
+      item.copyStatus = 'pending';
+    } else if (item.copyStatus === 'error') {
+      item.copyStatus = 'pending';
     }
   }
-
-  // 最后不管保存成不成功，强制完成
-  try { await saveData(b); } catch(e) {}
   
+  try {
+    await saveData(b); // 统一保存一次
+  } catch(e) {
+    // 忽略保存报错，直接进入启动流程，后台会自动接续
+  }
+
   btn.disabled = false;
-  toast(`已重置 ${processed} 个异常项，立即开始重新排队审核`);
+  toast(`已重置 ${errItems.length} 个异常项，立即开始重新排队审核`);
   
   // 启动前再次清零防拦截
   app.saving = 0;
