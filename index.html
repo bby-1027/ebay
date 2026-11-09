@@ -681,16 +681,16 @@ function saveData(activeBatch) {
           toast('正在查询服务器，确认刚才的保存结果');
           if(receipted)d=await recoverSaveReceipt(payload);
           else{
-          const saved=await api('/api/data');
-          if(savedPayloadMatches(saved,payload))d={version:saved.version};
-          else if(useD1&&saved.version===payload.version&&!error.status){
-            try{d=await api('/api/data',{method:'POST',body:payload});}
-            catch(retryError){
-              const confirmed=await api('/api/data');
-              if(!savedPayloadMatches(confirmed,payload))throw retryError;
-              d={version:confirmed.version};
-            }
-          }else{if(saved.version!==payload.version)error.status=409;throw error;}
+            const saved=await api('/api/data');
+            if(savedPayloadMatches(saved,payload))d={version:saved.version};
+            else if(useD1&&saved.version===payload.version&&!error.status){
+              try{d=await api('/api/data',{method:'POST',body:payload});}
+              catch(retryError){
+                const confirmed=await api('/api/data');
+                if(!savedPayloadMatches(confirmed,payload))throw retryError;
+                d={version:confirmed.version};
+              }
+            }else{if(saved.version!==payload.version)error.status=409;throw error;}
           }
         }
         rememberSavedPayload(payload);
@@ -701,15 +701,12 @@ function saveData(activeBatch) {
       if(app.processing)return await persist();
       if(!navigator.locks)throw new Error('当前浏览器无法保护写入，请使用新版Chrome');
       return await navigator.locks.request('ebay-workbench-processing-v1',{ifAvailable:true},async lock=>{if(!lock)throw new Error('另一个页面正在处理，本页暂时只读，请刷新查看');return persist();});
-    }
-      catch(e){
-              catch(e){
-        app.saveError=e.message;renderConnectionState();
-        if (e.status === 409) toast('数据已被其他页面修改，请刷新核对后继续。');
-        else toast(`保存响应慢，正在自动重试，不影响你继续查看...`);
-        throw e;
-      }
-    finally{app.saving--;if(!app.saving)render();}
+    } catch(e){
+      app.saveError=e.message;renderConnectionState();
+      if (e.status === 409) toast('数据已被其他页面修改，请刷新核对后继续。');
+      else toast(`保存响应慢，正在自动重试，不影响你继续查看...`);
+      throw e;
+    } finally{app.saving--;if(!app.saving)render();}
   };
   app.writeTail=app.writeTail.then(work,work);return app.writeTail;
 }
