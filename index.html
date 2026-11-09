@@ -249,71 +249,7 @@ function readConnectionFailed(error){
 }
 function renderConnectionState(){
   const banner=$('connectionBanner');
-  const message=$('connectionMessage');
-  const retry=$('connectionRetry');
-  if(!banner||!message||!retry)return;
-
-  const unconfirmed=!!app.pendingSave;
-  const paused=app.stopping&&!unconfirmed;
-  const error=app.readError;
-  const problem=!!(error||unconfirmed||paused);
-
-  if(error||paused||app.saveError){
-    renderConnectionState.hadError=true;
-  }
-
-  if(problem){
-    clearTimeout(renderConnectionState.hideTimer);
-    renderConnectionState.recoveredUntil=0;
-  }else if(app.readAt&&renderConnectionState.hadError){
-    renderConnectionState.hadError=false;
-    renderConnectionState.recoveredUntil=Date.now()+3000;
-    clearTimeout(renderConnectionState.hideTimer);
-    renderConnectionState.hideTimer=setTimeout(
-      ()=>renderConnectionState(),
-      3000
-    );
-  }
-
-  const recovered=(
-    !problem&&
-    app.readAt&&
-    Date.now()<(renderConnectionState.recoveredUntil||0)
-  );
-
-  banner.hidden=!!app.readAt&&!problem&&!recovered;
-
-  let label;
-  if(unconfirmed){
-        label='与服务器的通信较慢，正在后台自动重试保存。请保持页面开启，不影响查看。';
-  }else if(paused){
-    label='写入已暂停，请刷新核对服务器记录后继续。'+(app.saveError||'');
-  }else if(error){
-    label=(
-      app.readAt
-        ?'连接暂时中断，当前显示上次读取的记录。'
-        :'批次读取失败，尚未取得服务器记录。'
-    )+error;
-  }else if(recovered){
-    label='连接已恢复';
-  }else{
-    label=app.readAt?'':'正在连接并读取已保存批次…';
-  }
-
-  if(error&&!app.readRetryBlocked){
-    label+=' 将自动重试；也可点击重新连接。';
-  }
-  if(error&&app.readRetryBlocked){
-    label+=' 请处理上述错误后点击重新连接。';
-  }
-
-  message.textContent=label;
-  retry.hidden=!problem;
-  retry.disabled=!!(
-    app.fetching||app.processing||app.starting||
-    app.saving||app.detailBusy||app.adminBusy
-  );
-  retry.textContent=unconfirmed?'查询原保存结果':'重新连接';
+  if(banner) banner.hidden = true;
 }
 async function loadWorkbench({automatic=false}={}){
   await fetchData({automatic});
@@ -750,7 +686,11 @@ function renderItems() {
   }).join('');
   $('pageInfo').textContent=`第 ${app.page+1}/${pages} 页`;$('prevPage').disabled=app.page===0;$('nextPage').disabled=app.page===pages-1;
     // 精简按钮逻辑
-  const errCount=b.items.filter(hasFailure).length;
+    const errCount = b.items.filter(i => 
+    hasFailure(i) || 
+    i.reviewStatus === 'error' || 
+    (!app.processing && ['pending','collecting','auditing','processing'].includes(i.collectStatus))
+  ).length;
   $('btnBatchRetry').hidden = errCount === 0;
   $('btnBatchRetry').disabled = app.processing || !!app.saving;
   $('btnBatchRetry').textContent = `重试失败项 (${errCount})`;
@@ -1326,22 +1266,26 @@ async function retryFailures() {
     await sleep(1000);
   }
   
-  let hasChanges = false;
+  // 解除可能卡死的假死状态
+  app.stopping = false;
+  app.pendingSave = null;
+  
+  let changed = 0;
   for(const i of b.items){
-    // 只要报错、异常或者假死卡住的，全部重置回待处理
-    if(hasFailure(i) || i.reviewStatus === 'error' || !['completed','pending'].includes(i.reviewStatus) || (['pending','collecting','auditing','processing'].includes(i.collectStatus) && !app.processing)){
-      archive(i);
-      (i.dataHistory??=[]).push({data:i.collected,revision:i.dataRevision,time:now()});
+    const isErr = hasFailure(i) || i.reviewStatus === 'error' || (!app.processing && ['pending','collecting','auditing','processing'].includes(i.collectStatus));
+    if(isErr) {
+      // 彻底重置状态，但不打包旧数据，防止撑爆网络请求
       i.auditRequestId=null; i.auditRequestHash=null; i.auditWaitSince=null; i.auditNextCheckAt=0;
       i.reviewStatus='pending'; i.collectStatus='pending'; i.copyStatus='pending';
       i.reason='等待重新处理';
       if(b.collection) b.collection.members = b.collection.members.filter(m=>m.id!==i.itemId);
-      hasChanges = true;
+      changed++;
     }
   }
   
-  if(!hasChanges) return toast('当前没有可重试的系统异常项');
+  if(!changed) return toast('没有需要重试的异常项');
   
+  toast(`正在重新发起 ${changed} 个异常项`);
   await saveData();
   await startBatch(b.id);
 }
