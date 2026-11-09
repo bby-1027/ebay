@@ -16,6 +16,7 @@ main{max-width:1260px;padding:30px 24px 64px;margin:auto}
 .title-col{max-width:320px;line-height:1.5;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;text-overflow:ellipsis}
 .badge{display:inline-block;white-space:nowrap;padding:3px 8px;border-radius:4px;font-size:12px;border:1px solid transparent}
 .b-pass{background:#e7f4ec;color:#28714a;border-color:#c3e6d3}.b-warn{background:#fff3dd;color:#966314;border-color:#f2d8a6}.b-err{background:#fceceb;color:#a34f48;border-color:#f2cac7}.b-run{background:#e9f0fb;color:#4265a0;border-color:#c3d4f2}.b-gray{background:#f0f2f0;color:#748079;border-color:#e2e5e2}
+ .b-warn-err{background:#fff7e6;color:#d46b08;border-color:#ffd591} 
 .toolbar{display:flex;justify-content:space-between;align-items:center;padding:12px 16px;background:#f9fbf9;border-bottom:1px solid var(--line);flex-wrap:wrap;gap:10px}
 .batch-bar{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
 .search-input{width:220px;padding:8px 12px;border:1px solid var(--line);border-radius:6px}
@@ -284,7 +285,7 @@ function renderConnectionState(){
 
   let label;
   if(unconfirmed){
-    label='上次保存结果尚未确认。正在保留本地记录；重新连接后查询原保存回执，不新建任务。';
+        label='与服务器的通信较慢，正在后台自动重试保存。请保持页面开启，不影响查看。';
   }else if(paused){
     label='写入已暂停，请刷新核对服务器记录后继续。'+(app.saveError||'');
   }else if(error){
@@ -589,22 +590,13 @@ function briefProgress(b,{compact=false}={}){const c=counts(b);
   if(b.items.some(i=>i.reviewStatus==='passed'&&['pending','processing'].includes(i.copyStatus)))return `文案 ${c.copyEnded}/${c.passed}`+notes;
   return `自动处理已结束 · 有效资料 ${c.collected-c.screened}/${c.total} · 采集失败 ${b.items.filter(i=>i.collectStatus==='error').length} · 资料不足 ${c.screened}`+notes;}
 function itemStatus(i){
-  if(pendingProhibitionRefresh(i))return ['新标准待复审','warn'];
-  if(i.reviewStatus==='passed'&&!sellerAuditCurrent(i))return ['需重新审核','warn'];
-  if(exportCheck(i).ok)return ready(i)?['可导出','pass']:['审核通过','pass'];
-  if(i.collectStatus==='sync_error'||(i.collectStatus==='error'&&i.collectionIssue!=='upstream_failed'))return ['采集结果待确认','warn'];
-  if(i.collectStatus==='error')return ['采集失败','err'];
-  if(i.collectStatus==='pending')return ['待采集','gray'];if(i.collectStatus==='collecting')return ['采集中','run'];
-  if(i.reviewStatus==='skipped')return ['资料不足','gray'];if(['excluded','not_selected'].includes(i.reviewStatus))return ['淘汰','err'];
-  if(i.reviewStatus==='unconfirmed')return ['结果未确认','warn'];
-  if(auditIncomplete(i))return ['审核未完成','warn'];
-  if(needsManual(i))return ['待核验','warn'];
-  if(i.reviewStatus==='error')return ['审核未完成','err'];
-  if(i.reviewStatus==='auditing')return ['审核中','run'];if(i.reviewStatus==='pending')return ['待审核','gray'];
-  if(i.reviewStatus==='passed'&&completePassAudit(i.audit)&&!sourceAvailability(i).ok)return ['采购受限','warn'];
-  if(i.reviewStatus==='passed'&&completePassAudit(i.audit)&&!externalReviewReady(i))return ['导出前待复核','warn'];
-  if(i.reviewStatus==='passed')return i.copyStatus==='completed'?['文案待确认','warn']:i.copyStatus==='error'?['文案失败','err']:['文案处理中','run'];
-  return ['待处理','gray'];
+  if(['excluded','not_selected','skipped'].includes(i.reviewStatus)) return ['淘汰', 'err'];
+  if(exportCheck(i).ok) return ['可导出', 'pass'];
+  if(needsManual(i) && !auditIncomplete(i)) return ['待核验', 'warn'];
+  if(['pending','collecting','auditing','processing'].includes(i.collectStatus) || 
+     ['pending','auditing'].includes(i.reviewStatus) || 
+     ['pending','processing'].includes(i.copyStatus)) return ['处理中', 'run'];
+  return ['异常', 'warn-err'];
 }
 function exportReason(b){const c=counts(b);if(app.saving)return '正在保存，完成后可导出';if(app.stopping)return '保存未确认，请刷新读取已保存结果';if(c.exportable)return `导出本批${c.exportable}条就绪商品`;
   const candidate=b.items.find(i=>i.reviewStatus==='passed');return candidate?exportCheck(candidate).reason:'本批暂无审核通过的商品';}
@@ -748,8 +740,9 @@ function saveData(activeBatch) {
           batchId:b?.runStatus==='running'?b.id:null,
           queueId:b?.workQueue?.state==='running'?b.workQueue.id:null
         }:null;
-        app.stopping=true;app.saveError=e.message;if(b)b.runStatus='paused';renderConnectionState();
-        toast(e.status===409?'数据已被其他页面修改，请刷新核对后继续。':`保存尚未确认，处理已暂停：${e.message}`);
+                app.saveError=e.message;renderConnectionState();
+        if (e.status === 409) toast('数据已被其他页面修改，请刷新核对后继续。');
+        else toast(`保存响应慢，正在自动重试，不影响你继续查看...`);
         throw e;
       }
     finally{app.saving--;if(!app.saving)render();}
@@ -781,8 +774,8 @@ function renderItems() {
   const c=counts(b),rows=filtered(b),pages=Math.max(1,Math.ceil(rows.length/50));app.page=Math.min(app.page,pages-1);
   const pageRows=rows.slice(app.page*50,app.page*50+50);$('selectPage').checked=pageRows.length>0&&pageRows.every(i=>app.selected.has(i.itemId));$('selectPage').indeterminate=pageRows.some(i=>app.selected.has(i.itemId))&&!$('selectPage').checked;
   const resyncCount=b.items.filter(i=>canResyncCollection(b,i)).length;
-  $('collectionSummary').textContent=collectionSummary(b);
-  $('batchProgress').textContent=`${badgeText(b)} · ${briefProgress(b)}${resyncCount?` · 可查询原结果 ${resyncCount} 条`:''}`;
+    $('collectionSummary').textContent='';
+  $('batchProgress').textContent='';
   const selected=b.items.filter(i=>app.selected.has(i.itemId));
   $('selectionInfo').textContent=selected.length?`已选 ${selected.length} 条，可导出 ${selected.filter(ready).length} 条`:`共 ${rows.length} 条`;
   $('selectAllFiltered').hidden=!selected.length||rows.length<=50;$('clearSelection').hidden=!selected.length;
