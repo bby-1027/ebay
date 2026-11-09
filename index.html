@@ -1263,8 +1263,13 @@ async function retryFailures() {
     await sleep(1000);
   }
   
+  // 强行重置所有可能卡死的标志位
   app.stopping = false; 
   app.pendingSave = null;
+  app.saving = 0; 
+  app.detailBusy = false;
+  app.processing = false;
+  app.starting = false;
   
   const errItems = b.items.filter(i => 
     hasFailure(i) || 
@@ -1276,9 +1281,11 @@ async function retryFailures() {
   
   const btn = $('btnBatchRetry');
   btn.disabled = true;
+  btn.textContent = `正在恢复(0/${errItems.length})...`;
   let processed = 0;
   const chunkSize = 10; 
 
+  // 内存状态先重置，保证界面立刻刷新
   for (let i = 0; i < errItems.length; i += chunkSize) {
     const chunk = errItems.slice(i, i + chunkSize);
     for (const item of chunk) {
@@ -1290,6 +1297,7 @@ async function retryFailures() {
       item.collectStatus = 'pending'; 
       item.copyStatus = 'pending';
       item.reason = '等待重新处理';
+      item.auditError = null;
       if (b.collection) b.collection.members = b.collection.members.filter(m => m.id !== item.itemId);
       processed++;
     }
@@ -1298,15 +1306,22 @@ async function retryFailures() {
       await saveData(b);
     } catch (e) {
       // 如果保存超时，不中断，继续下一批
-      toast('保存响应较慢，正在跳过等待...');
     }
-    await sleep(200);
   }
 
+  // 最后不管保存成不成功，强制完成
+  try { await saveData(b); } catch(e) {}
+  
   btn.disabled = false;
   toast(`已重置 ${processed} 个异常项，立即开始重新排队审核`);
   
-  // 无论如何，强行启动批量处理
+  // 启动前再次清零防拦截
+  app.saving = 0;
+  app.pendingSave = null;
+  app.processing = false;
+  app.starting = false;
+  
+  // 强行启动批量处理
   await startBatch(b.id);
 }
 function field(label,value){return `<div class="field"><div class="label">${esc(label)}</div><div class="text">${esc(text(value)||'未提供')}</div></div>`;}
