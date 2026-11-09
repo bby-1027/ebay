@@ -534,6 +534,7 @@ function stage(b) {
   if(b.runStatus==='paused') return '已暂停';
   if((!b.runStatus||b.runStatus==='idle')&&b.items.every(i=>i.collectStatus==='pending'&&i.reviewStatus==='pending')) return '未开始';
   if(['queued','running'].includes(b.runStatus)) return '处理中';
+  // 如果系统已经没在跑了，不再死扣“处理中”，只要有结论（包括异常）就算已完成
   return '已完成';
 }
 function briefProgress(b,{compact=false}={}){
@@ -562,6 +563,8 @@ function itemStatus(i){
      ['pending','auditing'].includes(i.reviewStatus) || 
      ['pending','processing'].includes(i.copyStatus)){
      if(b && b.runStatus === 'paused') return ['已暂停', 'gray'];
+     // 如果全局没有在跑，但它还是“处理中”，说明它已经假死了，强制标为异常
+     if(!app.processing) return ['异常', 'warn-err'];
      return ['处理中', 'run'];
   }
   return ['异常', 'warn-err'];
@@ -982,9 +985,15 @@ function auditWaitingText(i){
  return (i.auditReceiptConfirmed?'后台已受理，等待原审核结果':'尚未确认后台受理，正在查询原任务')+' · 已等'+clock+'（最多5分钟，不会自动重提）';
 }
 function itemReason(i){
+  const clean = (txt) => text(txt)
+    .replace(/错误类型：.*?(?=；|$)/g,'')
+    .replace(/实际页面 ASIN：.*?(?=；|$)/g,'')
+    .replace(/采集站原始说明：.*/g,'')
+    .replace(/；\s*$/,'')
+    .trim();
   if(i.reviewStatus==='auditing')return auditWaitingText(i);
-  if(i.reviewStatus==='error')return i.auditError?.request_id===i.auditRequestId&&i.auditError?.detail||i.reason||'审核未完成';
-  return friendlyAuditReason(i.reason)||'—';
+  if(i.reviewStatus==='error')return clean(i.auditError?.request_id===i.auditRequestId&&i.auditError?.detail||i.reason||'审核未完成');
+  return friendlyAuditReason(clean(i.reason))||'—';
 }
 function friendlyAuditReason(value){
   return text(value).replace(/(?:审核依据待核验：)?审核分项未引用商品原文证据(?:。请核对商品原文及适用政策后复审。?)?/g,MISSING_SOURCE_NOTICE);
@@ -1308,40 +1317,33 @@ async function queueVerification(b,prohibition=false){
   catch(e){entries.forEach(({index},n)=>{b.items[index]=previous[n];});render();throw e;}
 }
 async function retryFailures() {
-  if(app.processing||app.saving||app.detailBusy)return toast('请先等待当前步骤完成');const b=batch();if(!b)return;
+  const b=batch();if(!b)return;
+  
+  // 如果当前有任务在跑，先暂停，避免冲突
+  if(app.processing) {
+    app.stopping = true;
+    toast('已暂停当前任务，准备重试异常项...');
+    await sleep(1000);
+  }
   
   let hasChanges = false;
-  const collectionErrors=b.items.filter(i=>i.collectStatus==='error'&&!canResyncCollection(b,i));
-  for(const i of collectionErrors){
-    archive(i);(i.dataHistory??=[]).push({data:i.collected,revision:i.dataRevision,time:now()});
-    i.dataRevision=(i.dataRevision||0)+1;i.collectStatus='pending';i.reviewStatus='pending';i.auditRequestId=null;invalidate(i);
-    if(b.collection)b.collection.members=b.collection.members.filter(m=>m.id!==i.itemId);
-    hasChanges = true;
-  }
-  if(b.collection?.state==='sync_error'){
-    b.collection.state='polling';
-    for(const m of b.collection.members){const i=b.items.find(x=>x.itemId===m.id);if(i?.collectStatus==='sync_error')i.collectStatus='collecting';}
-    hasChanges = true;
-  }
   for(const i of b.items){
-    if(canRetryAudit(i)){
-      i.auditRequestId=null;i.auditRequestHash=null;i.auditWaitSince=null;i.auditNextCheckAt=0;i.reviewStatus='pending';i.reason='等待重新审核';
-      hasChanges = true;
-    }else if(['error','unconfirmed'].includes(i.reviewStatus)&&!i.auditRecoveryBlocked&&!i.auditFailureKnown){
-      i.auditRecoverCount=0;i.auditNextCheckAt=0;
-      if(i.auditRequestId)i.reviewStatus='auditing';
-      else blockAuditRecovery(i,'审核记录缺少原任务编号，请重新审核');
-      hasChanges = true;
-    }
-    if(i.copyStatus==='error'){
-      i.copyStatus='pending';
+    // 只要报错、异常或者假死卡住的，全部重置回待处理
+    if(hasFailure(i) || i.reviewStatus === 'error' || !['completed','pending'].includes(i.reviewStatus) || (['pending','collecting','auditing','processing'].includes(i.collectStatus) && !app.processing)){
+      archive(i);
+      (i.dataHistory??=[]).push({data:i.collected,revision:i.dataRevision,time:now()});
+      i.auditRequestId=null; i.auditRequestHash=null; i.auditWaitSince=null; i.auditNextCheckAt=0;
+      i.reviewStatus='pending'; i.collectStatus='pending'; i.copyStatus='pending';
+      i.reason='等待重新处理';
+      if(b.collection) b.collection.members = b.collection.members.filter(m=>m.id!==i.itemId);
       hasChanges = true;
     }
   }
   
   if(!hasChanges) return toast('当前没有可重试的系统异常项');
   
-  await saveData();await startBatch(b.id);
+  await saveData();
+  await startBatch(b.id);
 }
 function field(label,value){return `<div class="field"><div class="label">${esc(label)}</div><div class="text">${esc(text(value)||'未提供')}</div></div>`;}
 function imageLinks(v){if(typeof v==='string'){try{v=JSON.parse(v);}catch{v=v.split(/[\s,]+/);}}return (Array.isArray(v)?v:[]).filter(x=>typeof x==='string'&&/^https:\/\//i.test(x));}
@@ -1479,7 +1481,6 @@ function openDetail(iid,{preserveNavigation=false}={}) {
   if(currentResult&&i.reviewStatus==='verify'&&!canManualPass(i))html+='<p class="muted">本条未完成有效审核或仍需复审，不能用人工通过替代。请先补审缺项。</p>';
   if(missing.length)html+=field('缺少信息或未完成检查',missing);
   if(currentResult&&a.seller_review?.materials?.requirements?.length)html+=field('销售材料',a.seller_review.materials.requirements);
-  if(i.collectionDiagnostic)html+=field('本次采集身份与原始错误',JSON.stringify(i.collectionDiagnostic,null,2));
   if(currentResult)html+=renderAuditBasis(i);
   html+=externalReviewPanel(i);
   html+='</div>';
