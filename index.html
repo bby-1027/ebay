@@ -1176,8 +1176,16 @@ async function runLoop(bid,{recheckVerification=false,resyncCollection=false,rec
     }else{
       for(const i of b.items){if(i.reviewStatus==='passed'&&(!sellerAuditCurrent(i)||(!auditCurrent(i)&&!legacyAudit(i)))){archive(i);i.reviewStatus='pending';i.auditRequestId=null;i.auditRecoverCount=0;i.auditWaitSince=null;i.auditNextCheckAt=0;invalidate(i);i.reason='资料与旧结果无法对应，已保留历史，等待重新审核';}}
     }
-    for(const i of scopedItems())if(i.reviewStatus==='auditing'&&!i.auditRequestId)blockAuditRecovery(i,'审核记录缺少原任务编号，已停止等待；请人工决定是否重新审核');
-    if(!checkSelection&&!resyncIds)await saveData(b);
+        for(const i of scopedItems())if(i.reviewStatus==='auditing'&&!i.auditRequestId)blockAuditRecovery(i,'审核记录缺少原任务编号，已停止等待；请人工决定是否重新审核');
+    
+    // 关键：启动前的保存如果卡了，不要终止任务，继续往下跑
+    if(!checkSelection&&!resyncIds){
+      try {
+        await saveData(b);
+      } catch(e) {
+        console.log('启动前保存超时，忽略并强行启动', e);
+      }
+    }
     while(b.runStatus==='running'&&!app.stopping) {
       if(!scopedIds&&b.collection&&!['completed','sync_error'].includes(b.collection.state)){await pollCollection(b);render();}
       if(b.runStatus!=='running')break;
@@ -1259,11 +1267,11 @@ async function queueVerification(b,prohibition=false){
   
   if(app.processing) {
     app.stopping = true;
-    toast('已暂停当前任务，准备重试异常项...');
+    toast('正在暂停当前任务，准备重置...');
     await sleep(1000);
   }
   
-  // 强行重置所有可能卡死的标志位
+  // 强制清理所有可能锁死的标志
   app.stopping = false; 
   app.pendingSave = null;
   app.saving = 0; 
@@ -1279,11 +1287,7 @@ async function queueVerification(b,prohibition=false){
   
   if(!errItems.length) return toast('当前没有可重试的系统异常项');
   
-  const btn = $('btnBatchRetry');
-  btn.disabled = true;
-  btn.textContent = `正在重置状态...`;
-
-  // 全部在内存中瞬间重置完毕
+  let processed = 0;
   for (const item of errItems) {
     item.auditRequestId = null; 
     item.auditRequestHash = null; 
@@ -1292,7 +1296,7 @@ async function queueVerification(b,prohibition=false){
     item.auditError = null;
     item.reason = '等待重新处理';
     
-    // 只有真正采集报错的，才重置采集状态；如果是审核或文案报错，不要动它的采集结果！
+    // 只有真正报错的状态才重置，避免把已经采集成功的数据搞丢
     if (['error', 'sync_error'].includes(item.collectStatus)) {
       item.collectStatus = 'pending';
       item.reviewStatus = 'pending';
@@ -1304,24 +1308,12 @@ async function queueVerification(b,prohibition=false){
     } else if (item.copyStatus === 'error') {
       item.copyStatus = 'pending';
     }
+    processed++;
   }
   
-  try {
-    await saveData(b); // 统一保存一次
-  } catch(e) {
-    // 忽略保存报错，直接进入启动流程，后台会自动接续
-  }
-
-  btn.disabled = false;
-  toast(`已重置 ${errItems.length} 个异常项，立即开始重新排队审核`);
+  toast(`已重置 ${processed} 个异常项，强行启动中...`);
   
-  // 启动前再次清零防拦截
-  app.saving = 0;
-  app.pendingSave = null;
-  app.processing = false;
-  app.starting = false;
-  
-  // 强行启动批量处理
+  // 关键：不等待保存，直接强行启动
   await startBatch(b.id);
 }
 function field(label,value){return `<div class="field"><div class="label">${esc(label)}</div><div class="text">${esc(text(value)||'未提供')}</div></div>`;}
