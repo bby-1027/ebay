@@ -1271,7 +1271,7 @@ async function queueVerification(b,prohibition=false){
     await sleep(1000);
   }
   
-  // 强制清理所有可能锁死的标志
+  // 强行重置所有可能卡死的标志位
   app.stopping = false; 
   app.pendingSave = null;
   app.saving = 0; 
@@ -1288,6 +1288,8 @@ async function queueVerification(b,prohibition=false){
   if(!errItems.length) return toast('当前没有可重试的系统异常项');
   
   let processed = 0;
+  let needCollection = false; // 标记是否需要重新激活采集
+
   for (const item of errItems) {
     item.auditRequestId = null; 
     item.auditRequestHash = null; 
@@ -1296,24 +1298,34 @@ async function queueVerification(b,prohibition=false){
     item.auditError = null;
     item.reason = '等待重新处理';
     
-    // 只有真正报错的状态才重置，避免把已经采集成功的数据搞丢
+    // 如果是采集或同步报错，重置采集状态，并标记需要重新激活采集队列
     if (['error', 'sync_error'].includes(item.collectStatus)) {
       item.collectStatus = 'pending';
       item.reviewStatus = 'pending';
       item.copyStatus = 'pending';
       if (b.collection) b.collection.members = b.collection.members.filter(m => m.id !== item.itemId);
-    } else if (['error', 'unconfirmed'].includes(item.reviewStatus)) {
+      needCollection = true;
+    } 
+    // 如果是审核报错
+    else if (['error', 'unconfirmed'].includes(item.reviewStatus)) {
       item.reviewStatus = 'pending';
       item.copyStatus = 'pending';
-    } else if (item.copyStatus === 'error') {
+    } 
+    // 如果是文案报错
+    else if (item.copyStatus === 'error') {
       item.copyStatus = 'pending';
     }
     processed++;
   }
+
+  // 【关键】如果之前采集卡死在报错状态，必须强行把它拉回正常，否则任务会瞬间报错退出
+  if (b.collection && needCollection) {
+    b.collection.state = 'polling'; 
+  }
   
-  toast(`已重置 ${processed} 个异常项，强行启动中...`);
+  toast(`已重置 ${processed} 个异常项，强行唤醒任务...`);
   
-  // 关键：不等待保存，直接强行启动
+  // 强行启动批量处理（内部已经加了防卡死逻辑）
   await startBatch(b.id);
 }
 function field(label,value){return `<div class="field"><div class="label">${esc(label)}</div><div class="text">${esc(text(value)||'未提供')}</div></div>`;}
