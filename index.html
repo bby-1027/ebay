@@ -795,11 +795,11 @@ function renderItems() {
   $('btnBatchResync').hidden=!resyncCount&&!b.collection?.needsResultSync;
   $('btnBatchResync').disabled=app.processing||!!app.saving||!!app.detailBusy||!!app.adminBusy;
   $('btnBatchResync').textContent=`同步原任务最新结果（${resyncCount}）`;
-  const verificationCount=b.items.filter(canRecheckVerification).length;
-  $('btnBatchRecheck').hidden=!verificationCount;
+    const systemErrorCount=b.items.filter(isSystemErrorItem).length;
+  $('btnBatchRecheck').hidden=!systemErrorCount;
   $('btnBatchRecheck').disabled=app.processing||!!app.saving||!!app.detailBusy||!!app.adminBusy;
-    $('btnBatchRecheck').textContent=b.workQueue?.kind==='verification'&&b.workQueue.state!=='completed'
-    ?`继续重审（${b.workQueue.cursor}/${b.workQueue.entries.length}）`:`重试系统异常（${verificationCount}）`;
+  $('btnBatchRecheck').textContent=b.workQueue?.kind==='verification'&&b.workQueue.state!=='completed'
+    ?`继续重审（${b.workQueue.cursor}/${b.workQueue.entries.length}）`:`重试系统异常（${systemErrorCount}）`;
   $('btnStrictReview').hidden=!c.prohibitionRefresh;
   $('btnStrictReview').disabled=app.processing||!!app.saving||!!app.detailBusy||!!app.adminBusy;
   $('btnStrictReview').textContent=`复审旧版已通过（${c.prohibitionRefresh}）`;
@@ -1335,7 +1335,7 @@ async function startBatch(bid,{recheckVerification=false,recheckSystemError=fals
   if(!navigator.locks)return toast('此浏览器不支持处理窗口保护，请使用新版Chrome');
   await navigator.locks.request('ebay-workbench-processing-v1',{ifAvailable:true},async lock=>{
     if(!lock)return toast('同一浏览器另一个页面正在处理，此页仅查看');
-    try{await runLoop(bid,{recheckVerification,resyncCollection,recheckProhibition,singleItem});}catch(e){toast('处理已暂停：'+e.message);}
+      try{await runLoop(bid,{recheckVerification,recheckSystemError,resyncCollection,recheckProhibition,singleItem});}catch(e){toast('处理已暂停：'+e.message);}
   });
   }finally{app.starting=false;render();}
   if(['completed','waiting_review','blocked'].includes(batch(bid)?.runStatus)&&!app.stopping){const queued=app.batches.find(b=>b.runStatus==='queued');if(queued)await startBatch(queued.id);}
