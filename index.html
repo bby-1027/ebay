@@ -533,6 +533,9 @@ function manualSuggestion(i){
   return text((existingManual(i)||history.findLast(entry=>entry?.dataRevision===(i.dataRevision||0)))?.reason);
 }
 function canRecheckVerification(i){return i.collectStatus==='collected'&&needsManual(i);}
+function isSystemErrorItem(i){
+  return i.collectStatus==='sync_error' || auditIncomplete(i) || i.reviewStatus==='error' || i.reviewStatus==='unconfirmed' || (i.collectStatus==='collected' && i.reviewStatus==='skipped');
+}
 function hasFailure(i) {return ['error','sync_error'].includes(i.collectStatus)||['error','unconfirmed'].includes(i.reviewStatus)||i.copyStatus==='error';}
 function canResyncCollection(b,i){
   return (['error','sync_error'].includes(i.collectStatus)||i.reviewStatus==='skipped')
@@ -556,18 +559,10 @@ function counts(b) {
 }
 function stage(b) {
   if(!b.items.length) return '无商品';
-  if((!b.runStatus||b.runStatus==='idle')&&b.items.every(i=>i.collectStatus==='pending'&&i.reviewStatus==='pending')) return '未开始';
   if(b.runStatus==='queued')return '等待中';
-  if(b.items.some(i=>['pending','collecting'].includes(i.collectStatus))) return '采集资料';
-  if(b.items.some(i=>i.collectStatus==='collected'&&['pending','auditing'].includes(i.reviewStatus)))return '审核中';
-  if(b.items.some(i=>pendingProhibitionRefresh(i)||(i.reviewStatus==='passed'&&(!sellerAuditCurrent(i)||(!auditCurrent(i)&&!legacyAudit(i))))))return '需要复审';
-  if(b.items.some(i=>i.reviewStatus==='passed'&&['pending','processing'].includes(i.copyStatus)))return '文案处理中';
-  if(b.items.some(i=>i.reviewStatus==='passed'&&i.copyStatus==='completed'&&!exportCheck(i).ok))return '文案待确认';
-  if(b.items.some(i=>i.collectStatus==='sync_error'))return '采集结果待确认';
-  if(b.items.some(auditIncomplete))return '有审核未完成';
-  const failures=b.items.filter(hasFailure);
-  if(failures.length)return failures.every(i=>i.collectStatus==='sync_error')?'采集结果待确认':failures.every(i=>i.reviewStatus==='error')?'有审核未完成':'有失败项';
-  return counts(b).verify?'待核验':'已完成';
+  const running=b.items.some(i=>['pending','collecting'].includes(i.collectStatus) || ['pending','auditing'].includes(i.reviewStatus) || (i.reviewStatus==='passed' && ['pending','processing'].includes(i.copyStatus)));
+  if(running && (b.runStatus==='running'||b.runStatus===undefined||b.runStatus==='idle')) return '处理中';
+  return '已完成';
 }
 function progress(b) {const c=counts(b);return `采集结束 ${c.collectEnded}/${c.total}（成功${c.collected}） · 审核 ${c.auditEligible?c.audited+'/'+c.auditEligible:'无需处理'} · 文案 ${c.passed?c.copyEnded+'/'+c.passed:'无需处理'}`;}
 function briefProgress(b,{compact=false}={}){const c=counts(b);
@@ -594,20 +589,18 @@ function statusSummary(b){
   return `总计 ${c.total} 条 | 可导出 ${c.exportable} 条 | 已淘汰 ${c.excluded+c.risk} 条 | 处理中 ${pending} 条 | 系统异常 ${systemError} 条 | 待人工 ${manual} 条`;
 }
 function itemStatus(i){
-  if(pendingProhibitionRefresh(i))return ['新标准待复审','warn'];
-  if(i.reviewStatus==='passed'&&!sellerAuditCurrent(i))return ['需重新审核','warn'];
-  if(exportCheck(i).ok)return ready(i)?['可导出','pass']:['审核通过','pass'];
-  if(i.collectStatus==='sync_error'||(i.collectStatus==='error'&&i.collectionIssue!=='upstream_failed'))return ['采集结果待确认','warn'];
-  if(i.collectStatus==='error')return ['采集失败','err'];
-  if(i.collectStatus==='pending')return ['待采集','gray'];if(i.collectStatus==='collecting')return ['采集中','run'];
-  if(i.reviewStatus==='skipped')return ['资料不足','gray'];if(['excluded','not_selected'].includes(i.reviewStatus))return ['淘汰','err'];
-  if(i.reviewStatus==='unconfirmed')return ['结果未确认','warn'];
-  if(auditIncomplete(i))return ['审核未完成','warn'];
-  if(needsManual(i))return ['待核验','warn'];
-  if(i.reviewStatus==='error')return ['审核未完成','err'];
-  if(i.reviewStatus==='auditing')return ['审核中','run'];if(i.reviewStatus==='pending')return ['待审核','gray'];
-  if(i.reviewStatus==='passed')return i.copyStatus==='completed'?['文案待确认','warn']:i.copyStatus==='error'?['文案失败','err']:['文案处理中','run'];
-  return ['待处理','gray'];
+  if(pendingProhibitionRefresh(i))return ['系统异常','warn'];
+  if(i.reviewStatus==='passed'&&!sellerAuditCurrent(i))return ['系统异常','warn'];
+  if(exportCheck(i).ok)return ready(i)?['可导出','pass']:['可导出','pass'];
+  if(i.collectStatus==='error'||i.collectStatus==='sync_error')return ['已淘汰','gray'];
+  if(i.collectStatus==='pending'||i.collectStatus==='collecting')return ['处理中','run'];
+  if(i.reviewStatus==='skipped')return ['已淘汰','gray'];
+  if(['excluded','not_selected'].includes(i.reviewStatus))return ['已淘汰','err'];
+  if(i.reviewStatus==='unconfirmed'||auditIncomplete(i)||i.reviewStatus==='error')return ['系统异常','warn'];
+  if(needsManual(i))return ['待人工','warn'];
+  if(i.reviewStatus==='auditing'||i.reviewStatus==='pending')return ['处理中','run'];
+  if(i.reviewStatus==='passed')return i.copyStatus==='completed'?['可导出','pass']:i.copyStatus==='error'?['系统异常','err']:['处理中','run'];
+  return ['处理中','gray'];
 }
 function exportReason(b){const c=counts(b);if(app.saving)return '正在保存，完成后可导出';if(app.stopping)return '保存未确认，请刷新读取已保存结果';if(c.exportable)return `导出本批${c.exportable}条就绪商品`;
   const candidate=b.items.find(i=>i.reviewStatus==='passed');return candidate?exportCheck(candidate).reason:'本批暂无审核通过的商品';}
@@ -1181,7 +1174,7 @@ function prepareQueueEntry(i,entry){
     auditWaitSince:null,auditNextCheckAt:0,reason:entry.action==='recollect'?'等待本次新采集':'等待重新审核'});
   invalidate(i);
 }
-async function runWorkQueue(b,{singleItem,recheckVerification,recheckProhibition}){
+async function runWorkQueue(b,{singleItem,recheckVerification,recheckSystemError,recheckProhibition}){
   let q=b.workQueue;
   const unfinished=q&&q.state!=='completed';
   if(recheckProhibition&&unfinished&&q.kind!=='strict')throw new Error('请先继续完成当前队列，再复审旧版已通过商品；不会覆盖原队列');
@@ -1191,7 +1184,7 @@ async function runWorkQueue(b,{singleItem,recheckVerification,recheckProhibition
     if(q.kind!=='single')b.suspendedQueue=q;
   }
   if(singleItem||(!unfinished&&(recheckVerification||recheckProhibition))){
-    const items=singleItem?b.items.filter(i=>i.itemId===singleItem.itemId):b.items.filter(recheckProhibition?pendingProhibitionRefresh:canRecheckVerification);
+        const items=singleItem?b.items.filter(i=>i.itemId===singleItem.itemId):b.items.filter(recheckProhibition?pendingProhibitionRefresh:recheckSystemError?isSystemErrorItem:canRecheckVerification);
     if(!items.length)return;
     q={id:uid(),kind:singleItem?'single':recheckProhibition?'strict':'verification',state:'running',cursor:0,createdAt:now(),
       entries:items.map(i=>({itemId:i.itemId,revision:i.dataRevision||0,
@@ -1256,17 +1249,17 @@ async function runWorkQueue(b,{singleItem,recheckVerification,recheckProhibition
     }else if(!app.stopping){q.state='paused';await saveData(b);}
   }finally{app.processing=false;app.activeId=null;render();}
 }
-async function runLoop(bid,{recheckVerification=false,resyncCollection=false,recheckProhibition=false,singleItem=null}={}) {
+async function runLoop(bid,{recheckVerification=false,recheckSystemError=false,resyncCollection=false,recheckProhibition=false,singleItem=null}={}) {
   const b=batch(bid);if(!b)return;
   if(!singleItem&&b.suspendedQueue&&b.workQueue?.state==='completed'){
     b.workQueue=b.suspendedQueue;delete b.suspendedQueue;
   }
-  if(singleItem||recheckVerification||recheckProhibition||b.workQueue?.state==='running'||b.workQueue?.state==='paused')
-    return runWorkQueue(b,{singleItem,recheckVerification,recheckProhibition});
+   if(singleItem||recheckVerification||recheckSystemError||recheckProhibition||b.workQueue?.state==='running'||b.workQueue?.state==='paused')
+    return runWorkQueue(b,{singleItem,recheckVerification,recheckSystemError,recheckProhibition});
   if(recheckVerification&&(app.saving||app.detailBusy||!b.items.some(canRecheckVerification)))return;
   const resyncIds=resyncCollection?new Set(b.items.filter(i=>canResyncCollection(b,i)).map(i=>i.itemId)):null;
   if(resyncIds&&(!resyncIds.size||app.saving||app.detailBusy))return;
-  const checkSelection=recheckProhibition?pendingProhibitionRefresh:recheckVerification?canRecheckVerification:null;
+  const checkSelection=recheckProhibition?pendingProhibitionRefresh:recheckSystemError?isSystemErrorItem:recheckVerification?canRecheckVerification:null;
   const scopedIds=resyncIds||(checkSelection?new Set(b.items.filter(checkSelection).map(i=>i.itemId)):null);
   if(checkSelection&&!scopedIds.size)return;
   const scopedItems=()=>scopedIds?b.items.filter(i=>scopedIds.has(i.itemId)):b.items;
@@ -1324,7 +1317,7 @@ async function runLoop(bid,{recheckVerification=false,resyncCollection=false,rec
   }
   if(auditJobError)throw auditJobError;
 }
-async function startBatch(bid,{recheckVerification=false,resyncCollection=false,recheckProhibition=false,singleItem=null}={}) {
+async function startBatch(bid,{recheckVerification=false,recheckSystemError=false,resyncCollection=false,recheckProhibition=false,singleItem=null}={}) {
   if(app.adminBusy)return toast('批次管理正在保存，请稍候再开始任务');
   if(app.processing||app.starting)return toast('已有任务在处理，请等待或暂停');
   if(app.saving||app.detailBusy)return toast('正在保存，请稍候');
@@ -1528,7 +1521,7 @@ function openDetail(iid,{preserveNavigation=false}={}) {
   if(i.reviewStatus==='passed'&&!exportCheck(i).ok)html+=`<p class="muted">${esc(exportCheck(i).reason)}</p>`+(pendingProhibitionRefresh(i)?'':`<button data-action="recopy" ${app.processing?'disabled':''}>重新检查文案</button>`);
   if(currentResult&&(a.seller_review||a.scope==='hard_rule'))html+=`<details class="advanced"><summary>经营检查详情</summary>${renderSellerReview(i)}</details>`;
   if(['auditing','unconfirmed'].includes(i.reviewStatus))html+=`<p class="muted">${i.reviewStatus==='unconfirmed'?'已停止自动等待。再次查询只读取原任务。':app.processing?'正在等待原任务结果。':'处理已暂停，继续后查询原任务。'}</p>${i.reviewStatus==='unconfirmed'?'<button data-action="retrieve">再次查询结果</button>':''}`;
-  html+=`<details class="advanced"><summary>更多操作</summary><div class="row-actions"><button data-action="reaudit" ${app.processing||i.collectStatus!=='collected'?'disabled':''}>重新审核此商品</button>${canResyncCollection(batch(),i)?`<button data-action="sync-original" ${app.processing?'disabled':''}>同步此商品原任务结果</button>`:''}<button data-action="recollect" ${app.processing?'disabled':''}>重新采集（创建新任务）</button><button data-action="toggle-edit">修正资料</button></div><div id="detailEditPanel" hidden>${detailPanel('edit',i)}</div></details></section></div>`;
+  html+=`<details class="advanced"><summary>更多操作</summary><div class="row-actions"><button data-action="reaudit" ${app.processing||i.collectStatus!=='collected'?'disabled':''}>重新审核此商品</button>${canResyncCollection(batch(),i)?`<button data-action="sync-original" ${app.processing?'disabled':''}>同步此商品原任务结果</button>`:''}<button data-action="toggle-edit">修正资料</button></div><div id="detailEditPanel" hidden>${detailPanel('edit',i)}</div></details></section></div>`;
   $('dtBody').innerHTML=html;
   if($('manualStatus'))$('manualStatus').value=manual?.decision||'';
   if($('manualReason'))$('manualReason').value=manualSuggestion(i);
