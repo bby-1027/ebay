@@ -181,8 +181,20 @@ let exportPrefs = {brand:true,link:true,title:true,bullets:true,desc:true};
 let detailDirty = false;
 const preferenceControls={brand:'expBrand',link:'expLink',title:'expTitle',bullets:'expBullets',desc:'expDesc'};
 function brandOf(i){const f=i.collected||{},r=f._raw?.data||f._raw?.product||f._raw?.item||f._raw||{};return [f.brand,r.brand,r['品牌']].map(text).find(substantive)||'';}
-function settingsDraft(){return Object.fromEntries(Object.entries(preferenceControls).map(([k,id])=>[k,k==='link'?true:!!$(id).checked]));}
-function syncSettingsControls(){exportPrefs.link=true;for(const [k,id]of Object.entries(preferenceControls)){$(id).checked=k==='link'||!!exportPrefs[k];if(k==='link'){$(id).disabled=true;$(id).title='SKU和链接为必选导出字段';}}}
+function settingsDraft(){
+  return Object.fromEntries(
+    Object.entries(preferenceControls).map(
+      ([k,id])=>[k,!!$(id).checked]
+    )
+  );
+}
+function syncSettingsControls(){
+  for(const [k,id]of Object.entries(preferenceControls)){
+    $(id).checked=!!exportPrefs[k];
+    $(id).disabled=false;
+    $(id).title='';
+  }
+}
 function settingsChanged(){const draft=settingsDraft();return Object.keys(preferenceControls).some(k=>draft[k]!==!!exportPrefs[k]);}
 function openSettings(){syncSettingsControls();$('settingsError').textContent='';$('settingsConfirmError').textContent='';$('settingsInfo').textContent=`版本 ${BUILD}。处理期间请保持本页面打开，并只使用一个处理窗口。刷新会接续原任务，不重新采集。`;$('settingsDialog').showModal();}
 function saveSettings(){
@@ -1497,7 +1509,20 @@ function exportRows(b,selected=false) {
   const scope=selected?b.items.filter(i=>app.selected.has(i.itemId)):b.items, good=scope.filter(ready);
   if(!good.length)throw new Error('没有审核通过、文案检查完成且保存成功的商品');
   const cols=[['SKU',i=>i.asin]];
-  if(exportPrefs.brand)cols.push(['品牌',brandOf]);cols.push(['链接',amazon]);if(exportPrefs.title)cols.push(['标题',i=>stripBrandLabelLines(i.copyData.title,brandOf(i))]);
+    if(exportPrefs.brand){
+    cols.push(['品牌',brandOf]);
+  }
+
+  if(exportPrefs.link){
+    cols.push(['链接',amazon]);
+  }
+
+  if(exportPrefs.title){
+    cols.push([
+      '标题',
+      i=>stripBrandLabelLines(i.copyData.title,brandOf(i))
+    ]);
+  }
   if(exportPrefs.bullets)cols.push(['五点',i=>stripBrandLabelLines(i.copyData.bullets,brandOf(i))]);if(exportPrefs.desc)cols.push(['长描述',i=>stripBrandLabelLines(i.copyData.description,brandOf(i))]);
   const rows=[cols.map(c=>c[0]),...good.map(i=>cols.map(c=>text(c[1](i))))];
   if(rows.some(r=>r.some(v=>v.length>32767)))throw new Error('存在超过Excel单元格32767字符上限的字段，未截断或导出；请先处理长文本');
