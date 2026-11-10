@@ -1271,12 +1271,11 @@ async function queueVerification(b,prohibition=false){
 async function retryFailures() {
   const b=batch();if(!b)return;
   
+  // 1. 强行清理可能卡死的进度锁，防止页面假死
   if(app.processing) {
     app.stopping = true;
-    toast('正在暂停当前任务，准备重置...');
-    await sleep(1000);
+    await sleep(500);
   }
-  
   app.stopping = false; 
   app.pendingSave = null;
   app.saving = 0; 
@@ -1284,36 +1283,58 @@ async function retryFailures() {
   app.processing = false;
   app.starting = false;
   
-  const errItems = b.items.filter(i => hasFailure(i) || i.reviewStatus === 'error');
-  if(!errItems.length) return toast('当前没有可重试的系统异常项');
+  // 2. 精准找出需要处理的商品（非淘汰、非完成、非资料不足）
+  const errItems = b.items.filter(i => 
+    !['excluded', 'not_selected', 'skipped'].includes(i.reviewStatus)
+  );
   
-  let processed = 0;
+  if(!errItems.length) return toast('当前没有需要重试的商品');
+  
+  let collectionRetryCount = 0;
+  let auditRetryCount = 0;
+
   for (const item of errItems) {
+    // 清空报错信息
     item.auditRequestId = null; 
     item.auditRequestHash = null; 
     item.auditWaitSince = null; 
     item.auditNextCheckAt = 0;
     item.auditError = null;
-    item.reason = '等待重新处理';
-    item.collectStatus = 'pending';
-    item.reviewStatus = 'pending';
-    item.copyStatus = 'pending';
-    processed++;
+    
+    // 【核心逻辑A】如果是采集失败或同步失败
+    if (['error', 'sync_error'].includes(item.collectStatus)) {
+      item.collectStatus = 'pending';
+      item.reviewStatus = 'pending';
+      item.copyStatus = 'pending';
+      item.reason = '重新查询原采集结果中...';
+      collectionRetryCount++;
+    } 
+    // 【核心逻辑B】如果是资料已经采到了，单纯是审核或文案失败/未完成
+    else if (i.collectStatus === 'collected' && (['error', 'unconfirmed', 'pending'].includes(item.reviewStatus) || item.reviewStatus === 'auditing')) {
+      item.reviewStatus = 'pending';
+      item.copyStatus = 'pending';
+      item.reason = '重新提交审核中...';
+      auditRetryCount++;
+    }
   }
 
-  // 强制把整个批次的采集状态归零，当作全新任务来处理
-  b.collection = null; 
-  b.runStatus = 'idle';
-  
-  toast(`已重置 ${processed} 个异常项，正在提交任务...`);
-  
-  try {
-    await saveData(b);
-  } catch(e) {
-    console.log("保存重置状态超时，强制继续");
+  // 【核心逻辑C】唤醒原来的采集任务，但不删除它！
+  if (collectionRetryCount > 0) {
+    if (b.collection) {
+      // 保留原任务ID，只把状态设为查询中，清零重试次数
+      b.collection.state = 'polling';
+      b.collection.syncAttempts = 0; 
+      b.collection.needsResultSync = true;
+    } else {
+      // 如果连原任务记录都没了，只能被迫重采
+      b.collection = null; 
+    }
   }
+
+  b.runStatus = 'idle';
+  toast(`已准备就绪：${collectionRetryCount}条去原任务重查，${auditRetryCount}条直接重审。正在启动...`);
   
-  // 强行启动
+  // 强行启动任务
   await startBatch(b.id);
 }
 function field(label,value){return `<div class="field"><div class="label">${esc(label)}</div><div class="text">${esc(text(value)||'未提供')}</div></div>`;}
