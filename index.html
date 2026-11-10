@@ -513,8 +513,6 @@ function exportCheck(i){
   if(pendingProhibitionRefresh(i))return {ok:false,reason:'旧结论需按最新标准完整复审'};
   if(!sellerAuditCurrent(i))return {ok:false,reason:'需要按最新审核标准重新审核'};
   if(!copyAuthorized(i))return {ok:false,reason:'尚未完成当前严格标准的全部文本审核，旧版或人工结论不能替代'};
-  if(!sourceAvailability(i).ok)return {ok:false,reason:sourceAvailability(i).reason};
-  if(!externalReviewReady(i))return {ok:false,reason:'导出前须实际完成图片、独立召回与当前货源复核，并保存记录'};
   if(i.reviewStatus!=='passed')return {ok:false,reason:i.reviewStatus==='verify'?'需要人工核验':'尚未审核通过'};
   if(i.copyStatus!=='completed'||!i.copyData)return {ok:false,reason:'文案尚未完成'};
   if(!substantive(stripBrandLabelLines(i.copyData.title,brandOf(i))))return {ok:false,reason:'清理后标题为空'};
@@ -588,6 +586,13 @@ function briefProgress(b,{compact=false}={}){const c=counts(b);
   }
   if(b.items.some(i=>i.reviewStatus==='passed'&&['pending','processing'].includes(i.copyStatus)))return `文案 ${c.copyEnded}/${c.passed}`+notes;
   return `自动处理已结束 · 有效资料 ${c.collected-c.screened}/${c.total} · 采集失败 ${b.items.filter(i=>i.collectStatus==='error').length} · 资料不足 ${c.screened}`+notes;}
+function statusSummary(b){
+  const c=counts(b);
+  const collectFailed=b.items.filter(i=>i.collectStatus==='error').length;
+  const syncPending=b.items.filter(i=>i.collectStatus==='sync_error').length;
+  const syncText=syncPending?` · 待同步 ${syncPending}`:'';
+  return `总计 ${c.total} · 有效 ${c.collected} · 采集失败 ${collectFailed}${syncText} · 资料不足 ${c.screened} · 审核未完成 ${c.auditFailed} · 待核验 ${c.verify} · 淘汰 ${c.excluded+c.risk} · 可导出 ${c.exportable}`;
+}
 function itemStatus(i){
   if(pendingProhibitionRefresh(i))return ['新标准待复审','warn'];
   if(i.reviewStatus==='passed'&&!sellerAuditCurrent(i))return ['需重新审核','warn'];
@@ -601,8 +606,6 @@ function itemStatus(i){
   if(needsManual(i))return ['待核验','warn'];
   if(i.reviewStatus==='error')return ['审核未完成','err'];
   if(i.reviewStatus==='auditing')return ['审核中','run'];if(i.reviewStatus==='pending')return ['待审核','gray'];
-  if(i.reviewStatus==='passed'&&completePassAudit(i.audit)&&!sourceAvailability(i).ok)return ['采购受限','warn'];
-  if(i.reviewStatus==='passed'&&completePassAudit(i.audit)&&!externalReviewReady(i))return ['导出前待复核','warn'];
   if(i.reviewStatus==='passed')return i.copyStatus==='completed'?['文案待确认','warn']:i.copyStatus==='error'?['文案失败','err']:['文案处理中','run'];
   return ['待处理','gray'];
 }
@@ -630,7 +633,7 @@ async function fetchData({automatic=false}={}) {
     if(app.dataContract===2&&app.readAt&&!app.pendingSave&&!app.stopping){
       const current=await api('/api/data_version');
       if(app.saving||app.processing||app.detailBusy||readEpoch!==(app.saveEpoch||0))return;
-      if(current.version===app.serverVersion){app.readAt=now();readConnectionSucceeded();render();return;}
+        if(current.version===app.serverVersion){app.readAt=now();readConnectionSucceeded();renderConnectionState();return;}
     }
     let d=await api('/api/data'); if(!d||d.version==null||!Number.isFinite(Number(d.version))||!Array.isArray(d.batches)||!d.batches.every(b=>b&&typeof b==='object'&&typeof b.id==='string'&&(b.items==null||Array.isArray(b.items)))){const e=new Error('批次响应格式不完整，已保留当前记录');e.code='invalid_data';throw e;} if(app.saving||app.processing||app.detailBusy||readEpoch!==(app.saveEpoch||0))return;
     if(app.pendingSave){
@@ -763,7 +766,7 @@ function renderHome() {
   $('batchRows').innerHTML=[...app.batches].sort((a,b)=>text(b.createdAt).localeCompare(text(a.createdAt))).map(b=>{
     const c=counts(b),paused=b.runStatus==='paused',label=paused?'已暂停':stage(b);return `<tr><td>${batchManagementCell(b)}<strong>${esc(b.name)}</strong><br><small>${esc(new Date(b.createdAt).toLocaleString())}</small></td><td>${c.total}</td>
       <td title="${esc(collectionFailureSummary(b))}">${badge(label,paused||c.verify?'warn':app.processing&&app.activeId===b.id?'run':'gray')}</td>
-      <td class="home-progress">${esc(briefProgress(b,{compact:true}))}</td><td>${c.passed}</td><td>${c.verify}</td><td>${app.saving&&c.passed?'保存中':c.exportable}</td>
+      <td class="home-progress">${esc(statusSummary(b))}</td><td>${c.passed}</td><td>${c.verify}</td><td>${app.saving&&c.passed?'保存中':c.exportable}</td>
       <td class="row-actions"><button class="linkbtn" data-action="enter" data-bid="${esc(b.id)}">明细</button>
       <button class="linkbtn" data-action="export" data-bid="${esc(b.id)}" title="${esc(exportReason(b))}" ${c.exportable?'':'disabled'}>导出${c.exportable?'('+c.exportable+')':''}</button>${batchManagementDelete(b)}</td></tr>`;
   }).join('')||('<tr><td colspan="8" class="muted">'+(!app.readAt?(app.readError?'批次读取失败，请点击上方“重新连接”。现有数据未被删除。':'正在读取已保存批次…'):'暂无批次，可导入新批次。')+'</td></tr>');
@@ -781,8 +784,8 @@ function renderItems() {
   const c=counts(b),rows=filtered(b),pages=Math.max(1,Math.ceil(rows.length/50));app.page=Math.min(app.page,pages-1);
   const pageRows=rows.slice(app.page*50,app.page*50+50);$('selectPage').checked=pageRows.length>0&&pageRows.every(i=>app.selected.has(i.itemId));$('selectPage').indeterminate=pageRows.some(i=>app.selected.has(i.itemId))&&!$('selectPage').checked;
   const resyncCount=b.items.filter(i=>canResyncCollection(b,i)).length;
-  $('collectionSummary').textContent=collectionSummary(b);
-  $('batchProgress').textContent=`${badgeText(b)} · ${briefProgress(b)}${resyncCount?` · 可查询原结果 ${resyncCount} 条`:''}`;
+    $('collectionSummary').textContent='';
+  $('batchProgress').textContent=statusSummary(b);
   const selected=b.items.filter(i=>app.selected.has(i.itemId));
   $('selectionInfo').textContent=selected.length?`已选 ${selected.length} 条，可导出 ${selected.filter(ready).length} 条`:`共 ${rows.length} 条`;
   $('selectAllFiltered').hidden=!selected.length||rows.length<=50;$('clearSelection').hidden=!selected.length;
@@ -1519,9 +1522,7 @@ function openDetail(iid,{preserveNavigation=false}={}) {
   if(currentResult&&i.reviewStatus==='verify'&&!canManualPass(i))html+='<p class="muted">本条未完成有效审核或仍需复审，不能用人工通过替代。请先补审缺项。</p>';
   if(missing.length)html+=field('缺少信息或未完成检查',missing);
   if(currentResult&&a.seller_review?.materials?.requirements?.length)html+=field('销售材料',a.seller_review.materials.requirements);
-  if(i.collectionDiagnostic)html+=field('本次采集身份与原始错误',JSON.stringify(i.collectionDiagnostic,null,2));
   if(currentResult)html+=renderAuditBasis(i);
-  html+=externalReviewPanel(i);
   html+='</div>';
   if(i.auditRecoveryBlocked)html+='<p class="muted">原任务资料无法对应，系统不会自动重新提交。请核对资料后，在更多操作中手动重新审核。</p>';
   if(i.reviewStatus==='passed'&&!exportCheck(i).ok)html+=`<p class="muted">${esc(exportCheck(i).reason)}</p>`+(pendingProhibitionRefresh(i)?'':`<button data-action="recopy" ${app.processing?'disabled':''}>重新检查文案</button>`);
