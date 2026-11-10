@@ -587,11 +587,11 @@ function briefProgress(b,{compact=false}={}){const c=counts(b);
   if(b.items.some(i=>i.reviewStatus==='passed'&&['pending','processing'].includes(i.copyStatus)))return `文案 ${c.copyEnded}/${c.passed}`+notes;
   return `自动处理已结束 · 有效资料 ${c.collected-c.screened}/${c.total} · 采集失败 ${b.items.filter(i=>i.collectStatus==='error').length} · 资料不足 ${c.screened}`+notes;}
 function statusSummary(b){
-  const c=counts(b);
-  const collectFailed=b.items.filter(i=>i.collectStatus==='error').length;
-  const syncPending=b.items.filter(i=>i.collectStatus==='sync_error').length;
-  const syncText=syncPending?` · 待同步 ${syncPending}`:'';
-  return `总计 ${c.total} · 有效 ${c.collected} · 采集失败 ${collectFailed}${syncText} · 资料不足 ${c.screened} · 审核未完成 ${c.auditFailed} · 待核验 ${c.verify} · 淘汰 ${c.excluded+c.risk} · 可导出 ${c.exportable}`;
+  const c = counts(b);
+  const pending = b.items.filter(i => ['pending','collecting'].includes(i.collectStatus) || ['pending','auditing'].includes(i.reviewStatus) || (i.reviewStatus==='passed' && ['pending','processing'].includes(i.copyStatus))).length;
+  const systemError = b.items.filter(i => i.collectStatus==='error' || i.collectStatus==='sync_error' || auditIncomplete(i) || i.reviewStatus==='error' || i.reviewStatus==='unconfirmed').length;
+  const manual = b.items.filter(i => needsManual(i) && !auditIncomplete(i)).length;
+  return `总计 ${c.total} 条 | 可导出 ${c.exportable} 条 | 已淘汰 ${c.excluded+c.risk} 条 | 处理中 ${pending} 条 | 系统异常 ${systemError} 条 | 待人工 ${manual} 条`;
 }
 function itemStatus(i){
   if(pendingProhibitionRefresh(i))return ['新标准待复审','warn'];
@@ -805,8 +805,8 @@ function renderItems() {
   const verificationCount=b.items.filter(canRecheckVerification).length;
   $('btnBatchRecheck').hidden=!verificationCount;
   $('btnBatchRecheck').disabled=app.processing||!!app.saving||!!app.detailBusy||!!app.adminBusy;
-  $('btnBatchRecheck').textContent=b.workQueue?.kind==='verification'&&b.workQueue.state!=='completed'
-    ?`继续重审（${b.workQueue.cursor}/${b.workQueue.entries.length}）`:`补审未完成／待核验（${verificationCount}）`;
+    $('btnBatchRecheck').textContent=b.workQueue?.kind==='verification'&&b.workQueue.state!=='completed'
+    ?`继续重审（${b.workQueue.cursor}/${b.workQueue.entries.length}）`:`重试系统异常（${verificationCount}）`;
   $('btnStrictReview').hidden=!c.prohibitionRefresh;
   $('btnStrictReview').disabled=app.processing||!!app.saving||!!app.detailBusy||!!app.adminBusy;
   $('btnStrictReview').textContent=`复审旧版已通过（${c.prohibitionRefresh}）`;
@@ -1844,7 +1844,7 @@ async function init() {
   $('detailConfirmContinue').onclick=()=>{if(!app.detailBusy)$('detailConfirmDialog').close();};
   $('btnRunBatch').onclick=()=>{const b=batch(app.currentBatchId);if(b)fail(app.processing&&app.activeId===b.id?setPaused():startBatch(b.id,{recheckProhibition:stage(b)==='需要复审'&&b.items.some(pendingProhibitionRefresh)}));};$('btnBatchRetry').onclick=()=>fail(retryFailures());
   $('btnBatchResync').onclick=()=>fail(syncOriginalCollection(app.currentBatchId));
-  $('btnBatchRecheck').onclick=()=>fail(startBatch(app.currentBatchId,{recheckVerification:true}));
+    $('btnBatchRecheck').onclick=()=>fail(startBatch(app.currentBatchId,{recheckSystemError:true}));
   $('btnStrictReview').onclick=()=>fail(startBatch(app.currentBatchId,{recheckProhibition:true}));
   $('renameBatch').onclick=()=>{if(app.processing)return toast('请先暂停并等待当前步骤保存');const b=batch(),v=prompt('批次名称',b.name);if(v?.trim()){b.name=v.trim();fail(saveData().then(render));}};
   $('btnExportItems').onclick=()=>{try{doExport(app.currentBatchId,app.selected.size>0);}catch(e){toast(e.message);}};$('btnExportFailures').onclick=()=>{try{exportFailures();}catch(e){toast(e.message);}};
