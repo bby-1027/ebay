@@ -1025,8 +1025,7 @@ function auditElapsedMs(i,serverStartedAt){
  return stamps.length?Math.max(0,nowMs-Math.min(...stamps)):0;
 }
 function auditWaitingText(i){
- const seconds=Math.floor(auditElapsedMs(i)/1000),clock=seconds>=60?Math.floor(seconds/60)+'分'+seconds%60+'秒':seconds+'秒';
- return (i.auditReceiptConfirmed?'后台已受理，等待原审核结果':'尚未确认后台受理，正在查询原任务')+' · 已等'+clock+'（最多5分钟，不会自动重提）';
+ return i.auditReceiptConfirmed ? 'AI审核中，请稍候' : '正在确认 AI 接收状态';
 }
 function itemReason(i){
   if(i.reviewStatus==='auditing')return auditWaitingText(i);
@@ -1321,6 +1320,13 @@ async function startBatch(bid,{recheckVerification=false,recheckSystemError=fals
   if(app.adminBusy)return toast('批次管理正在保存，请稍候再开始任务');
   if(app.processing||app.starting)return toast('已有任务在处理，请等待或暂停');
   if(app.saving||app.detailBusy)return toast('正在保存，请稍候');
+  // 点击重试系统异常时，强行打断卡死的旧队列，让新任务进来
+  if(recheckSystemError) {
+    const target = batch(bid);
+    if (target && target.workQueue) {
+      target.workQueue = null;
+    }
+  }
   app.starting=true;
   let scopedRun=true;
   try{
@@ -1489,8 +1495,7 @@ function openDetail(iid,{preserveNavigation=false}={}) {
   const manual=existingManual(i);
   const conclusion=currentResult&&(i.reviewStatus!=='passed'||sellerAuditCurrent(i));
   const aiDecision=conclusion&&i.manualDecision?a.decision:i.reviewStatus;
-  const resultBadge=conclusion&&aiDecision==='passed'?['通过','pass']
-    :conclusion&&auditIncomplete(i)?['审核未完成','warn']:conclusion&&aiDecision==='verify'?['待核验','warn']:itemStatus(i);
+    const resultBadge=itemStatus(i);
   const missing=currentResult?[...new Set([
     ...(Array.isArray(a.missing_info)?a.missing_info:[]),
     ...(Array.isArray(a.required_checks_not_completed)?a.required_checks_not_completed:[])
