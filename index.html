@@ -1321,31 +1321,39 @@ async function startBatch(bid,{recheckVerification=false,recheckSystemError=fals
   if(app.processing||app.starting)return toast('已有任务在处理，请等待或暂停');
   if(app.saving||app.detailBusy)return toast('正在保存，请稍候');
   app.starting=true;
-  try {
+  let scopedRun=true;
+  try{
+    if(!app.readAt)await loadWorkbench();
+    if(app.stopping){await fetchData();if(app.stopping)return;}
+    if(!await checkBackend())return;
+    const target=batch(bid);if(!target)return;
+    app.resumeAfterSave=null;
+    
+    // ==== 强行清理卡死队列，并重置异常项 ====
     if(recheckSystemError||recheckVerification||singleItem) {
-        const b=batch(bid);
-        if(b) {
-            b.workQueue=null; 
-            const targetIds = singleItem ? [singleItem.itemId] : b.items.filter(recheckSystemError?isSystemErrorItem:canRecheckVerification).map(i=>i.itemId);
-            targetIds.forEach(id => {
-                const item = b.items.find(x=>x.itemId===id);
-                if(item) {
-                    item.reviewStatus = 'pending';
-                    item.audit = null;
-                    item.auditRequestId = null;
-                }
-            });
-            await saveData(b);
-        }
+        target.workQueue=null; 
+        const targetIds = singleItem ? [singleItem.itemId] : target.items.filter(recheckSystemError?isSystemErrorItem:canRecheckVerification).map(i=>i.itemId);
+        targetIds.forEach(id => {
+            const item = target.items.find(x=>x.itemId===id);
+            if(item) {
+                item.reviewStatus = 'pending';
+                item.audit = null;
+                item.auditRequestId = null;
+            }
+        });
+        await saveData(target);
     }
-    await runLoop(bid,{recheckVerification,recheckSystemError,resyncCollection,recheckProhibition,singleItem});
-  } catch(e){
-      toast('处理已暂停：'+e.message);
-  } finally {
-      app.starting=false;
-      render();
-  }
-}
+    // ========================
+
+    scopedRun=!!(singleItem||recheckVerification||recheckSystemError||resyncCollection||recheckProhibition||target.suspendedQueue
+      ||(target.workQueue&&target.workQueue.state!=='completed'));
+    if(!scopedRun&&target.items.some(i=>i.reviewStatus==='passed'&&!auditCurrent(i)&&!legacyAudit(i))&&!confirm('本批部分资料与原审核不能对应，继续需要重新审核。旧结论会保留。是否继续？'))return;
+    if(!navigator.locks)return toast('此浏览器不支持处理窗口保护，请使用新版Chrome');
+    await navigator.locks.request('ebay-workbench-processing-v1',{ifAvailable:true},async lock=>{
+      if(!lock)return toast('同一浏览器另一个页面正在处理，此页仅查看');
+      try{await runLoop(bid,{recheckVerification,recheckSystemError,resyncCollection,recheckProhibition,singleItem});}catch(e){toast('处理已暂停：'+e.message);}
+    });
+  }finally{app.starting=false;render();}
   if(['completed','waiting_review','blocked'].includes(batch(bid)?.runStatus)&&!app.stopping){const queued=app.batches.find(b=>b.runStatus==='queued');if(queued)await startBatch(queued.id);}
 }
 async function queueVerification(b,prohibition=false){
