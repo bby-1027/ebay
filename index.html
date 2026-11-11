@@ -799,7 +799,7 @@ function renderItems() {
   $('btnBatchResync').disabled=app.processing||!!app.saving||!!app.detailBusy||!!app.adminBusy;
   $('btnBatchResync').textContent=`同步原任务最新结果（${resyncCount}）`;
     const systemErrorCount=b.items.filter(i => isSystemErrorItem(i) || (i.reviewStatus === 'auditing' && i.reason && !i.reason.includes('正在等待') && !i.reason.includes('正在确认'))).length;
-  $('btnBatchRecheck').hidden=!systemErrorCount;
+  $('btnBatchRecheck').hidden = !b.items.some(i => isSystemErrorItem(i) || (i.reviewStatus === 'auditing' && i.reason && !i.reason.includes('正在等待')));
   $('btnBatchRecheck').disabled=app.processing||!!app.saving||!!app.detailBusy||!!app.adminBusy;
   $('btnBatchRecheck').textContent=b.workQueue?.kind==='verification'&&b.workQueue.state!=='completed'
     ?`继续重审（${b.workQueue.cursor}/${b.workQueue.entries.length}）`:`重试系统异常（${systemErrorCount}）`;
@@ -811,7 +811,7 @@ function renderItems() {
   // 只要还有“处理中”的，或者系统没跑完，按钮就一直显示
   const hasRunning = b.items.some(i => i.reviewStatus === 'pending' || i.reviewStatus === 'auditing');
   $('btnRunBatch').hidden = !hasRunning && stage(b) === '已完成';
-  $('btnRunBatch').textContent = app.processing && app.activeId === b.id ? '暂停处理' : '开始处理';
+  $('btnRunBatch').textContent = (b.runStatus === 'running' || (app.processing && app.activeId === b.id)) ? '暂停处理' : '开始处理';
   $('pagination').hidden=pages===1;
   $('btnExportItems').textContent=selected.length?`导出已选(${selected.filter(ready).length})`:`导出本批通过(${c.exportable})`;
   $('btnExportItems').disabled=!(selected.length?selected.some(ready):c.exportable);
