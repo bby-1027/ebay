@@ -801,9 +801,12 @@ function renderItems() {
   $('btnStrictReview').hidden=!c.prohibitionRefresh;
   $('btnStrictReview').disabled=app.processing||!!app.saving||!!app.detailBusy||!!app.adminBusy;
   $('btnStrictReview').textContent=`复审旧版已通过（${c.prohibitionRefresh}）`;
-  $('btnRunBatch').disabled=app.processing&&app.activeId!==b.id;
-  $('btnRunBatch').textContent=app.processing&&app.activeId===b.id?'暂停处理':stage(b)==='需要复审'&&c.prohibitionRefresh?`补审旧记录禁售（${c.prohibitionRefresh}）`:b.runStatus==='paused'||b.flowVersion===1?'继续批量处理':'开始批量处理';
-  $('btnRunBatch').hidden=['已完成','有失败项','有审核未完成'].includes(stage(b))&&!app.processing;
+    $('btnRunBatch').disabled=app.processing&&app.activeId!==b.id;
+  const isPaused = b.runStatus === 'paused' || b.runStatus === 'idle' || b.runStatus === 'blocked' || b.runStatus === 'waiting_review';
+  // 只要还有“处理中”的，或者系统没跑完，按钮就一直显示
+  const hasRunning = b.items.some(i => i.reviewStatus === 'pending' || i.reviewStatus === 'auditing');
+  $('btnRunBatch').hidden = !hasRunning && stage(b) === '已完成';
+  $('btnRunBatch').textContent = app.processing && app.activeId === b.id ? '暂停处理' : '开始处理';
   $('pagination').hidden=pages===1;
   $('btnExportItems').textContent=selected.length?`导出已选(${selected.filter(ready).length})`:`导出本批通过(${c.exportable})`;
   $('btnExportItems').disabled=!(selected.length?selected.some(ready):c.exportable);
@@ -1328,11 +1331,13 @@ async function startBatch(bid,{recheckVerification=false,recheckSystemError=fals
     app.resumeAfterSave=null;
     
     // ==== 强行清理卡死队列，并重置异常项 ====
-    if(recheckSystemError||recheckVerification||singleItem) {
+        if(recheckSystemError||recheckVerification||singleItem) {
         target.workQueue=null; 
+        target.runStatus = 'running';
+        target.flowVersion = 1;
         const targetIds = singleItem ? [singleItem.itemId] : target.items.filter(recheckSystemError?isSystemErrorItem:canRecheckVerification).map(i=>i.itemId);
         targetIds.forEach(id => {
-                    const item = target.items.find(x=>x.itemId===id);
+            const item = target.items.find(x=>x.itemId===id);
             if(item) {
                 item.reviewStatus = 'pending';
                 item.audit = null;
