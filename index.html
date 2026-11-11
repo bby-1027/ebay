@@ -533,13 +533,8 @@ function manualSuggestion(i){
   return text((existingManual(i)||history.findLast(entry=>entry?.dataRevision===(i.dataRevision||0)))?.reason);
 }
 function canRecheckVerification(i){return i.collectStatus==='collected'&&needsManual(i);}
-function isSystemErrorItem(i) {
-  const isFakePending = ['pending', 'auditing'].includes(i.reviewStatus) && 
-    i.reason && 
-    !i.reason.includes('正在等待') && 
-    !i.reason.includes('正在确认') &&
-    !i.reason.includes('正在提交');
-  return isFakePending || i.collectStatus === 'sync_error' || auditIncomplete(i) || i.reviewStatus === 'error' || i.reviewStatus === 'unconfirmed' || (i.collectStatus === 'collected' && i.reviewStatus === 'skipped');
+function isSystemErrorItem(i){
+  return i.collectStatus==='sync_error' || auditIncomplete(i) || i.reviewStatus==='error' || i.reviewStatus==='unconfirmed' || (i.collectStatus==='collected' && i.reviewStatus==='skipped');
 }
 function hasFailure(i) {return ['error','sync_error'].includes(i.collectStatus)||['error','unconfirmed'].includes(i.reviewStatus)||i.copyStatus==='error';}
 function canResyncCollection(b,i){
@@ -589,16 +584,16 @@ function briefProgress(b,{compact=false}={}){const c=counts(b);
   return `自动处理已结束 · 有效资料 ${c.collected-c.screened}/${c.total} · 采集失败 ${b.items.filter(i=>i.collectStatus==='error').length} · 资料不足 ${c.screened}`+notes;}
 function statusSummary(b){
   const c = counts(b);
-  const pending = b.items.filter(i => ['pending','collecting'].includes(i.collectStatus) || (['pending','auditing'].includes(i.reviewStatus) && !isSystemErrorItem(i)) || (i.reviewStatus==='passed' && ['pending','processing'].includes(i.copyStatus))).length;
-  const systemError = b.items.filter(isSystemErrorItem).length;
-  const manual = b.items.filter(i => needsManual(i) && !auditIncomplete(i) && !isSystemErrorItem(i)).length;
+  const pending = b.items.filter(i => ['pending','collecting'].includes(i.collectStatus) || ['pending','auditing'].includes(i.reviewStatus) || (i.reviewStatus==='passed' && ['pending','processing'].includes(i.copyStatus))).length;
+  const systemError = b.items.filter(i => i.collectStatus==='error' || i.collectStatus==='sync_error' || auditIncomplete(i) || i.reviewStatus==='error' || i.reviewStatus==='unconfirmed').length;
+  const manual = b.items.filter(i => needsManual(i) && !auditIncomplete(i)).length;
   return `总计 ${c.total} 条 | 可导出 ${c.exportable} 条 | 已淘汰 ${c.excluded+c.risk} 条 | 处理中 ${pending} 条 | 系统异常 ${systemError} 条 | 待人工 ${manual} 条`;
 }
 function itemStatus(i){
-  // 最优先级：假死判定
-  if (isSystemErrorItem(i) && ['pending','auditing'].includes(i.reviewStatus)) {
-      return ['系统异常', 'warn'];
-  }
+  // 诊断假死：只要状态是审核中/待处理，但原因里已经出现了结论文字（非等待词），判定为系统异常
+  const isFakePending = ['pending','auditing'].includes(i.reviewStatus) && i.reason && !i.reason.includes('正在等待') && !i.reason.includes('正在确认');
+  if(isFakePending) return ['系统异常', 'warn'];
+
   if(pendingProhibitionRefresh(i))return ['系统异常','warn'];
   if(i.reviewStatus==='passed'&&!sellerAuditCurrent(i))return ['系统异常','warn'];
   if(exportCheck(i).ok)return ready(i)?['可导出','pass']:['可导出','pass'];
@@ -800,7 +795,7 @@ function renderItems() {
   $('itemRows').innerHTML=rows.slice(app.page*50,app.page*50+50).map(i=>{
     return `<tr class="${app.lastViewed?.batchId===b.id&&app.lastViewed.itemId===i.itemId?'last-viewed':''}" data-item-row="${esc(i.itemId)}"><td><input type="checkbox" data-select="${esc(i.itemId)}" ${app.selected.has(i.itemId)?'checked':''}></td><td><span class="sku">${esc(i.asin)}</span></td>
       <td><a href="${amazon(i)}" target="_blank" rel="noopener">打开商品 ↗</a></td><td>${badge(...itemStatus(i))}</td>
-            <td><div class="short-reason" title="${esc(itemReason(i))}">${esc(itemReason(i))}</div></td><td><button class="linkbtn" data-action="detail" data-iid="${esc(i.itemId)}">查看详情</button></td></tr>`;
+            <td><div class="short-reason" title="${esc(i.reviewStatus === 'auditing' || i.reviewStatus === 'pending' ? '正在等待 AI 审核，请稍候' : itemReason(i))}">${esc(i.reviewStatus === 'auditing' || i.reviewStatus === 'pending' ? '正在等待 AI 审核，请稍候' : itemReason(i))}</div></td><td><button class="linkbtn" data-action="detail" data-iid="${esc(i.itemId)}">查看详情</button></td></tr>`;
   }).join('');
   $('pageInfo').textContent=`第 ${app.page+1}/${pages} 页`;$('prevPage').disabled=app.page===0;$('nextPage').disabled=app.page===pages-1;
   const auditRetries=b.items.filter(canRetryAudit).length;
@@ -808,8 +803,11 @@ function renderItems() {
   $('btnBatchResync').disabled=app.processing||!!app.saving||!!app.detailBusy||!!app.adminBusy;
   $('btnBatchResync').textContent=`同步原任务最新结果（${resyncCount}）`;
     // 把假死的商品也算进系统异常里
-      const systemErrorCount = b.items.filter(isSystemErrorItem).length;
-  $('btnBatchRecheck').hidden = systemErrorCount === 0;
+    const systemErrorCount = b.items.filter(i => 
+      isSystemErrorItem(i) || 
+      (['pending','auditing'].includes(i.reviewStatus) && i.reason && !i.reason.includes('正在等待') && !i.reason.includes('正在确认'))
+  ).length;
+  $('btnBatchRecheck').hidden = !b.items.some(i => isSystemErrorItem(i) || (i.reviewStatus === 'auditing' && i.reason && !i.reason.includes('正在等待')));
   $('btnBatchRecheck').disabled=app.processing||!!app.saving||!!app.detailBusy||!!app.adminBusy;
   $('btnBatchRecheck').textContent=b.workQueue?.kind==='verification'&&b.workQueue.state!=='completed'
     ?`继续重审（${b.workQueue.cursor}/${b.workQueue.entries.length}）`:`重试系统异常（${systemErrorCount}）`;
@@ -1052,6 +1050,10 @@ function itemReason(i){
   if(i.reviewStatus==='error')return i.auditError?.request_id===i.auditRequestId&&i.auditError?.detail||i.reason||'审核未完成';
   return friendlyAuditReason(i.reason)||'—';
 }
+function isSystemErrorItem(i){
+  const isStuckAuditing = i.reviewStatus === 'auditing' && i.reason && !i.reason.includes('正在等待') && !i.reason.includes('正在确认');
+  return i.collectStatus==='sync_error' || auditIncomplete(i) || i.reviewStatus==='error' || i.reviewStatus==='unconfirmed' || (i.collectStatus==='collected' && i.reviewStatus==='skipped') || isStuckAuditing;
+}
 function friendlyAuditReason(value){
   return text(value).replace(/(?:审核依据待核验：)?审核分项未引用商品原文证据(?:。请核对商品原文及适用政策后复审。?)?/g,MISSING_SOURCE_NOTICE);
 }
@@ -1074,7 +1076,7 @@ async function auditItem(b,i,recover=false){
   const expectedHash=await auditInputHash(fields,i.asin,rev,note);
   if((i.dataRevision||0)!==rev||(i.decisionRevision||0)!==decisionRevision)return;
   if(!recover&&(b.runStatus==='paused'||app.stopping))return;
-  if(!recover){i.reviewStatus='auditing';i.reason='正在等待 AI 审核，请稍候';i.auditRequestId=uid();i.auditWaitSince=now();i.auditNextCheckAt=0;i.auditReceiptConfirmed=false;i.auditRecoveryBlocked=false;i.auditRequestHash=expectedHash;i.auditRequestReviewNote=note;await saveData(b);}
+ if(!recover){i.reviewStatus='auditing';i.reason='正在提交审核';i.auditRequestId=uid();i.auditWaitSince=now();i.auditNextCheckAt=0;i.auditReceiptConfirmed=false;i.auditRecoveryBlocked=false;i.auditRequestHash=expectedHash;i.auditRequestReviewNote=note;await saveData(b);}
    if(recover&&(!i.auditRequestId||(i.auditRequestHash&&i.auditRequestHash!==expectedHash))){blockAuditRecovery(i,'原任务编号缺失或商品资料已经变化，不能使用旧审核结果');await saveData(b);return;}
   const requestId=i.auditRequestId;
   const changedClock=!Number.isFinite(Date.parse(i.auditWaitSince))||Date.parse(i.auditWaitSince)>Date.now();
@@ -1215,8 +1217,8 @@ async function runWorkQueue(b,{singleItem,recheckVerification,recheckSystemError
     if(q.kind==='single'&&q.entries[0].itemId!==singleItem.itemId)throw new Error('还有单个商品任务未结束，请先接续原任务');
     if(q.kind!=='single')b.suspendedQueue=q;
   }
-        if(singleItem||(!unfinished&&(recheckVerification||recheckSystemError||recheckProhibition))){
-                const items=singleItem?b.items.filter(i=>i.itemId===singleItem.itemId):b.items.filter(recheckProhibition?pendingProhibitionRefresh:recheckSystemError?isSystemErrorItem:canRecheckVerification);
+    if(singleItem||(!unfinished&&(recheckVerification||recheckSystemError||recheckProhibition))){
+        const items=singleItem?b.items.filter(i=>i.itemId===singleItem.itemId):b.items.filter(recheckProhibition?pendingProhibitionRefresh:recheckSystemError?isSystemErrorItem:canRecheckVerification);
     if(!items.length)return;
     q={id:uid(),kind:singleItem?'single':recheckProhibition?'strict':'verification',state:'running',cursor:0,createdAt:now(),
       entries:items.map(i=>({itemId:i.itemId,revision:i.dataRevision||0,
@@ -1291,8 +1293,7 @@ async function runLoop(bid,{recheckVerification=false,recheckSystemError=false,r
   if(recheckVerification&&(app.saving||app.detailBusy||!b.items.some(canRecheckVerification)))return;
   const resyncIds=resyncCollection?new Set(b.items.filter(i=>canResyncCollection(b,i)).map(i=>i.itemId)):null;
   if(resyncIds&&(!resyncIds.size||app.saving||app.detailBusy))return;
-    // 这里不需要再用 isSystemErrorItem 去筛了，因为上面 startBatch 已经把它们重置为 pending 并存在了。
-  const checkSelection=recheckProhibition?pendingProhibitionRefresh:recheckVerification?canRecheckVerification:null;
+  const checkSelection=recheckProhibition?pendingProhibitionRefresh:recheckSystemError?isSystemErrorItem:recheckVerification?canRecheckVerification:null;
   const scopedIds=resyncIds||(checkSelection?new Set(b.items.filter(checkSelection).map(i=>i.itemId)):null);
   if(checkSelection&&!scopedIds.size)return;
   const scopedItems=()=>scopedIds?b.items.filter(i=>scopedIds.has(i.itemId)):b.items;
@@ -1362,20 +1363,21 @@ async function startBatch(bid,{recheckVerification=false,recheckSystemError=fals
     if(!await checkBackend())return;
     const target=batch(bid);if(!target)return;
     app.resumeAfterSave=null;
-        // ==== 强行清理卡死队列 ====
-    if(recheckSystemError||recheckVerification||singleItem) {
+    // ==== 强行清理卡死队列，并重置异常项 ====
+            if(recheckSystemError||recheckVerification||singleItem) {
         target.workQueue=null; 
         target.runStatus = 'running';
         target.flowVersion = 1;
+        // 强行触发一次 render 确保状态刷新
+        render();
         const targetIds = singleItem ? [singleItem.itemId] : target.items.filter(recheckSystemError?isSystemErrorItem:canRecheckVerification).map(i=>i.itemId);
         targetIds.forEach(id => {
             const item = target.items.find(x=>x.itemId===id);
-                        if(item) {
+            if(item) {
                 item.reviewStatus = 'pending';
                 item.audit = null;
                 item.auditRequestId = null;
-                item.auditNextCheckAt = 0;
-                // 注意：这里绝对不要修改 reason，保留报错文字，流水线才能靠它找到任务
+                item.reason = '正在等待 AI 审核，请稍候';
             }
         });
         await saveData(target);
