@@ -1211,8 +1211,8 @@ async function runWorkQueue(b,{singleItem,recheckVerification,recheckSystemError
     if(q.kind==='single'&&q.entries[0].itemId!==singleItem.itemId)throw new Error('还有单个商品任务未结束，请先接续原任务');
     if(q.kind!=='single')b.suspendedQueue=q;
   }
-    if(singleItem||(!unfinished&&(recheckVerification||recheckSystemError||recheckProhibition))){
-        const items=singleItem?b.items.filter(i=>i.itemId===singleItem.itemId):b.items.filter(recheckProhibition?pendingProhibitionRefresh:recheckSystemError?isSystemErrorItem:canRecheckVerification);
+        if(singleItem||(!unfinished&&(recheckVerification||recheckSystemError||recheckProhibition))){
+        const items=singleItem?b.items.filter(i=>i.itemId===singleItem.itemId):b.items.filter(recheckProhibition?pendingProhibitionRefresh:recheckSystemError?i => ['pending','auditing'].includes(i.reviewStatus) : canRecheckVerification);
     if(!items.length)return;
     q={id:uid(),kind:singleItem?'single':recheckProhibition?'strict':'verification',state:'running',cursor:0,createdAt:now(),
       entries:items.map(i=>({itemId:i.itemId,revision:i.dataRevision||0,
@@ -1287,7 +1287,8 @@ async function runLoop(bid,{recheckVerification=false,recheckSystemError=false,r
   if(recheckVerification&&(app.saving||app.detailBusy||!b.items.some(canRecheckVerification)))return;
   const resyncIds=resyncCollection?new Set(b.items.filter(i=>canResyncCollection(b,i)).map(i=>i.itemId)):null;
   if(resyncIds&&(!resyncIds.size||app.saving||app.detailBusy))return;
-  const checkSelection=recheckProhibition?pendingProhibitionRefresh:recheckSystemError?isSystemErrorItem:recheckVerification?canRecheckVerification:null;
+    // 这里不需要再用 isSystemErrorItem 去筛了，因为上面 startBatch 已经把它们重置为 pending 并存在了。
+  const checkSelection=recheckProhibition?pendingProhibitionRefresh:recheckVerification?canRecheckVerification:null;
   const scopedIds=resyncIds||(checkSelection?new Set(b.items.filter(checkSelection).map(i=>i.itemId)):null);
   if(checkSelection&&!scopedIds.size)return;
   const scopedItems=()=>scopedIds?b.items.filter(i=>scopedIds.has(i.itemId)):b.items;
@@ -1357,13 +1358,11 @@ async function startBatch(bid,{recheckVerification=false,recheckSystemError=fals
     if(!await checkBackend())return;
     const target=batch(bid);if(!target)return;
     app.resumeAfterSave=null;
-    // ==== 强行清理卡死队列，并重置异常项 ====
-            if(recheckSystemError||recheckVerification||singleItem) {
+        // ==== 强行清理卡死队列 ====
+    if(recheckSystemError||recheckVerification||singleItem) {
         target.workQueue=null; 
         target.runStatus = 'running';
         target.flowVersion = 1;
-        // 强行触发一次 render 确保状态刷新
-        render();
         const targetIds = singleItem ? [singleItem.itemId] : target.items.filter(recheckSystemError?isSystemErrorItem:canRecheckVerification).map(i=>i.itemId);
         targetIds.forEach(id => {
             const item = target.items.find(x=>x.itemId===id);
@@ -1371,7 +1370,8 @@ async function startBatch(bid,{recheckVerification=false,recheckSystemError=fals
                 item.reviewStatus = 'pending';
                 item.audit = null;
                 item.auditRequestId = null;
-                item.reason = '正在等待 AI 审核，请稍候';
+                item.auditNextCheckAt = 0; // 允许立即重试
+                // 注意：这里不改 reason，保留报错原因，直到 auditItem 真正启动才会覆盖
             }
         });
         await saveData(target);
