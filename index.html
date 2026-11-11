@@ -610,7 +610,8 @@ async function fetchData({automatic=false}={}) {
   if(app.processing) {render();toast('当前进度已更新，没有重新提交任务');return;}
   if(app.saving||app.detailBusy)return toast('正在保存，完成后再刷新状态');
   if(app.fetching)return;const readEpoch=app.saveEpoch||0;app.fetching=true;
-  $('refreshState').disabled=true;$('refreshState').textContent='刷新中…';renderConnectionState();
+  if (!automatic) { $('refreshState').disabled=true;$('refreshState').textContent='刷新中…'; }
+  renderConnectionState();
   try {
     if(app.pendingSave?.operationId&&app.dataContract===2){
       try{
@@ -650,7 +651,11 @@ async function fetchData({automatic=false}={}) {
     readConnectionFailed(error);
     if(!app.readAt)renderHome();
     throw error;
-  } finally {app.fetching=false;$('refreshState').disabled=false;$('refreshState').textContent='刷新状态';renderConnectionState();}
+  } finally {
+    app.fetching=false;
+    if (!automatic) { $('refreshState').disabled=false;$('refreshState').textContent='刷新状态'; }
+    renderConnectionState();
+  }
 }
 function savedBatchSnapshot(b){const {items=[],...fields}=b;return {fields,items:new Map(items.map(i=>[i.itemId,JSON.stringify(i)]))};}
 function rememberSavedPayload(payload){
@@ -1029,9 +1034,13 @@ function auditWaitingText(i){
  return i.auditReceiptConfirmed ? ' AI 审核中，请稍候' : '正在确认 AI 接收状态';
 }
 function itemReason(i){
-  if(i.reviewStatus==='auditing')return auditWaitingText(i);
+  if(['auditing','pending'].includes(i.reviewStatus)) return '正在等待 AI 审核，请稍候';
   if(i.reviewStatus==='error')return i.auditError?.request_id===i.auditRequestId&&i.auditError?.detail||i.reason||'审核未完成';
   return friendlyAuditReason(i.reason)||'—';
+}
+function isSystemErrorItem(i){
+  const isStuckAuditing = i.reviewStatus === 'auditing' && i.reason && !i.reason.includes('正在等待') && !i.reason.includes('正在确认');
+  return i.collectStatus==='sync_error' || auditIncomplete(i) || i.reviewStatus==='error' || i.reviewStatus==='unconfirmed' || (i.collectStatus==='collected' && i.reviewStatus==='skipped') || isStuckAuditing;
 }
 function friendlyAuditReason(value){
   return text(value).replace(/(?:审核依据待核验：)?审核分项未引用商品原文证据(?:。请核对商品原文及适用政策后复审。?)?/g,MISSING_SOURCE_NOTICE);
