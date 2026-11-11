@@ -590,6 +590,10 @@ function statusSummary(b){
   return `总计 ${c.total} 条 | 可导出 ${c.exportable} 条 | 已淘汰 ${c.excluded+c.risk} 条 | 处理中 ${pending} 条 | 系统异常 ${systemError} 条 | 待人工 ${manual} 条`;
 }
 function itemStatus(i){
+  // 自动诊断：如果状态是审核中，但原因不是等待词，说明是假死，判定为系统异常
+  const isStuckAuditing = i.reviewStatus === 'auditing' && i.reason && !i.reason.includes('正在等待') && !i.reason.includes('正在确认');
+  if(isStuckAuditing) return ['系统异常', 'warn'];
+
   if(pendingProhibitionRefresh(i))return ['系统异常','warn'];
   if(i.reviewStatus==='passed'&&!sellerAuditCurrent(i))return ['系统异常','warn'];
   if(exportCheck(i).ok)return ready(i)?['可导出','pass']:['可导出','pass'];
@@ -798,7 +802,8 @@ function renderItems() {
   $('btnBatchResync').hidden=!resyncCount&&!b.collection?.needsResultSync;
   $('btnBatchResync').disabled=app.processing||!!app.saving||!!app.detailBusy||!!app.adminBusy;
   $('btnBatchResync').textContent=`同步原任务最新结果（${resyncCount}）`;
-    const systemErrorCount=b.items.filter(i => isSystemErrorItem(i) || (i.reviewStatus === 'auditing' && i.reason && !i.reason.includes('正在等待') && !i.reason.includes('正在确认'))).length;
+    // 把假死的商品也算进系统异常里
+  const systemErrorCount = b.items.filter(i => isSystemErrorItem(i) || (i.reviewStatus === 'auditing' && i.reason && !i.reason.includes('正在等待') && !i.reason.includes('正在确认'))).length;
   $('btnBatchRecheck').hidden = !b.items.some(i => isSystemErrorItem(i) || (i.reviewStatus === 'auditing' && i.reason && !i.reason.includes('正在等待')));
   $('btnBatchRecheck').disabled=app.processing||!!app.saving||!!app.detailBusy||!!app.adminBusy;
   $('btnBatchRecheck').textContent=b.workQueue?.kind==='verification'&&b.workQueue.state!=='completed'
@@ -811,7 +816,8 @@ function renderItems() {
   // 只要还有“处理中”的，或者系统没跑完，按钮就一直显示
   const hasRunning = b.items.some(i => i.reviewStatus === 'pending' || i.reviewStatus === 'auditing');
   $('btnRunBatch').hidden = !hasRunning && stage(b) === '已完成';
-  $('btnRunBatch').textContent = (b.runStatus === 'running' || (app.processing && app.activeId === b.id)) ? '暂停处理' : '开始处理';
+    const isRunning = b.runStatus === 'running' || (app.processing && app.activeId === b.id);
+  $('btnRunBatch').textContent = isRunning ? '暂停处理' : '开始处理';
   $('pagination').hidden=pages===1;
   $('btnExportItems').textContent=selected.length?`导出已选(${selected.filter(ready).length})`:`导出本批通过(${c.exportable})`;
   $('btnExportItems').disabled=!(selected.length?selected.some(ready):c.exportable);
@@ -1034,6 +1040,10 @@ function auditWaitingText(i){
  return i.auditReceiptConfirmed ? ' AI 审核中，请稍候' : '正在确认 AI 接收状态';
 }
 function itemReason(i){
+  // 如果商品是假死的，直接显示它原有的AI结论，不要覆盖
+  const isStuckAuditing = i.reviewStatus === 'auditing' && i.reason && !i.reason.includes('正在等待') && !i.reason.includes('正在确认');
+  if (isStuckAuditing) return friendlyAuditReason(i.reason) || 'AI 已返回结论，但状态未同步';
+  
   if(['auditing','pending'].includes(i.reviewStatus)) return '正在等待 AI 审核，请稍候';
   if(i.reviewStatus==='error')return i.auditError?.request_id===i.auditRequestId&&i.auditError?.detail||i.reason||'审核未完成';
   return friendlyAuditReason(i.reason)||'—';
@@ -1376,23 +1386,6 @@ async function startBatch(bid,{recheckVerification=false,recheckSystemError=fals
     scopedRun=!!(singleItem||recheckVerification||recheckSystemError||resyncCollection||recheckProhibition||target.suspendedQueue
       ||(target.workQueue&&target.workQueue.state!=='completed'));
     if(!scopedRun&&target.items.some(i=>i.reviewStatus==='passed'&&!auditCurrent(i)&&!legacyAudit(i))&&!confirm('本批部分资料与原审核不能对应，继续需要重新审核。旧结论会保留。是否继续？'))return;
-    
-    // 强行拯救：只要点击开始，把所有卡在“审核中”但实际没跑的，强制拉回“待处理”
-    if (!app.processing) {
-        let revived = false;
-        target.items.forEach(i => {
-            if (i.reviewStatus === 'auditing') {
-                i.reviewStatus = 'pending';
-                i.auditRequestId = null;
-                i.auditWaitSince = null;
-                i.reason = '等待重新审核';
-                revived = true;
-            }
-        });
-        if (revived) await saveData(target);
-        target.runStatus = 'running'; // 强制设为运行中，让按钮变“暂停处理”
-        await saveData(target);
-    }
     if(!navigator.locks)return toast('此浏览器不支持处理窗口保护，请使用新版Chrome');
     await navigator.locks.request('ebay-workbench-processing-v1',{ifAvailable:true},async lock=>{
       if(!lock)return toast('同一浏览器另一个页面正在处理，此页仅查看');
