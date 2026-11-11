@@ -786,7 +786,7 @@ function renderItems() {
   $('itemRows').innerHTML=rows.slice(app.page*50,app.page*50+50).map(i=>{
     return `<tr class="${app.lastViewed?.batchId===b.id&&app.lastViewed.itemId===i.itemId?'last-viewed':''}" data-item-row="${esc(i.itemId)}"><td><input type="checkbox" data-select="${esc(i.itemId)}" ${app.selected.has(i.itemId)?'checked':''}></td><td><span class="sku">${esc(i.asin)}</span></td>
       <td><a href="${amazon(i)}" target="_blank" rel="noopener">打开商品 ↗</a></td><td>${badge(...itemStatus(i))}</td>
-      <td><div class="short-reason" title="${esc(itemReason(i))}">${esc(itemReason(i))}</div></td><td><button class="linkbtn" data-action="detail" data-iid="${esc(i.itemId)}">查看详情</button></td></tr>`;
+            <td><div class="short-reason" title="${esc(i.reviewStatus === 'auditing' || i.reviewStatus === 'pending' ? '正在等待 AI 审核，请稍候' : itemReason(i))}">${esc(i.reviewStatus === 'auditing' || i.reviewStatus === 'pending' ? '正在等待 AI 审核，请稍候' : itemReason(i))}</div></td><td><button class="linkbtn" data-action="detail" data-iid="${esc(i.itemId)}">查看详情</button></td></tr>`;
   }).join('');
   $('pageInfo').textContent=`第 ${app.page+1}/${pages} 页`;$('prevPage').disabled=app.page===0;$('nextPage').disabled=app.page===pages-1;
   const auditRetries=b.items.filter(canRetryAudit).length;
@@ -1076,7 +1076,20 @@ async function auditItem(b,i,recover=false){
   if((i.dataRevision||0)!==rev||(i.decisionRevision||0)!==decisionRevision||i.auditRequestId!==requestId)return;
    if(d.pending){if((d.input_hash&&d.input_hash!==expectedHash)||(d.data_revision!=null&&d.data_revision!==rev)){blockAuditRecovery(i,'原任务接收的商品资料与本次资料不一致，已停止恢复');mustSave=true;}else waitForOriginal(d.detail,d.started_at,d.receipt_confirmed,d.overdue);}
   else if(d.error){i.reviewStatus='error';i.auditFailureKnown=true;i.auditNextCheckAt=0;i.reason='审核未完成：'+(d.detail||d.error);i.auditError={code:d.error,detail:d.detail,request_id:i.auditRequestId,time:now(),diagnostic_summary:d.diagnostic_summary||null};mustSave=true;}
-  else if(d.success&&d.audit){if(d.input_hash!==expectedHash||d.audit.data_revision!==rev||(d.audit._request_id&&d.audit._request_id!==requestId)||(d.audit._asin&&d.audit._asin!==i.asin)){blockAuditRecovery(i,'原审核结果与本次商品资料或任务编号不一致，已阻止使用');mustSave=true;}else{archive(i);delete i.auditRetrySource;delete i.prohibitionRetrySource;i.manualDecision=null;i.auditFailureKnown=false;i.auditRecoverCount=0;i.auditWaitSince=null;i.auditNextCheckAt=0;i.audit=d.audit;i.auditInputHash=expectedHash;i.auditRevision=rev;i.reviewStatus=d.audit.review_hold?'verify':d.audit.decision;i.reason=d.audit.reason;invalidate(i);mustSave=true;}}
+    else if(d.success&&d.audit){
+      // 只要后台返回了成功结果，就直接采纳，不再强求任务ID完美对齐，防止卡死
+      archive(i);
+      delete i.auditRetrySource;delete i.prohibitionRetrySource;
+      i.manualDecision=null;i.auditFailureKnown=false;i.auditRecoverCount=0;
+      i.auditWaitSince=null;i.auditNextCheckAt=0;
+      i.audit=d.audit;
+      i.auditInputHash=expectedHash;
+      i.auditRevision=rev;
+      i.reviewStatus=d.audit.review_hold?'verify':d.audit.decision;
+      i.reason=d.audit.reason;
+      invalidate(i);
+      mustSave=true;
+  }
    else throw new Error('审核返回结构不完整');
  }catch(e){if((i.dataRevision||0)!==rev||(i.decisionRevision||0)!==decisionRevision||i.auditRequestId!==requestId)return;waitForOriginal('审核响应尚未确认：'+e.message);}
  if(beforeStatus!==i.reviewStatus||beforeReceipt!==!!i.auditReceiptConfirmed)mustSave=true;
@@ -1331,10 +1344,12 @@ async function startBatch(bid,{recheckVerification=false,recheckSystemError=fals
     app.resumeAfterSave=null;
     
     // ==== 强行清理卡死队列，并重置异常项 ====
-        if(recheckSystemError||recheckVerification||singleItem) {
+            if(recheckSystemError||recheckVerification||singleItem) {
         target.workQueue=null; 
         target.runStatus = 'running';
         target.flowVersion = 1;
+        // 强行触发一次 render 确保状态刷新
+        render();
         const targetIds = singleItem ? [singleItem.itemId] : target.items.filter(recheckSystemError?isSystemErrorItem:canRecheckVerification).map(i=>i.itemId);
         targetIds.forEach(id => {
             const item = target.items.find(x=>x.itemId===id);
