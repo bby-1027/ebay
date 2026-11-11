@@ -561,7 +561,8 @@ function stage(b) {
   if(!b.items.length) return '无商品';
   if(b.runStatus==='queued')return '等待中';
   const running=b.items.some(i=>['pending','collecting'].includes(i.collectStatus) || ['pending','auditing'].includes(i.reviewStatus) || (i.reviewStatus==='passed' && ['pending','processing'].includes(i.copyStatus)));
-  if(running && (b.runStatus==='running'||b.runStatus===undefined||b.runStatus==='idle')) return '处理中';
+  // 只要列表里有任何状态是处理中的，首页必定显示处理中
+  if(running) return '处理中';
   return '已完成';
 }
 function progress(b) {const c=counts(b);return `采集结束 ${c.collectEnded}/${c.total}（成功${c.collected}） · 审核 ${c.auditEligible?c.audited+'/'+c.auditEligible:'无需处理'} · 文案 ${c.passed?c.copyEnded+'/'+c.passed:'无需处理'}`;}
@@ -1182,7 +1183,7 @@ async function runWorkQueue(b,{singleItem,recheckVerification,recheckSystemError
     if(q.kind==='single'&&q.entries[0].itemId!==singleItem.itemId)throw new Error('还有单个商品任务未结束，请先接续原任务');
     if(q.kind!=='single')b.suspendedQueue=q;
   }
-  if(singleItem||(!unfinished&&(recheckVerification||recheckProhibition))){
+    if(singleItem||(!unfinished&&(recheckVerification||recheckSystemError||recheckProhibition))){
         const items=singleItem?b.items.filter(i=>i.itemId===singleItem.itemId):b.items.filter(recheckProhibition?pendingProhibitionRefresh:recheckSystemError?isSystemErrorItem:canRecheckVerification);
     if(!items.length)return;
     q={id:uid(),kind:singleItem?'single':recheckProhibition?'strict':'verification',state:'running',cursor:0,createdAt:now(),
@@ -1334,11 +1335,12 @@ async function startBatch(bid,{recheckVerification=false,recheckSystemError=fals
         target.workQueue=null; 
         const targetIds = singleItem ? [singleItem.itemId] : target.items.filter(recheckSystemError?isSystemErrorItem:canRecheckVerification).map(i=>i.itemId);
         targetIds.forEach(id => {
-            const item = target.items.find(x=>x.itemId===id);
+                        const item = target.items.find(x=>x.itemId===id);
             if(item) {
                 item.reviewStatus = 'pending';
                 item.audit = null;
                 item.auditRequestId = null;
+                item.reason = '等待重新审核';
             }
         });
         await saveData(target);
