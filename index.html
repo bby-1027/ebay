@@ -1849,7 +1849,7 @@ async function init() {
   $('detailConfirmSave').onclick=()=>{if(externalFormDirty())fail(saveExternalReview().then(saved=>{if(saved){$('detailConfirmDialog').close();$('detailDialog').close();}}));else fail(detailAction('manual-save'));};
   $('detailConfirmDiscard').onclick=()=>{if(!app.detailBusy){detailDirty=false;$('detailConfirmDialog').close();$('detailDialog').close();}};
   $('detailConfirmContinue').onclick=()=>{if(!app.detailBusy)$('detailConfirmDialog').close();};
-  $('btnRunBatch').onclick=()=>{const b=batch(app.currentBatchId);if(b)fail(app.processing&&app.activeId===b.id?setPaused():startBatch(b.id,{recheckProhibition:stage(b)==='需要复审'&&b.items.some(pendingProhibitionRefresh)}));};$('btnBatchRetry').onclick=()=>fail(retryFailures());
+  $('btnRunBatch').onclick=()=>{const b=batch(app.currentBatchId);if(b)fail(app.processing&&app.activeId===b.id?setPaused():startBatch(b.id,{recheckProhibition:stage(b)==='需要复审'&&b.items.some(pendingProhibitionRefresh)}));};
   $('btnBatchResync').onclick=()=>fail(syncOriginalCollection(app.currentBatchId));
     $('btnBatchRecheck').onclick=()=>fail(startBatch(app.currentBatchId,{recheckSystemError:true}));
   $('btnStrictReview').onclick=()=>fail(startBatch(app.currentBatchId,{recheckProhibition:true}));
