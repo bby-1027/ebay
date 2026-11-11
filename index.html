@@ -1025,7 +1025,7 @@ function auditElapsedMs(i,serverStartedAt){
  return stamps.length?Math.max(0,nowMs-Math.min(...stamps)):0;
 }
 function auditWaitingText(i){
- return i.auditReceiptConfirmed ? 'AI审核中，请稍候' : '正在确认 AI 接收状态';
+ return i.auditReceiptConfirmed ? ' AI 审核中，请稍候' : '正在确认 AI 接收状态';
 }
 function itemReason(i){
   if(i.reviewStatus==='auditing')return auditWaitingText(i);
@@ -1320,30 +1320,32 @@ async function startBatch(bid,{recheckVerification=false,recheckSystemError=fals
   if(app.adminBusy)return toast('批次管理正在保存，请稍候再开始任务');
   if(app.processing||app.starting)return toast('已有任务在处理，请等待或暂停');
   if(app.saving||app.detailBusy)return toast('正在保存，请稍候');
-  // 点击重试系统异常时，强行打断卡死的旧队列，让新任务进来
-  if(recheckSystemError) {
-    const target = batch(bid);
-    if (target && target.workQueue) {
-      target.workQueue = null;
-    }
-  }
   app.starting=true;
-  let scopedRun=true;
-  try{
-  if(!app.readAt)await loadWorkbench();
-  if(app.stopping){await fetchData();if(app.stopping)return;}
-  if(!await checkBackend())return;
-  const target=batch(bid);if(!target)return;
-  app.resumeAfterSave=null;
-  scopedRun=!!(singleItem||recheckVerification||resyncCollection||recheckProhibition||target.suspendedQueue
-    ||(target.workQueue&&target.workQueue.state!=='completed'));
-  if(!scopedRun&&target.items.some(i=>i.reviewStatus==='passed'&&!auditCurrent(i)&&!legacyAudit(i))&&!confirm('本批部分资料与原审核不能对应，继续需要重新审核。旧结论会保留。是否继续？'))return;
-  if(!navigator.locks)return toast('此浏览器不支持处理窗口保护，请使用新版Chrome');
-  await navigator.locks.request('ebay-workbench-processing-v1',{ifAvailable:true},async lock=>{
-    if(!lock)return toast('同一浏览器另一个页面正在处理，此页仅查看');
-      try{await runLoop(bid,{recheckVerification,recheckSystemError,resyncCollection,recheckProhibition,singleItem});}catch(e){toast('处理已暂停：'+e.message);}
-  });
-  }finally{app.starting=false;render();}
+  try {
+    if(recheckSystemError||recheckVerification||singleItem) {
+        const b=batch(bid);
+        if(b) {
+            b.workQueue=null; 
+            const targetIds = singleItem ? [singleItem.itemId] : b.items.filter(recheckSystemError?isSystemErrorItem:canRecheckVerification).map(i=>i.itemId);
+            targetIds.forEach(id => {
+                const item = b.items.find(x=>x.itemId===id);
+                if(item) {
+                    item.reviewStatus = 'pending';
+                    item.audit = null;
+                    item.auditRequestId = null;
+                }
+            });
+            await saveData(b);
+        }
+    }
+    await runLoop(bid,{recheckVerification,recheckSystemError,resyncCollection,recheckProhibition,singleItem});
+  } catch(e){
+      toast('处理已暂停：'+e.message);
+  } finally {
+      app.starting=false;
+      render();
+  }
+}
   if(['completed','waiting_review','blocked'].includes(batch(bid)?.runStatus)&&!app.stopping){const queued=app.batches.find(b=>b.runStatus==='queued');if(queued)await startBatch(queued.id);}
 }
 async function queueVerification(b,prohibition=false){
@@ -1501,8 +1503,8 @@ function openDetail(iid,{preserveNavigation=false}={}) {
     ...(Array.isArray(a.required_checks_not_completed)?a.required_checks_not_completed:[])
   ])]:[];
   let html=`<div class="review-layout"><section class="product-column"><div class="detail-tabs" role="tablist"><button id="sourceTab" role="tab" data-action="tab-source">采集资料</button><button id="copyTab" role="tab" data-action="tab-copy" ${i.copyData?'':'disabled'}>清理后文案</button></div><div id="detailSource"></div></section>
-    <section class="review-column"><div class="review-card"><div class="review-card-head"><h4>${conclusion?(manual?'AI 原始结论':a.model_called===false?'规则审核结论':'AI 审核结论'):i.reviewStatus==='error'?'系统审核异常':'审核任务'}</h4>${badge(...resultBadge)}</div>${field('具体理由',conclusion?friendlyAuditReason(a.reason||i.reason||'等待处理'):itemReason(i))}`;
-  if(manual)html+=`<div class="field"><div class="label">人工最终结论</div>${manual.decision==='passed'?badge('通过','pass'):badge('淘汰','err')}</div><div class="review-note"><label for="manualStatus">人工处理</label><select id="manualStatus" class="manual-status-select"><option value="passed" ${manual.decision==='passed'?'selected':!canManualPass(i)?'disabled':''}>通过</option><option value="excluded" ${manual.decision==='excluded'?'selected':''}>淘汰</option></select></div>`;
+    <section class="review-column"><div class="review-card"><div class="review-card-head"><h4>审核状态</h4>${badge(...resultBadge)}</div>${field('具体理由',conclusion?friendlyAuditReason(a.reason||i.reason||'等待处理'):itemReason(i))}`;
+  if(manual)html+=`<div class="review-note"><label for="manualStatus">人工处理</label><select id="manualStatus" class="manual-status-select"><option value="passed" ${manual.decision==='passed'?'selected':!canManualPass(i)?'disabled':''}>通过</option><option value="excluded" ${manual.decision==='excluded'?'selected':''}>淘汰</option></select></div>`;
   if(i.reviewStatus==='skipped')html+='<p class="muted">资料不足，未调用AI。</p>';
   if(currentResult&&a.prohibited_recheck_incomplete)html+=`<p class="danger-text" role="note">${manual?'原 AI 提醒：复查后仍未给出禁售与限售结论。':'AI 复查后仍未完成禁售与限售检查，暂不能通过或导出，请重新审核。'}</p>`;
   if(currentResult&&a.manual_approval_blocked&&!a.prohibited_recheck_incomplete&&i.reviewStatus==='verify')html+='<p class="danger-text" role="note">AI 提出了尚未解决的风险，当前不能人工通过。请重新审核或淘汰。</p>';
