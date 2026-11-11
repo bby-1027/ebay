@@ -140,7 +140,7 @@ var o=[];var l=Array.isArray(e);for(f=n.s.c;f<=n.e.c;++f)s[f]=ya(f);for(var c=n.
   <div class="batch-heading"><div class="left"><button id="backHomeBtn">← 返回</button><h2 id="currentBatchName"></h2></div><div class="right"><button id="btnRunBatch" class="primary">开始处理</button><button id="btnExportItems">导出通过</button><details class="options-menu"><summary>更多</summary><div><button id="renameBatch">重命名批次</button><button id="btnExportFailures">导出失败清单</button></div></details></div></div>
   <p id="batchProgress" class="batch-meta"></p><p id="collectionSummary" class="batch-meta" style="white-space:normal;line-height:1.7"></p><p id="exportReason" class="batch-meta"></p>
   <div class="card">
-    <div class="toolbar"><div class="batch-retry-actions"><button id="btnBatchRetry" hidden>重试失败项</button><button id="btnBatchResync" hidden>重同步本次采集</button><button id="btnBatchRecheck" hidden>批量重审待核验</button><button id="btnStrictReview" hidden>复审旧版已通过</button></div><div style="display:flex;gap:10px"><input id="searchInput" class="search-input" placeholder="搜索SKU，多个用空格或逗号分隔"><select id="filterStatus" class="search-input" style="width:140px"><option value="all">全部商品</option><option value="attention">需要处理</option><option value="ready">可导出</option><option value="rejected">未通过</option></select></div></div>
+    <div class="toolbar"><div class="batch-retry-actions"><button id="btnBatchResync" hidden>重同步本次采集</button><button id="btnBatchRecheck" hidden>批量重审待核验</button><button id="btnStrictReview" hidden>复审旧版已通过</button></div><div style="display:flex;gap:10px"><input id="searchInput" class="search-input" placeholder="搜索SKU，多个用空格或逗号分隔"><select id="filterStatus" class="search-input" style="width:140px"><option value="all">全部商品</option><option value="attention">需要处理</option><option value="ready">可导出</option><option value="rejected">未通过</option></select></div></div>
     <div class="selection-strip"><span id="selectionInfo"></span><button class="linkbtn" id="selectAllFiltered" hidden>选择全部筛选结果</button><button class="linkbtn" id="clearSelection" hidden>取消选择</button></div>
     <div class="tablewrap"><table><thead><tr><th style="width:40px"><input type="checkbox" id="selectPage" aria-label="全选本页"></th><th>SKU</th><th>Amazon链接</th><th>状态</th><th>原因</th><th>操作</th></tr></thead><tbody id="itemRows"></tbody></table></div>
     <div class="subtoolbar" id="pagination"><button id="prevPage">上一页</button><span id="pageInfo"></span><button id="nextPage">下一页</button></div>
@@ -790,9 +790,6 @@ function renderItems() {
   }).join('');
   $('pageInfo').textContent=`第 ${app.page+1}/${pages} 页`;$('prevPage').disabled=app.page===0;$('nextPage').disabled=app.page===pages-1;
   const auditRetries=b.items.filter(canRetryAudit).length;
-  $('btnBatchRetry').hidden=!b.items.some(i=>hasFailure(i)&&!canResyncCollection(b,i));
-  $('btnBatchRetry').disabled=app.processing||!!app.saving;
-  $('btnBatchRetry').textContent=auditRetries&&auditRetries===c.failures?`批量重试审核（${auditRetries}）`:'处理本批失败项';
   $('btnBatchResync').hidden=!resyncCount&&!b.collection?.needsResultSync;
   $('btnBatchResync').disabled=app.processing||!!app.saving||!!app.detailBusy||!!app.adminBusy;
   $('btnBatchResync').textContent=`同步原任务最新结果（${resyncCount}）`;
@@ -1335,12 +1332,12 @@ async function startBatch(bid,{recheckVerification=false,recheckSystemError=fals
         target.workQueue=null; 
         const targetIds = singleItem ? [singleItem.itemId] : target.items.filter(recheckSystemError?isSystemErrorItem:canRecheckVerification).map(i=>i.itemId);
         targetIds.forEach(id => {
-                        const item = target.items.find(x=>x.itemId===id);
+                    const item = target.items.find(x=>x.itemId===id);
             if(item) {
                 item.reviewStatus = 'pending';
                 item.audit = null;
                 item.auditRequestId = null;
-                item.reason = '等待重新审核';
+                item.reason = '正在等待 AI 审核，请稍候';
             }
         });
         await saveData(target);
