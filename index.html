@@ -534,7 +534,11 @@ function manualSuggestion(i){
 }
 function canRecheckVerification(i){return i.collectStatus==='collected'&&needsManual(i);}
 function isSystemErrorItem(i) {
-  const isFakePending = ['pending', 'auditing'].includes(i.reviewStatus) && i.reason && !i.reason.includes('正在等待') && !i.reason.includes('正在确认');
+  const isFakePending = ['pending', 'auditing'].includes(i.reviewStatus) && 
+    i.reason && 
+    !i.reason.includes('正在等待') && 
+    !i.reason.includes('正在确认') &&
+    !i.reason.includes('正在提交');
   return isFakePending || i.collectStatus === 'sync_error' || auditIncomplete(i) || i.reviewStatus === 'error' || i.reviewStatus === 'unconfirmed' || (i.collectStatus === 'collected' && i.reviewStatus === 'skipped');
 }
 function hasFailure(i) {return ['error','sync_error'].includes(i.collectStatus)||['error','unconfirmed'].includes(i.reviewStatus)||i.copyStatus==='error';}
@@ -1070,7 +1074,7 @@ async function auditItem(b,i,recover=false){
   const expectedHash=await auditInputHash(fields,i.asin,rev,note);
   if((i.dataRevision||0)!==rev||(i.decisionRevision||0)!==decisionRevision)return;
   if(!recover&&(b.runStatus==='paused'||app.stopping))return;
- if(!recover){i.reviewStatus='auditing';i.reason='正在提交审核';i.auditRequestId=uid();i.auditWaitSince=now();i.auditNextCheckAt=0;i.auditReceiptConfirmed=false;i.auditRecoveryBlocked=false;i.auditRequestHash=expectedHash;i.auditRequestReviewNote=note;await saveData(b);}
+  if(!recover){i.reviewStatus='auditing';i.reason='正在等待 AI 审核，请稍候';i.auditRequestId=uid();i.auditWaitSince=now();i.auditNextCheckAt=0;i.auditReceiptConfirmed=false;i.auditRecoveryBlocked=false;i.auditRequestHash=expectedHash;i.auditRequestReviewNote=note;await saveData(b);}
    if(recover&&(!i.auditRequestId||(i.auditRequestHash&&i.auditRequestHash!==expectedHash))){blockAuditRecovery(i,'原任务编号缺失或商品资料已经变化，不能使用旧审核结果');await saveData(b);return;}
   const requestId=i.auditRequestId;
   const changedClock=!Number.isFinite(Date.parse(i.auditWaitSince))||Date.parse(i.auditWaitSince)>Date.now();
@@ -1212,7 +1216,7 @@ async function runWorkQueue(b,{singleItem,recheckVerification,recheckSystemError
     if(q.kind!=='single')b.suspendedQueue=q;
   }
         if(singleItem||(!unfinished&&(recheckVerification||recheckSystemError||recheckProhibition))){
-        const items=singleItem?b.items.filter(i=>i.itemId===singleItem.itemId):b.items.filter(recheckProhibition?pendingProhibitionRefresh:recheckSystemError?i => ['pending','auditing'].includes(i.reviewStatus) : canRecheckVerification);
+                const items=singleItem?b.items.filter(i=>i.itemId===singleItem.itemId):b.items.filter(recheckProhibition?pendingProhibitionRefresh:recheckSystemError?isSystemErrorItem:canRecheckVerification);
     if(!items.length)return;
     q={id:uid(),kind:singleItem?'single':recheckProhibition?'strict':'verification',state:'running',cursor:0,createdAt:now(),
       entries:items.map(i=>({itemId:i.itemId,revision:i.dataRevision||0,
@@ -1366,12 +1370,12 @@ async function startBatch(bid,{recheckVerification=false,recheckSystemError=fals
         const targetIds = singleItem ? [singleItem.itemId] : target.items.filter(recheckSystemError?isSystemErrorItem:canRecheckVerification).map(i=>i.itemId);
         targetIds.forEach(id => {
             const item = target.items.find(x=>x.itemId===id);
-            if(item) {
+                        if(item) {
                 item.reviewStatus = 'pending';
                 item.audit = null;
                 item.auditRequestId = null;
-                item.auditNextCheckAt = 0; // 允许立即重试
-                // 注意：这里不改 reason，保留报错原因，直到 auditItem 真正启动才会覆盖
+                item.auditNextCheckAt = 0;
+                // 注意：这里绝对不要修改 reason，保留报错文字，流水线才能靠它找到任务
             }
         });
         await saveData(target);
