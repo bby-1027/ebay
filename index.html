@@ -590,9 +590,9 @@ function statusSummary(b){
   return `总计 ${c.total} 条 | 可导出 ${c.exportable} 条 | 已淘汰 ${c.excluded+c.risk} 条 | 处理中 ${pending} 条 | 系统异常 ${systemError} 条 | 待人工 ${manual} 条`;
 }
 function itemStatus(i){
-  // 自动诊断：如果状态是审核中，但原因不是等待词，说明是假死，判定为系统异常
-  const isStuckAuditing = i.reviewStatus === 'auditing' && i.reason && !i.reason.includes('正在等待') && !i.reason.includes('正在确认');
-  if(isStuckAuditing) return ['系统异常', 'warn'];
+  // 诊断假死：只要状态是审核中/待处理，但原因里已经出现了结论文字（非等待词），判定为系统异常
+  const isFakePending = ['pending','auditing'].includes(i.reviewStatus) && i.reason && !i.reason.includes('正在等待') && !i.reason.includes('正在确认');
+  if(isFakePending) return ['系统异常', 'warn'];
 
   if(pendingProhibitionRefresh(i))return ['系统异常','warn'];
   if(i.reviewStatus==='passed'&&!sellerAuditCurrent(i))return ['系统异常','warn'];
@@ -603,7 +603,7 @@ function itemStatus(i){
   if(['excluded','not_selected'].includes(i.reviewStatus))return ['已淘汰','err'];
   if(i.reviewStatus==='unconfirmed'||auditIncomplete(i)||i.reviewStatus==='error')return ['系统异常','warn'];
   if(needsManual(i))return ['待人工','warn'];
-  if(i.reviewStatus==='auditing'||i.reviewStatus==='pending')return ['处理中','run'];
+  if(['auditing','pending'].includes(i.reviewStatus))return ['处理中','run'];
   if(i.reviewStatus==='passed')return i.copyStatus==='completed'?['可导出','pass']:i.copyStatus==='error'?['系统异常','err']:['处理中','run'];
   return ['处理中','gray'];
 }
@@ -803,7 +803,10 @@ function renderItems() {
   $('btnBatchResync').disabled=app.processing||!!app.saving||!!app.detailBusy||!!app.adminBusy;
   $('btnBatchResync').textContent=`同步原任务最新结果（${resyncCount}）`;
     // 把假死的商品也算进系统异常里
-  const systemErrorCount = b.items.filter(i => isSystemErrorItem(i) || (i.reviewStatus === 'auditing' && i.reason && !i.reason.includes('正在等待') && !i.reason.includes('正在确认'))).length;
+    const systemErrorCount = b.items.filter(i => 
+      isSystemErrorItem(i) || 
+      (['pending','auditing'].includes(i.reviewStatus) && i.reason && !i.reason.includes('正在等待') && !i.reason.includes('正在确认'))
+  ).length;
   $('btnBatchRecheck').hidden = !b.items.some(i => isSystemErrorItem(i) || (i.reviewStatus === 'auditing' && i.reason && !i.reason.includes('正在等待')));
   $('btnBatchRecheck').disabled=app.processing||!!app.saving||!!app.detailBusy||!!app.adminBusy;
   $('btnBatchRecheck').textContent=b.workQueue?.kind==='verification'&&b.workQueue.state!=='completed'
@@ -1040,9 +1043,8 @@ function auditWaitingText(i){
  return i.auditReceiptConfirmed ? ' AI 审核中，请稍候' : '正在确认 AI 接收状态';
 }
 function itemReason(i){
-  // 如果商品是假死的，直接显示它原有的AI结论，不要覆盖
-  const isStuckAuditing = i.reviewStatus === 'auditing' && i.reason && !i.reason.includes('正在等待') && !i.reason.includes('正在确认');
-  if (isStuckAuditing) return friendlyAuditReason(i.reason) || 'AI 已返回结论，但状态未同步';
+  const isFakePending = ['pending','auditing'].includes(i.reviewStatus) && i.reason && !i.reason.includes('正在等待') && !i.reason.includes('正在确认');
+  if (isFakePending) return friendlyAuditReason(i.reason) || 'AI 已返回结论，但状态未同步';
   
   if(['auditing','pending'].includes(i.reviewStatus)) return '正在等待 AI 审核，请稍候';
   if(i.reviewStatus==='error')return i.auditError?.request_id===i.auditRequestId&&i.auditError?.detail||i.reason||'审核未完成';
@@ -1361,7 +1363,6 @@ async function startBatch(bid,{recheckVerification=false,recheckSystemError=fals
     if(!await checkBackend())return;
     const target=batch(bid);if(!target)return;
     app.resumeAfterSave=null;
-    
     // ==== 强行清理卡死队列，并重置异常项 ====
             if(recheckSystemError||recheckVerification||singleItem) {
         target.workQueue=null; 
@@ -1382,6 +1383,23 @@ async function startBatch(bid,{recheckVerification=false,recheckSystemError=fals
         await saveData(target);
     }
     // ========================
+
+        // 强行拯救：只要点击开始，把所有卡住的、带旧原因的，强制拉回干净的待处理状态
+    if (!app.processing) {
+        let revived = false;
+        target.items.forEach(i => {
+            if (['pending','auditing'].includes(i.reviewStatus) && i.reason && !i.reason.includes('正在等待')) {
+                i.reviewStatus = 'pending';
+                i.auditRequestId = null;
+                i.auditWaitSince = null;
+                i.reason = '等待重新审核';
+                revived = true;
+            }
+        });
+        if (revived) await saveData(target);
+        target.runStatus = 'running'; 
+        await saveData(target);
+    }
 
     scopedRun=!!(singleItem||recheckVerification||recheckSystemError||resyncCollection||recheckProhibition||target.suspendedQueue
       ||(target.workQueue&&target.workQueue.state!=='completed'));
