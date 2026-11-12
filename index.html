@@ -763,15 +763,28 @@ function briefProgress(b,{compact=false}={}){const c=counts(b);
   if(b.items.some(i=>i.reviewStatus==='passed'&&['pending','processing'].includes(i.copyStatus)))return `文案 ${c.copyEnded}/${c.passed}`+notes;
   return `自动处理已结束 · 有效资料 ${c.collected-c.screened}/${c.total} · 采集失败 ${b.items.filter(i=>i.collectStatus==='error').length} · 资料不足 ${c.screened}`+notes;}
 function statusSummary(b){
-  const labels=['等待中','处理中','已暂停','可导出','已淘汰','系统异常','待人工'];
+  const labels=['等待中','待审核','审核中','处理中','已暂停','可导出','已淘汰','系统异常','待人工'];
   const totals=Object.fromEntries(labels.map(label=>[label,0]));
   b.items.forEach(i=>totals[itemStatus(i,b)[0]]++);
   return '总计 '+b.items.length+' 条'+labels.filter(label=>totals[label]).map(label=>' | '+label+' '+totals[label]+' 条').join('');
+}
+function queuedRecoveryEntry(i,b){
+  const q=b?.workQueue;
+  if(!q?.retrySystemErrors||!['running','paused'].includes(q.state))return null;
+  const index=q.entries.findIndex(entry=>entry.itemId===i.itemId&&!entry.completedAt&&entry.revision===(i.dataRevision||0));
+  return index>=q.cursor?q.entries[index]:null;
 }
 function itemStatus(i,b){
   b??=app.batches.find(batch=>batch.items?.some(row=>row.itemId===i.itemId));
   if(i.reviewStatus==='skipped')return ['已淘汰','gray'];
   if(['excluded','not_selected'].includes(i.reviewStatus))return ['已淘汰','err'];
+  const recovery=queuedRecoveryEntry(i,b);
+  if(recovery){
+    if(b?.runStatus==='paused')return ['已暂停','warn'];
+    if(!recovery.prepared||i.reviewStatus==='pending')return ['待审核','gray'];
+    if(i.reviewStatus==='auditing')return ['审核中','run'];
+    if(['collect_sync','copy'].includes(recovery.action))return ['处理中','run'];
+  }
   if(manualPassCurrent(i)&&confirmedBlocker(i))return ['待人工','warn'];
   if(exportCheck(i).ok)return ['可导出','pass'];
   if(systemIssue(i))return ['系统异常','warn'];
@@ -1212,6 +1225,16 @@ function auditWaitingText(i){
 }
 function itemReason(i,b){
   if(i.reviewStatus==='skipped')return '资料不足，无法完成商品审核';
+  const recovery=queuedRecoveryEntry(i,b);
+  if(recovery){
+    if(b?.runStatus==='paused')return '重试任务已暂停，恢复后继续处理原队列';
+    if(!recovery.prepared||i.reviewStatus==='pending')return {
+      collect_sync:'等待查询原采集结果',retrieve:'等待查询原审核结果',reaudit:'等待补审缺项',copy:'等待重新清理文案'
+    }[recovery.action]||'等待审核';
+    if(i.reviewStatus==='auditing')return auditWaitingText(i);
+    if(recovery.action==='collect_sync')return '正在查询原采集结果';
+    if(recovery.action==='copy')return '正在重新清理文案';
+  }
   const issue=systemIssue(i);if(issue)return issue.message;
   if(manualPassCurrent(i)&&confirmedBlocker(i))return '人工通过与已确认的商品阻断事实冲突，禁止导出';
   if(b?.runStatus==='paused'&&['pending','auditing'].includes(i.reviewStatus))return '已暂停；恢复后从原任务继续';
@@ -1400,6 +1423,9 @@ async function runWorkQueue(b,{singleItem,recheckVerification,recheckSystemError
       (b.workQueueHistory??=[]).push({...q,state:'superseded',supersededAt:now(),
         note:'旧队列已结束或未能处理当前异常；保留记录，按商品当前状态建立恢复队列'});
       q=null;
+    }else{
+      if(b.suspendedQueue)throw new Error('还有尚未完成的暂停队列，请先完成当前队列再重试系统异常');
+      b.suspendedQueue=q;q=null;
     }
   }
   const unfinished=q&&q.state!=='completed';
@@ -1413,7 +1439,8 @@ async function runWorkQueue(b,{singleItem,recheckVerification,recheckSystemError
         const items=singleItem?b.items.filter(i=>i.itemId===singleItem.itemId):b.items.filter(recheckProhibition?pendingProhibitionRefresh
           :recheckSystemError?i=>{const action=recoveryAction(i,b);return !!action&&action!=='blocked';}:canRecheckVerification);
     if(!items.length){toast('当前没有可安全自动恢复的商品，请查看各 SKU 的具体原因');return;}
-    q={id:uid(),kind:singleItem?'single':recheckProhibition?'strict':'verification',state:'running',cursor:0,createdAt:now(),
+    q={id:uid(),kind:singleItem?'single':recheckProhibition?'strict':'verification',retrySystemErrors:!!recheckSystemError,
+      state:'running',cursor:0,createdAt:now(),
       entries:items.map(i=>({itemId:i.itemId,revision:i.dataRevision||0,
         action:singleItem?.action||(recheckSystemError?recoveryAction(i,b)
           :!recheckProhibition&&copyAuthorized(i)&&i.copyStatus==='verify'?'copy':'reaudit')}))};
@@ -1712,7 +1739,7 @@ function detailNavigationFooter(){
 function renderDetailFooter(i){const busy=!!app.detailBusy,blocked=busy||app.processing;
   const retry=recoveryAction(i,batch()),retryButtons={collect_sync:'查询原采集结果',retrieve:'查询原审核结果',reaudit:'补审缺项',copy:'重新清理文案'};
   const retryAction={collect_sync:'sync-original',retrieve:'retrieve',reaudit:'reaudit',copy:'recopy'}[retry];
-  const actions=systemIssue(i)?retryAction?`<button class="primary" data-action="${retryAction}" ${blocked?'disabled':''}>${retryButtons[retry]}</button>`:'':existingManual(i)?`<button class="primary" data-action="manual-save" ${blocked?'disabled':''}>保存</button>`
+  const actions=queuedRecoveryEntry(i,batch())?'':systemIssue(i)?retryAction?`<button class="primary" data-action="${retryAction}" ${blocked?'disabled':''}>${retryButtons[retry]}</button>`:'':existingManual(i)?`<button class="primary" data-action="manual-save" ${blocked?'disabled':''}>保存</button>`
     :i.reviewStatus==='verify'?`<button class="primary" data-action="manual-pass" ${blocked||!canManualPass(i)?'disabled':''}>通过</button><button data-action="manual-exclude" ${blocked?'disabled':''}>淘汰</button>`
     :needsManual(i)?`<button class="primary" data-action="manual-pass" ${blocked||!canManualPass(i)?'disabled':''}>人工通过</button><button data-action="manual-exclude" ${blocked?'disabled':''}>淘汰</button>`
     :i.reviewStatus==='excluded'&&canManualPass(i)?`<button data-action="manual-pass" ${blocked?'disabled':''}>人工通过</button>`:ready(i)?'':'';
@@ -1729,7 +1756,7 @@ function openDetail(iid,{preserveNavigation=false}={}) {
   app.lastViewed={batchId:b.id,itemId:iid};renderItems();
   $('dtTitle').textContent=i.asin;$('dtStatus').textContent=itemStatus(i,b)[0];$('dtStatus').className='badge b-'+itemStatus(i,b)[1];
   $('detailMeta').innerHTML=`<span>品牌：<strong>${esc(brandOf(i)||'未提供')}</strong></span><a href="${amazon(i)}" target="_blank" rel="noopener">Amazon ↗</a>`;
-  const a=i.audit||{},issue=systemIssue(i),currentResult=hasCurrentDisplayedAudit(i);
+  const a=i.audit||{},issue=queuedRecoveryEntry(i,b)?null:systemIssue(i),currentResult=hasCurrentDisplayedAudit(i);
   const manual=existingManual(i);
   const conclusion=currentResult&&(i.reviewStatus!=='passed'||sellerAuditCurrent(i));
   const aiDecision=conclusion&&i.manualDecision?a.decision:i.reviewStatus;
