@@ -116,7 +116,7 @@ dialog[open]{display:flex;flex-direction:column;width:760px;overflow:hidden}dial
   <div class="batch-heading"><div class="left"><button id="backHomeBtn">← 返回</button><h2 id="currentBatchName"></h2></div><div class="right"><button id="btnRunBatch" class="primary">开始处理</button><button id="btnExportItems">导出通过</button><details class="options-menu" id="batchMore"><summary>更多</summary><div><button id="renameBatch">重命名批次</button><button id="btnExportFailures">导出失败清单</button></div></details></div></div>
   <p id="batchProgress" class="batch-meta"></p>
   <div class="card">
-    <div class="toolbar"><div class="batch-retry-actions"><button id="btnBatchRecheck" hidden>重试系统异常</button><button id="btnStrictReview" hidden>复审旧版已通过</button></div><div style="display:flex;gap:10px"><input id="searchInput" class="search-input" placeholder="搜索SKU，多个用空格或逗号分隔"><select id="filterStatus" class="search-input" style="width:140px"><option value="all">全部商品</option><option value="waiting">等待中</option><option value="running">处理中</option><option value="paused">已暂停</option><option value="ready">可导出</option><option value="rejected">已淘汰</option><option value="error">系统异常</option><option value="manual">待人工</option></select></div></div>
+    <div class="toolbar"><div class="batch-retry-actions"><button id="btnBatchRecheck" hidden>重试系统异常</button><button id="btnStrictReview" hidden>复审旧版已通过</button></div><div style="display:flex;gap:10px"><input id="searchInput" class="search-input" placeholder="搜索SKU，多个用空格或逗号分隔"><select id="filterStatus" class="search-input" style="width:140px"><option value="all">全部商品</option><option value="work">待处理</option><option value="manual">待人工</option><option value="ready">可导出</option><option value="rejected">已淘汰</option><option value="error">系统异常</option></select></div></div>
     <div class="selection-strip"><span id="selectionInfo"></span><button class="linkbtn" id="selectAllFiltered" hidden>选择全部筛选结果</button><button class="linkbtn" id="clearSelection" hidden>取消选择</button></div>
     <div class="tablewrap"><table><thead><tr><th style="width:40px"><input type="checkbox" id="selectPage" aria-label="全选本页"></th><th>SKU</th><th>Amazon链接</th><th>状态</th><th>原因</th><th>操作</th></tr></thead><tbody id="itemRows"></tbody></table></div>
     <div class="subtoolbar" id="pagination"><button id="prevPage">上一页</button><span id="pageInfo"></span><button id="nextPage">下一页</button></div>
@@ -307,6 +307,10 @@ async function maintainConnection(force=false){
     ||app.detailBusy||app.adminBusy||detailDirty||document.querySelector('dialog[open]'))return;
   if(force){app.nextReadRetryAt=0;app.nextRecoveryAt=0;}
   if(app.resumeAfterSave)return recoverInterruptedSave();
+  if(!app.stopping&&!app.pendingSave&&!app.readError&&app.readAt&&(app.nextQueuedStartAt||0)<=Date.now()){
+    const queued=app.batches.find(b=>b.runStatus==='queued');
+    if(queued){app.nextQueuedStartAt=Date.now()+15000;return startBatch(queued.id);}
+  }
   if(!force&&(app.readRetryBlocked||(app.nextReadRetryAt||0)>Date.now()))return;
   await loadWorkbench({automatic:true});
   if(!app.readError)await syncIdleCollection();
@@ -655,7 +659,7 @@ function queuedRecoveryEntry(i,b){
 function itemStatus(i,b){
   b??=app.batches.find(batch=>batch.items?.some(row=>row.itemId===i.itemId));
   if(i.reviewStatus==='skipped')return ['已淘汰','gray'];
-  if(['excluded','not_selected'].includes(i.reviewStatus))return ['已淘汰','err'];
+  if(['excluded','not_selected'].includes(i.reviewStatus))return ['已淘汰','gray'];
   const recovery=queuedRecoveryEntry(i,b);
   if(recovery){
     if(b?.runStatus==='paused')return ['已暂停','warn'];
@@ -842,15 +846,17 @@ function searchTerms(v){return text(v).trim().toLowerCase().split(/[\s,;，；�
 function filtered(b) {const terms=searchTerms(app.searchQuery);return b.items.filter(i=>{
   if(terms.length&&!terms.some(q=>`${i.asin} ${i.collected?.title||''}`.toLowerCase().includes(q)))return false;
   const selected=app.filterStatus;const status=itemStatus(i,b)[0];
-  const labels={waiting:'等待中',running:'处理中',paused:'已暂停',ready:'可导出',rejected:'已淘汰',error:'系统异常',manual:'待人工'};
-  return selected==='all'||status===labels[selected];
+  const labels={ready:'可导出',rejected:'已淘汰',error:'系统异常',manual:'待人工'};
+  return selected==='all'||selected==='work'&&['等待中','待审核','审核中','处理中','已暂停'].includes(status)||status===labels[selected];
 });}
 function renderItems() {
   const b=batch();if(!b){app.view='home';return renderHome();}
   $('homeView').classList.add('hidden');$('itemsView').classList.remove('hidden');$('currentBatchName').textContent=b.name;
   const c=counts(b),rows=filtered(b),pages=Math.max(1,Math.ceil(rows.length/50));app.page=Math.min(app.page,pages-1);
   const pageRows=rows.slice(app.page*50,app.page*50+50);$('selectPage').checked=pageRows.length>0&&pageRows.every(i=>app.selected.has(i.itemId));$('selectPage').indeterminate=pageRows.some(i=>app.selected.has(i.itemId))&&!$('selectPage').checked;
-  $('batchProgress').textContent=statusSummary(b);
+  const pauseNote=b.runStatus==='paused'?(app.pendingSave||app.stopping?'保存结果待确认，核对后继续':b.workQueue?.note||b.note||'处理已暂停，可从原任务继续'):
+    b.runStatus==='queued'?'正在等待恢复原任务':'';
+  $('batchProgress').textContent=statusSummary(b)+(pauseNote?' | '+pauseNote:'');
   const selected=b.items.filter(i=>app.selected.has(i.itemId));
   $('selectionInfo').textContent=selected.length?`已选 ${selected.length} 条，可导出 ${selected.filter(ready).length} 条`:`共 ${rows.length} 条`;
   $('selectAllFiltered').hidden=!selected.length||rows.length<=50;$('clearSelection').hidden=!selected.length;
@@ -862,13 +868,13 @@ function renderItems() {
   $('pageInfo').textContent=`第 ${app.page+1}/${pages} 页`;$('prevPage').disabled=app.page===0;$('nextPage').disabled=app.page===pages-1;
   const retryableCount=b.items.filter(i=>{const action=recoveryAction(i,b);return action&&action!=='blocked';}).length;
   $('btnBatchRecheck').hidden=!retryableCount;
-  $('btnBatchRecheck').disabled=app.processing||!!app.saving||!!app.detailBusy||!!app.adminBusy;
+  $('btnBatchRecheck').disabled=app.processing||!!app.saving||!!app.detailBusy||!!app.adminBusy||!!app.pendingSave||!!app.stopping;
   $('btnBatchRecheck').textContent=`重试系统异常（${retryableCount}）`;
   $('btnStrictReview').hidden=!c.prohibitionRefresh;
-  $('btnStrictReview').disabled=app.processing||!!app.saving||!!app.detailBusy||!!app.adminBusy;
+  $('btnStrictReview').disabled=app.processing||!!app.saving||!!app.detailBusy||!!app.adminBusy||!!app.pendingSave||!!app.stopping;
   $('btnStrictReview').textContent=`复审旧版已通过（${c.prohibitionRefresh}）`;
   $('btnRunBatch').hidden=['已完成','待处理'].includes(stage(b));
-  $('btnRunBatch').disabled=!!app.saving||b.runStatus==='queued'||app.processing&&app.activeId!==b.id;
+  $('btnRunBatch').disabled=!!app.saving||!!app.pendingSave||!!app.stopping||b.runStatus==='queued'||app.processing&&app.activeId!==b.id;
     const isRunning = b.runStatus === 'running';
   $('btnRunBatch').textContent=b.runStatus==='queued'?'等待中':isRunning?'暂停处理':'开始处理';
   $('pagination').hidden=pages===1;
@@ -1115,7 +1121,8 @@ function itemReason(i,b){
   }
   const issue=systemIssue(i);if(issue)return issue.message;
   if(manualPassCurrent(i)&&confirmedBlocker(i))return '人工通过与已确认的商品阻断事实冲突，禁止导出';
-  if(b?.runStatus==='paused'&&['pending','auditing'].includes(i.reviewStatus))return '已暂停；恢复后从原任务继续';
+  if(b?.runStatus==='queued'&&itemStatus(i,b)[0]==='等待中')return '已排队，等待恢复原任务';
+  if(b?.runStatus==='paused'&&itemStatus(i,b)[0]==='已暂停')return app.pendingSave||app.stopping?'保存结果待确认，核对后继续':'已暂停；恢复后从原任务继续';
   if(i.collectStatus==='pending')return '等待采集';
   if(i.collectStatus==='collecting')return '正在采集原任务资料';
   if(i.reviewStatus==='auditing')return auditWaitingText(i);
@@ -1457,13 +1464,14 @@ async function runLoop(bid,{recheckVerification=false,recheckSystemError=false,r
 }
 async function startBatch(bid,{recheckVerification=false,recheckSystemError=false,resyncCollection=false,recheckProhibition=false,singleItem=null}={}) {
   if(app.adminBusy)return toast('批次管理正在保存，请稍候再开始任务');
-  if(app.processing||app.starting){const queued=batch(bid);if(queued?.runStatus==='paused'&&!app.saving){queued.runStatus='queued';await saveData(queued);render();return toast('已加入恢复队列，当前批次结束后继续');}return toast('已有任务在处理，请等待或暂停');}
+  if(app.pendingSave||app.stopping)return toast('上次保存结果尚未确认，请先查询原保存结果；不会新建任务');
+  if(app.processing||app.starting){const queued=batch(bid);if(queued?.id===app.activeId)return toast('当前批次尚在完成原任务，请等待结果保存后继续');if(queued?.runStatus==='paused'&&!app.saving){queued.runStatus='queued';await saveData(queued);render();return toast('已加入恢复队列，当前批次结束后继续');}return toast('已有任务在处理，请等待或暂停');}
   if(app.saving||app.detailBusy)return toast('正在保存，请稍候');
   app.starting=true;
   let scopedRun=true;
   try{
     if(!app.readAt)await loadWorkbench();
-    if(app.stopping){await fetchData();if(app.stopping)return;}
+    if(app.pendingSave||app.stopping)return toast('上次保存结果尚未确认，请先查询原保存结果；不会新建任务');
     if(!await checkBackend())return;
     const target=batch(bid);if(!target)return;
     app.resumeAfterSave=null;
