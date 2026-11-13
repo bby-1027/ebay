@@ -125,7 +125,7 @@ dialog[open]{display:flex;flex-direction:column;width:760px;overflow:hidden}dial
 </main>
 <dialog id="importDialog"><div class="dialoghead"><h3>导入新批次</h3><button class="close" data-close aria-label="关闭">×</button></div><div class="dialogbody"><div class="form-group"><label>批次名称（选填）</label><input type="text" id="inputBatchName" placeholder="默认按日期命名"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><label>SKU列表</label><input type="file" id="goodsFile" accept=".xlsx,.xls,.csv"></div><textarea id="skuInput" rows="7" placeholder="粘贴SKU，支持空格、逗号或换行。文件仅A列，首行为列名。"></textarea></div><p id="importSummary" class="muted"></p><p id="importError" style="color:#a53d38"></p></div><div class="dialogfoot"><button data-close>取消</button><button id="btnConfirmImport" class="primary">确认并开始</button></div></dialog>
 <dialog id="detailDialog"><div class="dialoghead"><div><div class="detail-id-line"><h3 id="dtTitle"></h3><span id="dtStatus" class="badge b-gray"></span></div><div id="detailMeta"></div></div><button class="close" data-close aria-label="关闭">×</button></div><div id="dtBody" class="dialogbody"></div><div id="dtFooter" class="dialogfoot"></div></dialog>
-<dialog id="settingsDialog" style="width:420px"><div class="dialoghead"><h3>设置</h3><button class="close" data-close aria-label="关闭">×</button></div><div class="dialogbody"><h4>导出字段</h4><p class="muted">仅保存在当前浏览器。</p><label style="display:block;margin-bottom:12px"><input type="checkbox" checked disabled> SKU（必选）</label><label style="display:block;margin-bottom:12px"><input type="checkbox" id="expBrand" checked> 品牌</label><label style="display:block;margin-bottom:12px"><input type="checkbox" id="expLink" checked> 链接</label><label style="display:block;margin-bottom:12px"><input type="checkbox" id="expTitle" checked> 标题</label><label style="display:block;margin-bottom:12px"><input type="checkbox" id="expBullets" checked> 五点</label><label style="display:block;margin-bottom:12px"><input type="checkbox" id="expDesc" checked> 长描述</label><label style="display:block;margin-bottom:12px"><input type="checkbox" id="expPrice" checked> 当前金额</label><p id="settingsError" role="alert"></p><details><summary>使用说明</summary><p id="settingsInfo" class="muted"></p></details></div><div class="dialogfoot"><button id="settingsSave" class="primary">保存</button></div></dialog>
+<dialog id="settingsDialog" style="width:420px"><div class="dialoghead"><h3>设置</h3><button class="close" data-close aria-label="关闭">×</button></div><div class="dialogbody"><h4>导出字段</h4><p class="muted">仅保存在当前浏览器。</p><label style="display:block;margin-bottom:12px"><input type="checkbox" checked disabled> SKU（必选）</label><label style="display:block;margin-bottom:12px"><input type="checkbox" id="expBrand" checked> 品牌</label><label style="display:block;margin-bottom:12px"><input type="checkbox" id="expLink" checked> 链接</label><label style="display:block;margin-bottom:12px"><input type="checkbox" id="expTitle" checked> 标题</label><label style="display:block;margin-bottom:12px"><input type="checkbox" id="expBullets" checked> 五点</label><label style="display:block;margin-bottom:12px"><input type="checkbox" id="expDesc" checked> 长描述</label><label style="display:block;margin-bottom:12px"><input type="checkbox" id="expPrice" checked> 当前金额（采集总价，缺失留空）</label><p id="settingsError" role="alert"></p><details><summary>使用说明</summary><p id="settingsInfo" class="muted"></p></details></div><div class="dialogfoot"><button id="settingsSave" class="primary">保存</button></div></dialog>
 <dialog id="settingsConfirmDialog" aria-labelledby="settingsConfirmTitle" aria-describedby="settingsConfirmMessage"><div class="dialoghead"><h3 id="settingsConfirmTitle">保存更改？</h3></div><div class="dialogbody"><p id="settingsConfirmMessage">设置有未保存的更改，是否保存？</p><p id="settingsConfirmError" role="alert"></p></div><div class="dialogfoot"><button id="settingsContinue">继续编辑</button><button id="settingsDiscard">不保存退出</button><button id="settingsConfirmSave" class="primary" autofocus>保存并关闭</button></div></dialog>
 <dialog id="detailConfirmDialog" aria-labelledby="detailConfirmTitle"><div class="dialoghead"><h3 id="detailConfirmTitle">保存人工审核修改？</h3></div><div class="dialogbody"><p>人工结论或建议有修改。商品资料的编辑仍需通过资料区单独保存。</p></div><div class="dialogfoot"><button id="detailConfirmContinue">继续编辑</button><button id="detailConfirmDiscard">不保存并关闭</button><button id="detailConfirmSave" class="primary">保存并关闭</button></div></dialog>
 <dialog id="imagePreviewDialog" aria-label="商品大图"><div class="dialoghead"><h3>商品大图</h3><button class="close" data-close aria-label="关闭大图">×</button></div><div class="image-preview-body"><p id="previewStatus" role="status"></p><img id="previewImage" alt="商品大图，供人工查看" hidden></div><div class="dialogfoot"><button id="imagePrev" data-action="image-prev">上一张</button><button id="imageNext" data-action="image-next">下一张</button><button data-close>关闭</button></div></dialog>
@@ -137,7 +137,7 @@ dialog[open]{display:flex;flex-direction:column;width:760px;overflow:hidden}dial
 // Connection settings are copied from the inspected deployment by build.py.
 const WORKER_URL = 'https://scraper-proxy.1172743763.workers.dev';
 const TOKEN = 'ebay1031';
-const BUILD = '2026-11-12-workflow-6';
+const BUILD = '2026-11-12-workflow-7';
 const PROHIBITION_REVIEW_VERSION=3;
 const MISSING_SOURCE_NOTICE='AI 审核结果缺少能对应到商品原文的证据';
 const AUDIT_CONCURRENCY = 2;
@@ -335,14 +335,14 @@ function collectedPrice(value){
 }
 function latestCollectedPrice(i){
   const f=i.collected||{},r=f._raw?.data||f._raw?.product||f._raw?.item||f._raw||{};
-  for(const v of [f.price,r.current_price,r.sale_price,r.price,r.product_price,r['当前金额'],r['当前价格'],r['价格']]){
+  for(const v of [r['总价'],r.total_price,r.totalPrice,r.total_amount,f['总价'],f.total_price,f.totalPrice]){
     const price=collectedPrice(v);if(price)return price;
   }
   return '';
 }
 function normalizeCollectedData(raw) {
   const r=raw.data||raw.product||raw.item||raw;
-  return {price:latestCollectedPrice({collected:{_raw:raw}}),title:text(r.title||r['商品标题']||r['标题']),brand:text(r.brand||r['品牌']),
+  return {totalPrice:latestCollectedPrice({collected:{_raw:raw}}),title:text(r.title||r['商品标题']||r['标题']),brand:text(r.brand||r['品牌']),
     bullets:text(r.bullet_points||r.bullets||r['五点描述']||r['五点']),
     description:text(r.long_description||r.description||r['长描述']||r['商品描述']),
     images:r.image_urls||r.images||r.imageurls||r['图片链接']||[],
@@ -589,7 +589,7 @@ function systemIssue(i){
   const gaps=auditEvidenceGaps(i);
   if(['error','unconfirmed'].includes(i.reviewStatus)||auditIncomplete(i)){
     if(i.audit&&(gaps.length||auditIncomplete(i)||i.audit.decision==='passed'))
-      return {kind:'audit_repair',message:'审核回复未完成必要检查：'+(gaps.slice(0,3).join('；')||i.audit.reason||i.auditError?.detail||'后台未提供具体缺项，需修复审核返回记录')};
+      return {kind:'audit_repair',failureKind:i.audit.failure_kind,message:'审核回复未完成必要检查：'+(gaps.slice(0,3).join('；')||i.audit.reason||i.auditError?.detail||'后台未提供具体缺项，需修复审核返回记录')};
     if(i.auditFailureKnown)return {kind:'audit_retry',message:i.auditError?.detail||'审核任务已明确失败，请从审核步骤重试'};
     return {kind:i.auditRequestId?'audit_lookup':'binding',
       message:i.auditRequestId?'原审核结果尚未确认，请先查询原任务':'审核记录缺少原任务编号，无法安全自动重试'};
@@ -942,13 +942,14 @@ function recordAuditOutcome(b,i){
   const key=i.auditRequestId+':'+i.reviewStatus;
   if(i.lastCountedAuditOutcome===key)return;
   i.lastCountedAuditOutcome=key;
-  const code=i.audit?.review_hold&&['policy_fields_missing','checks_incomplete','seller_checks_incomplete'].includes(i.audit.audit_issue)?i.audit.audit_issue:null;
+  const code=['error','unconfirmed'].includes(i.reviewStatus)
+    ?i.audit?.failure_kind||i.auditError?.code||i.audit?.audit_issue||(i.reviewStatus==='unconfirmed'?'audit_result_unconfirmed':'audit_validation'):null;
   if(code){
     (i.systemIssueHistory??=[]).push({requestId:i.auditRequestId,code,reason:i.reason,time:now()});
     b.runIssueStreak={code,count:b.runIssueStreak?.code===code?b.runIssueStreak.count+1:1};
   }else b.runIssueStreak=null;
   if(b.runIssueStreak?.count>=3&&b.runStatus==='running'){
-    b.pauseKind='ai_incomplete';b.note='连续3条出现同类AI漏答，已暂停；可继续剩余队列，或重试系统异常';b.runStatus='paused';
+    b.pauseKind='ai_incomplete';b.note='连续3条出现同类审核异常，已暂停；可继续剩余队列，或重试系统异常';b.runStatus='paused';
     if(b.workQueue?.state==='running'){b.workQueue.state='paused';b.workQueue.note=b.note;}
   }
 }
@@ -1686,6 +1687,44 @@ function detailNavigationFooter(){
   const nav=app.detailNav||{ids:[]},index=nav.ids.indexOf(app.detailItemId),busy=!!app.detailBusy;
   return `<div class="detail-navigation"><button data-action="detail-prev" ${busy||index<=0?'disabled':''}>上一条</button><span>${index>=0?index+1:0} / ${nav.ids.length}</span><button data-action="detail-next" ${busy||index<0||index>=nav.ids.length-1?'disabled':''}>下一条</button></div>`;
 }
+function auditNextStep(issue){
+  const steps={invalid_fact_reference:'系统重新对应本商品原文并补审引用；无法对应的依据不能用于通过或淘汰。',
+    missing_fact_evidence:'系统补齐判断所依据的商品原文；已有具体可核实问题时交人工处理。',
+    hazard_relation_conflict:'系统先核对实际出售的商品与收纳、兼容对象的关系，再补审内容物判断。',
+    unsupported_safety_assertion:'系统核对安全表述及原文依据，区分宣传、否定说明和实际安全结论。',
+    invalid_policy_reference:'系统重新核对适用政策与具体条款，不凭错误引用作决定。'};
+  if(steps[issue.failureKind])return steps[issue.failureKind];
+  if(issue.kind==='audit_lookup')return '系统核对原任务结果，确认前不重复提交。';
+  if(issue.kind==='binding')return '核对原任务与商品资料的对应关系，不能直接人工通过。';
+  if(issue.kind==='copy')return '重新清理并检查文案，不重做已完成的商品审核。';
+  return '由系统针对具体失败原因补审；已有分析且存在可核实的问题时转待人工。';
+}
+function auditRecordPanel(i){
+  const a=i.audit||{},checks=Array.isArray(a.review_checks)?a.review_checks:[];
+  const labels={clear:'已核对',no_match:'未发现适用限制',not_applicable:'不适用',needs_verification:'有具体问题待核实',blocked:'存在阻断',unresolved_risk:'具体风险未解决',not_checked:'未完成检查'};
+  const analysis=checks.map(c=>'<p><strong>'+esc(c.label||({prohibited:'禁售与限售',safety:'安全',ip:'知识产权',conditions:'必要条件',consistency:'资料一致性'}[c.area]||c.area))+'：'+esc(labels[c.status]||c.status)+'</strong><br>'+esc(c.reason||'未保留分项说明')+'</p>').join('');
+  return '<details class="advanced" data-audit-record="'+esc(i.itemId)+'" data-batch-id="'+esc(app.currentBatchId)+'"><summary>查看审核记录</summary>'
+    +(analysis||'<p class="muted">这条旧记录未保留完整分项分析。</p>')
+    +'<div class="audit-record-content"><p class="muted">打开后读取已保存的审核记录，不重新调用 AI。</p></div></details>';
+}
+async function loadAuditRecordPanel(panel){
+  if(panel.dataset.loaded)return;panel.dataset.loaded='1';
+  const i=itemOf(panel.dataset.batchId,panel.dataset.auditRecord),a=i?.audit||{},id=a._request_id||i?.auditRequestId;
+  const content=panel.querySelector('.audit-record-content');if(!content||!id)return;
+  content.textContent='正在读取原审核记录…';
+  try{
+    const record=await api('/api/audit_record?request_id='+encodeURIComponent(id));
+    const expectedHash=a._input_hash||i.auditRequestHash;
+    if(record.request_id!==id||(expectedHash&&record.input_hash!==expectedHash)
+      ||(record.asin&&record.asin!==i.asin)||(record.data_revision!=null&&record.data_revision!==(i.auditRevision??i.dataRevision)))throw new Error('记录与本次审核无法对应');
+    const outputs=Array.isArray(record.outputs)?record.outputs:[];
+    if(record.pending){content.textContent='原审核任务尚未保存实际回复，系统仍按原任务确认；稍后打开此记录可重新读取。';delete panel.dataset.loaded;return;}
+    content.innerHTML=(record.source_request_id&&record.source_request_id!==id?'<p class="muted">本次复用了已核对的原任务记录，以下展示原任务保存的实际回复。</p>':'')
+      +(record.system_detail?'<details><summary>系统诊断记录</summary><p>'+esc(record.system_detail)+'</p></details>':'')
+      +(outputs.length?outputs.map(o=>'<details><summary>AI 实际回复 · 第 '+esc(o.attempt||'?')+' 次</summary><pre style="white-space:pre-wrap;overflow-wrap:anywhere">'+esc(o.content)+'</pre></details>').join('')
+        :'<p class="muted">未保留可读取的 AI 原始回复，或其保留期已过；以上分项记录不冒充原始回复。</p>');
+  }catch(error){content.textContent='暂时无法读取原审核记录：'+error.message;delete panel.dataset.loaded;}
+}
 function renderDetailFooter(i){const busy=!!app.detailBusy,blocked=busy||app.processing;
   const retry=recoveryAction(i,batch()),retryButtons={collect_sync:'查询原采集结果',retrieve:'查询原审核结果',reaudit:'补审缺项',copy:'重新清理文案'};
   const retryAction={collect_sync:'sync-original',retrieve:'retrieve',reaudit:'reaudit',copy:'recopy'}[retry];
@@ -1717,7 +1756,9 @@ function openDetail(iid,{preserveNavigation=false}={}) {
   ])]:[];
   let html=`<div class="review-layout"><section class="product-column"><div class="detail-tabs" role="tablist"><button id="sourceTab" role="tab" data-action="tab-source">采集资料</button><button id="copyTab" role="tab" data-action="tab-copy" ${i.copyData?'':'disabled'}>清理后文案</button></div><div id="detailSource"></div></section>
     <section class="review-column"><div class="review-card"><div class="review-card-head"><h4>审核状态</h4>${badge(...resultBadge)}</div>${field('具体理由',issue?issue.message:conclusion?friendlyAuditReason(a.reason||i.reason||'等待处理'):itemReason(i,b))}`;
-  if(issue&&a.reason)html+=field('AI 原回复（未形成有效结论）',a.reason);
+  if(issue)html+=field('下一步处理',auditNextStep(issue));
+  if(a.ai_summary&&a.ai_summary!==a.reason)html+=field('AI 判断摘要',a.ai_summary);
+  if(a._request_id||i.auditRequestId)html+=auditRecordPanel(i);
   if(manual&&manual.decision!=='excluded')html+=`<div class="review-note"><label for="manualStatus">人工处理</label><select id="manualStatus" class="manual-status-select"><option value="passed" ${manual.decision==='passed'?'selected':!canManualPass(i)?'disabled':''}>通过</option><option value="excluded" ${manual.decision==='excluded'?'selected':''}>淘汰</option></select></div>`;
   if(i.reviewStatus==='skipped')html+='<p class="muted">资料不足；未调用 AI。</p>';
   if(currentResult&&a.prohibited_recheck_incomplete)html+=`<p class="danger-text" role="note">${manual?'原 AI 提醒：复查后仍未给出禁售与限售结论。':'AI 复查后仍未完成禁售与限售检查，暂不能通过或导出，请重新审核。'}</p>`;
@@ -1830,7 +1871,7 @@ function exportRows(b,selected=false) {
   if(!good.length)throw new Error('没有审核通过、文案检查完成且保存成功的商品');
   const cols=[['SKU',i=>i.asin]];
     if(exportPrefs.brand){
-    cols.push(['品牌',()=> 'Unbranded']);
+    cols.push(['品牌',brandOf]);
   }
 
   if(exportPrefs.link){
@@ -2078,7 +2119,7 @@ async function init() {
   $('btnConfirmImport').onclick=()=>{const button=$('btnConfirmImport');button.disabled=true;confirmImport().catch(e=>$('importError').textContent=e.message).finally(()=>button.disabled=false);};
   document.addEventListener('change',e=>{const id=e.target.dataset.select;if(id){e.target.checked?app.selected.add(id):app.selected.delete(id);renderItems();}});
   document.addEventListener('input',e=>{if(e.target.closest('#detailDialog'))updateDetailDirty();});
-  document.addEventListener('toggle',e=>{const d=e.target;if(d.dataset?.panel&&d.open&&!d.dataset.loaded){const i=itemOf(app.currentBatchId,app.detailItemId);if(!i)return;d.querySelector('.panel-content').innerHTML=detailPanel(d.dataset.panel,i);d.dataset.loaded='1';}},true);
+  document.addEventListener('toggle',e=>{const d=e.target;if(d.dataset?.auditRecord&&d.open)fail(loadAuditRecordPanel(d));if(d.dataset?.panel&&d.open&&!d.dataset.loaded){const i=itemOf(app.currentBatchId,app.detailItemId);if(!i)return;d.querySelector('.panel-content').innerHTML=detailPanel(d.dataset.panel,i);d.dataset.loaded='1';}},true);
   document.addEventListener('click',e=>{
     const menu=$('batchMore');if(menu.open&&!menu.contains(e.target))menu.open=false;
     const close=e.target.closest('[data-close]');if(close){closeDialog(close.closest('dialog'));return;}
