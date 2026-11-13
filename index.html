@@ -433,7 +433,8 @@ function unsupportedSafetyClaim(c){
       const after=sentence.slice(match.index+match[0].length,match.index+match[0].length+30);
       const negated=/(?:不能|无法|不足以|不代表|不等于|尚未|未能|未证明|未经证实|不得|不应|不保证|不能据此|没有证据).{0,24}$/.test(before)
         ||/^(?:的|这一|这个|说法|结论|所需|相关|\s){0,8}(?:证据不足|依据不足|尚未证实|无法确认|没有依据)/.test(after);
-      const attributed=/(?:卖家|商家|广告|页面|商品描述|营销|标签).{0,10}(?:声称|宣称|标注|写着|标称|称|提到).{0,12}$/.test(before);
+            const attributed=/(?:卖家|商家|广告|页面|商品描述|营销|标签).{0,10}(?:声称|宣称|标注|写着|标称|称|提到).{0,12}$/.test(before)
+        &&!/(?:因此|所以|据此|由此|足以|可见|证明|表明|确认)/.test(before);
       if(!negated&&!attributed)return true;
     }
   }
@@ -466,7 +467,9 @@ function completePassAudit(a){
   })&&['materials','after_sales','scope'].every(key=>a.seller_review?.[key]?.fact_ids?.length>0);
 }
 function canManualPass(i){
-  return i.collectStatus==='collected'&&!savedCollectionProblem(i)&&inputCheck({...i.collected,requestedAsin:i.asin}).ok;
+  return i.collectStatus==='collected'&&!savedCollectionProblem(i)
+    &&i.audit?.manual_review_reason_kind!=='unsupported_safety_after_retry'
+    &&inputCheck({...i.collected,requestedAsin:i.asin}).ok;
 }
 function sourceAvailability(i){
   const f=i.collected||{},r=f._raw?.data||f._raw?.product||f._raw?.item||f._raw||{};
@@ -615,14 +618,23 @@ function auditEvidenceGaps(i){
 function savedCollectionProblem(i){
   if(i.reviewStatus!=='skipped')return null;
   const check=inputCheck({...i.collected,requestedAsin:i.asin}),d=i.collectionDiagnostic||{};
-  if(check.kind==='identity'||/variant_offset/.test(d.error_type||''))return {issue:'variant_mismatch',reason:'原采集页面与请求SKU不一致；需纠正采集对应关系，不能按资料不足淘汰'};
+  if(check.kind==='identity'||/variant_offset/.test(d.error_type||''))return {issue:'variant_mismatch',reason:collectionProblemMessage(i,'variant_mismatch',d)};
   if(['failed','failure','error','cancelled','canceled'].includes(text(d.status).toLowerCase()))return {issue:'upstream_failed',reason:'原采集任务失败，本次商品资料尚未确认；保留历史资料，不按资料不足淘汰'};
   return null;
+}
+function collectionProblemMessage(i,issue,diagnostic={}){
+  const actual=asin(diagnostic.actual_page_asin||text(diagnostic.error_message).match(/\bpage=([A-Z0-9]{10})\b/i)?.[1]);
+  if(issue==='variant_mismatch'||/variant_offset/i.test(text(diagnostic.error_type)))return actual
+    ?`你要采集的是 ${i.asin}，但实际打开了 ${actual}。本次没有取得正确商品资料，请重新采集。`
+    :`你要采集的 ${i.asin} 与实际打开的商品不一致。本次没有取得正确资料，请重新采集。`;
+  if(issue==='upstream_failed')return `商品 ${i.asin} 的原采集任务已明确失败，请重新采集。`;
+  if(issue==='no_batch_data')return `商品 ${i.asin} 的本次采集没有取得资料，请核对原任务。`;
+  return (COLLECTION_ISSUES[issue]||'本次采集资料尚未确认')+'，请核对原采集任务。';
 }
 function systemIssue(i){
   const collection=savedCollectionProblem(i);
   if(collection)return {kind:'collection',message:collection.reason};
-  if(['error','sync_error'].includes(i.collectStatus))return {kind:'collection',message:i.reason||'原采集任务的结果尚未确认'};
+  if(['error','sync_error'].includes(i.collectStatus))return {kind:'collection',message:collectionProblemMessage(i,i.collectionIssue||'upstream_failed',i.collectionDiagnostic)};
   if(['skipped','excluded','not_selected'].includes(i.reviewStatus))return null;
   if(manualPassCurrent(i)){
     if(confirmedBlocker(i))return null;
@@ -1166,10 +1178,7 @@ function applyRows(b,attempt,rows,terminal,onlyIds){
         i.reason='资料不足';i.audit=null;i.auditRevision=null;
         invalidate(i);changed=true;continue;
       }
-      const reason=(COLLECTION_ISSUES[issue]||'本批采集结果尚未确认')
-        +(diagnostic.error_type?'；错误类型：'+diagnostic.error_type:'')
-        +(diagnostic.actual_page_asin?'；实际页面 ASIN：'+diagnostic.actual_page_asin:'')
-        +(diagnostic.error_message?'；采集站原始说明：'+diagnostic.error_message:'');
+            const reason=collectionProblemMessage(i,issue,diagnostic);
       const status=issue==='upstream_failed'?'error':'sync_error';
       if(i.collectionIssue!==issue||i.collectStatus!==status||i.reason!==reason)changed=true;
       i.collectionIssue=issue;i.collectStatus=status;i.reason=reason;i.collectionDiagnostic=diagnostic;
@@ -1752,7 +1761,7 @@ function auditNextStep(issue){
     invalid_policy_reference:'系统重新核对适用政策与具体条款，不凭错误引用作决定。'};
   if(steps[issue.failureKind])return steps[issue.failureKind];
   if(issue.kind==='audit_lookup')return '系统核对原任务结果，确认前不重复提交。';
-  if(issue.kind==='collection')return '先查询原采集任务。若原任务已明确失败且不能恢复，可在更多操作中重新采集；旧资料不能代表本次采集成功。';
+  if(issue.kind==='collection')return '原采集任务已明确失败时，请重新采集；原任务仍在处理中时，系统继续查询原结果。';
   if(issue.kind==='binding')return '核对原任务与商品资料的对应关系，不能直接人工通过。';
   if(issue.kind==='copy')return '重新清理并检查文案，不重做已完成的商品审核。';
   return '由系统针对具体失败原因补审；已有分析且存在可核实的问题时转待人工。';
@@ -1786,7 +1795,10 @@ async function loadAuditRecordPanel(panel){
 function renderDetailFooter(i){const busy=!!app.detailBusy,blocked=busy||app.processing;
   const retry=recoveryAction(i,batch()),retryButtons={collect_sync:'查询原采集结果',retrieve:'查询原审核结果',reaudit:'补审缺项',copy:'重新清理文案'};
   const retryAction={collect_sync:'sync-original',retrieve:'retrieve',reaudit:'reaudit',copy:'recopy'}[retry];
-  const actions=queuedRecoveryEntry(i,batch())?'':systemIssue(i)?retryAction?`<button class="primary" data-action="${retryAction}" ${blocked?'disabled':''}>${retryButtons[retry]}</button>`:'':sourceNeedsReview(i)?`<button class="primary" data-action="recollect" ${blocked?'disabled':''}>重新采集货源</button><button data-action="manual-exclude" ${blocked?'disabled':''}>淘汰</button>`:['excluded','not_selected','skipped'].includes(i.reviewStatus)?`<button data-action="manual-save" ${blocked?'disabled':''}>保存人工意见</button>`:existingManual(i)?`<button class="primary" data-action="manual-save" ${blocked?'disabled':''}>保存</button>`
+  const knownFailedCollection=systemIssue(i)?.kind==='collection'&&(
+    savedCollectionProblem(i)||['failed','failure','error','cancelled','canceled'].includes(text(i.collectionDiagnostic?.status).toLowerCase()));
+  const actions=queuedRecoveryEntry(i,batch())?'':knownFailedCollection?`<button class="primary" data-action="recollect" ${blocked?'disabled':''}>重新采集此商品</button>`:systemIssue(i)?retryAction?`<button class="primary" data-action="${retryAction}" ${blocked?'disabled':''}>${retryButtons[retry]}</button>`:'':sourceNeedsReview(i)?`<button class="primary" data-action="recollect" ${blocked?'disabled':''}>重新采集货源</button><button data-action="manual-exclude" ${blocked?'disabled':''}>淘汰</button>`:['excluded','not_selected','skipped'].includes(i.reviewStatus)?`<button data-action="manual-save" ${blocked?'disabled':''}>保存人工意见</button>`:existingManual(i)?`<button class="primary" data-action="manual-save" ${blocked?'disabled':''}>保存</button>`
+    :i.reviewStatus==='verify'&&i.audit?.manual_review_reason_kind==='unsupported_safety_after_retry'?`<button class="primary" data-action="manual-exclude" ${blocked?'disabled':''}>人工淘汰</button>`
     :i.reviewStatus==='verify'?`<button class="primary" data-action="manual-pass" ${blocked||!canManualPass(i)?'disabled':''}>通过</button><button data-action="manual-exclude" ${blocked?'disabled':''}>淘汰</button>`
     :needsManual(i)?`<button class="primary" data-action="manual-pass" ${blocked||!canManualPass(i)?'disabled':''}>人工通过</button><button data-action="manual-exclude" ${blocked?'disabled':''}>淘汰</button>`
     :ready(i)?'':'';
@@ -1815,12 +1827,12 @@ function openDetail(iid,{preserveNavigation=false}={}) {
   let html=`<div class="review-layout"><section class="product-column"><div class="detail-tabs" role="tablist"><button id="sourceTab" role="tab" data-action="tab-source">采集资料</button><button id="copyTab" role="tab" data-action="tab-copy" ${i.copyData?'':'disabled'}>清理后文案</button></div><div id="detailSource"></div></section>
     <section class="review-column"><div class="review-card"><div class="review-card-head"><h4>审核状态</h4>${badge(...resultBadge)}</div>${field('具体理由',issue?issue.message:sourceNeedsReview(i)?sourceAvailability(i).reason:conclusion?friendlyAuditReason(a.reason||i.reason||'等待处理'):itemReason(i,b))}`;
   if(issue)html+=field('下一步处理',auditNextStep(issue));
-  if(a.ai_summary&&a.ai_summary!==a.reason)html+=field('AI 判断摘要',a.ai_summary);
+  if(a.ai_summary&&a.ai_summary!==a.reason&&a.manual_review_reason_kind!=='unsupported_safety_after_retry')html+=field('AI 判断摘要',a.ai_summary);
   if(a._request_id||i.auditRequestId)html+=auditRecordPanel(i);
   if(manual&&manual.decision!=='excluded')html+=`<div class="review-note"><label for="manualStatus">人工处理</label><select id="manualStatus" class="manual-status-select"><option value="passed" ${manual.decision==='passed'?'selected':!canManualPass(i)?'disabled':''}>通过</option><option value="excluded" ${manual.decision==='excluded'?'selected':''}>淘汰</option></select></div>`;
   if(i.reviewStatus==='skipped')html+='<p class="muted">'+(savedCollectionProblem(i)?'本次采集资料未确认；未调用 AI。':'资料不足；未调用 AI。')+'</p>';
   if(currentResult&&a.prohibited_recheck_incomplete)html+=`<p class="danger-text" role="note">${manual?'原 AI 提醒：复查后仍未给出禁售与限售结论。':'AI 复查后仍未完成禁售与限售检查，暂不能通过或导出，请重新审核。'}</p>`;
-  if(currentResult&&a.manual_approval_blocked&&!a.prohibited_recheck_incomplete&&i.reviewStatus==='verify')html+='<p class="danger-text" role="note">AI 提出了尚未解决的风险，当前不能人工通过。请重新审核或淘汰。</p>';
+  if(currentResult&&a.manual_approval_blocked&&!a.prohibited_recheck_incomplete&&i.reviewStatus==='verify')html+='<p class="danger-text" role="note">实际安全风险尚未核实。请修正商品资料后重新审核，或人工淘汰。</p>';
   if(currentResult&&a.missing_source_evidence?.length)html+=field(MISSING_SOURCE_NOTICE,'无原文引用：'+a.missing_source_evidence.join('、'));
   if(currentResult&&a.missing_policy_references?.length)html+=field('政策引用说明','AI 未提供政策条款引用：'+a.missing_policy_references.join('、'));
   if(currentResult&&a.manual_questions?.length){
