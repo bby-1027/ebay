@@ -125,7 +125,7 @@ dialog[open]{display:flex;flex-direction:column;width:760px;overflow:hidden}dial
 </main>
 <dialog id="importDialog"><div class="dialoghead"><h3>导入新批次</h3><button class="close" data-close aria-label="关闭">×</button></div><div class="dialogbody"><div class="form-group"><label>批次名称（选填）</label><input type="text" id="inputBatchName" placeholder="默认按日期命名"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><label>SKU列表</label><input type="file" id="goodsFile" accept=".xlsx,.xls,.csv"></div><textarea id="skuInput" rows="7" placeholder="粘贴SKU，支持空格、逗号或换行。文件仅A列，首行为列名。"></textarea></div><p id="importSummary" class="muted"></p><p id="importError" style="color:#a53d38"></p></div><div class="dialogfoot"><button data-close>取消</button><button id="btnConfirmImport" class="primary">确认并开始</button></div></dialog>
 <dialog id="detailDialog"><div class="dialoghead"><div><div class="detail-id-line"><h3 id="dtTitle"></h3><span id="dtStatus" class="badge b-gray"></span></div><div id="detailMeta"></div></div><button class="close" data-close aria-label="关闭">×</button></div><div id="dtBody" class="dialogbody"></div><div id="dtFooter" class="dialogfoot"></div></dialog>
-<dialog id="settingsDialog" style="width:420px"><div class="dialoghead"><h3>设置</h3><button class="close" data-close aria-label="关闭">×</button></div><div class="dialogbody"><h4>导出字段</h4><p class="muted">仅保存在当前浏览器。</p><label style="display:block;margin-bottom:12px"><input type="checkbox" checked disabled> SKU（必选）</label><label style="display:block;margin-bottom:12px"><input type="checkbox" id="expBrand" checked> 品牌</label><label style="display:block;margin-bottom:12px"><input type="checkbox" id="expLink" checked> 链接</label><label style="display:block;margin-bottom:12px"><input type="checkbox" id="expTitle" checked> 标题</label><label style="display:block;margin-bottom:12px"><input type="checkbox" id="expBullets" checked> 五点</label><label style="display:block;margin-bottom:12px"><input type="checkbox" id="expDesc" checked> 长描述</label><label style="display:block;margin-bottom:12px"><input type="checkbox" id="expPrice" checked>当前金额</label><p id="settingsError" role="alert"></p><details><summary>使用说明</summary><p id="settingsInfo" class="muted"></p></details></div><div class="dialogfoot"><button id="settingsSave" class="primary">保存</button></div></dialog>
+<dialog id="settingsDialog" style="width:420px"><div class="dialoghead"><h3>设置</h3><button class="close" data-close aria-label="关闭">×</button></div><div class="dialogbody"><h4>导出字段</h4><p class="muted">仅保存在当前浏览器。</p><label style="display:block;margin-bottom:12px"><input type="checkbox" checked disabled> SKU（必选）</label><label style="display:block;margin-bottom:12px"><input type="checkbox" id="expBrand" checked> 品牌</label><label style="display:block;margin-bottom:12px"><input type="checkbox" id="expLink" checked> 链接</label><label style="display:block;margin-bottom:12px"><input type="checkbox" id="expTitle" checked> 标题</label><label style="display:block;margin-bottom:12px"><input type="checkbox" id="expBullets" checked> 五点</label><label style="display:block;margin-bottom:12px"><input type="checkbox" id="expDesc" checked> 长描述</label><label style="display:block;margin-bottom:12px"><input type="checkbox" id="expPrice" checked> 当前金额（采集总价，缺失留空）</label><p id="settingsError" role="alert"></p><details><summary>使用说明</summary><p id="settingsInfo" class="muted"></p></details></div><div class="dialogfoot"><button id="settingsSave" class="primary">保存</button></div></dialog>
 <dialog id="settingsConfirmDialog" aria-labelledby="settingsConfirmTitle" aria-describedby="settingsConfirmMessage"><div class="dialoghead"><h3 id="settingsConfirmTitle">保存更改？</h3></div><div class="dialogbody"><p id="settingsConfirmMessage">设置有未保存的更改，是否保存？</p><p id="settingsConfirmError" role="alert"></p></div><div class="dialogfoot"><button id="settingsContinue">继续编辑</button><button id="settingsDiscard">不保存退出</button><button id="settingsConfirmSave" class="primary" autofocus>保存并关闭</button></div></dialog>
 <dialog id="detailConfirmDialog" aria-labelledby="detailConfirmTitle"><div class="dialoghead"><h3 id="detailConfirmTitle">保存人工审核修改？</h3></div><div class="dialogbody"><p>人工结论或建议有修改。商品资料的编辑仍需通过资料区单独保存。</p></div><div class="dialogfoot"><button id="detailConfirmContinue">继续编辑</button><button id="detailConfirmDiscard">不保存并关闭</button><button id="detailConfirmSave" class="primary">保存并关闭</button></div></dialog>
 <dialog id="imagePreviewDialog" aria-label="商品大图"><div class="dialoghead"><h3>商品大图</h3><button class="close" data-close aria-label="关闭大图">×</button></div><div class="image-preview-body"><p id="previewStatus" role="status"></p><img id="previewImage" alt="商品大图，供人工查看" hidden></div><div class="dialogfoot"><button id="imagePrev" data-action="image-prev">上一张</button><button id="imageNext" data-action="image-next">下一张</button><button data-close>关闭</button></div></dialog>
@@ -137,7 +137,7 @@ dialog[open]{display:flex;flex-direction:column;width:760px;overflow:hidden}dial
 // Connection settings are copied from the inspected deployment by build.py.
 const WORKER_URL = 'https://scraper-proxy.1172743763.workers.dev';
 const TOKEN = 'ebay1031';
-const BUILD = '2026-11-12-workflow-7';
+const BUILD = '2026-11-13-workflow-8';
 const PROHIBITION_REVIEW_VERSION=3;
 const MISSING_SOURCE_NOTICE='AI 审核结果缺少能对应到商品原文的证据';
 const AUDIT_CONCURRENCY = 2;
@@ -334,9 +334,9 @@ function collectedPrice(value){
   const result=text(value).trim();return substantive(result)?result:'';
 }
 function latestCollectedPrice(i){
-  const f=i.collected||{},r=f._raw?.data||f._raw?.product||f._raw?.item||f._raw||{};
-  for(const v of [r['总价'],r.total_price,r.totalPrice,r.total_amount,f['总价'],f.total_price,f.totalPrice]){
-    const price=collectedPrice(v);if(price)return price;
+  const f=i.collected||{},raw=f._raw||{},r=raw.data||raw.product||raw.item||raw;
+  for(const source of [r,raw,f])for(const key of ['总价','total_price','totalPrice','total_amount']){
+    const price=collectedPrice(source[key]);if(price)return price;
   }
   return '';
 }
@@ -352,18 +352,17 @@ function normalizeCollectedData(raw) {
 }
 // R10: metadata, identifiers, image URLs and a title by themselves are not product facts.
 function inputCheck(f) {
+  const r=f._raw?.data||f._raw?.product||f._raw?.item||f._raw||{},expected=asin(f.requestedAsin);
+  for(const src of [f,f._raw,r])for(const key of ['actual_page_asin','page_asin','实际页面ASIN']){
+    const actual=src?.[key];if(substantive(actual)&&expected&&asin(actual)!==expected)return {ok:false,kind:'identity',reason:'实际页面ASIN与请求商品不一致'};
+  }
+  if(substantive(r.asin)&&expected&&asin(r.asin)!==expected)return {ok:false,kind:'identity',reason:'采集结果ASIN与请求商品不一致'};
+  if(/variant_offset|串品/.test(text(f._raw?.batch_task_error_type||r.error_type||r.failure_type)))return {ok:false,kind:'identity',reason:'采集身份或变体校验未通过'};
   const title=text(f.title).trim();
-  if(!substantive(title) || /^https?:\/\//i.test(title)) return {ok:false,reason:'缺少可识别的商品标题'};
-  const r=f._raw?.data||f._raw?.product||f._raw?.item||f._raw||{};
+  if(!substantive(title)||/^https?:\/\//i.test(title))return {ok:false,kind:'missing',reason:'缺少可识别的商品标题'};
   const attrs=[f.attributes,f.model,f.variants,f.compatibility,r.item_dimensions,r.package_dimensions,r.material,r.size,r.color,r.compatibility];
   const facts=[f.bullets,f.description,...attrs].map(factText).filter(substantive);
-  if(!facts.length) return {ok:false,reason:'仅有标题、标识或链接，缺少商品事实'};
-  const expected=asin(f.requestedAsin);
-  for(const src of [f,f._raw,r])for(const key of ['actual_page_asin','page_asin','实际页面ASIN']){
-    const actual=src?.[key];if(substantive(actual)&&expected&&asin(actual)!==expected)return {ok:false,reason:'实际页面ASIN与请求商品不一致'};
-  }
-  if(substantive(r.asin)&&expected&&asin(r.asin)!==expected)return {ok:false,reason:'采集结果ASIN与请求商品不一致'};
-  return {ok:true};
+  return facts.length?{ok:true}:{ok:false,kind:'missing',reason:'仅有标题、标识或链接，缺少商品事实'};
 }
 function resultRows(v) {
   if(Array.isArray(v)) return v;
@@ -407,6 +406,8 @@ function collectionRowIssue(r,attempt){
   const match=collectionTaskMatch(r,attempt);
   if(match<0)return 'wrong_task';
   if(match!==1)return 'missing_task_identity';
+  const fields={...normalizeCollectedData(r),requestedAsin:asin(r.asin||r.ASIN)};
+  if(inputCheck(fields).kind==='identity')return 'variant_mismatch';
   if(['failed','failure','error','cancelled','canceled'].includes(status))return 'upstream_failed';
   if(!['completed','done','success','succeeded'].includes(status))return 'task_unconfirmed';
   if(['false','0'].includes(has))return 'no_batch_data';
@@ -423,29 +424,60 @@ function auditIncomplete(i){
   const a=i.audit;return !!a&&(a.review_hold===true||a.decision==='system_incomplete'
     ||a.required_checks_not_completed?.length||a.missing_audit_areas?.length);
 }
+function unsupportedSafetyClaim(c){
+  if(c?.area!=='safety'||!['clear','no_match','not_applicable'].includes(c.status))return false;
+  const claim=/符合(?:所有)?(?:儿童|婴幼儿|电气|产品|相关|适用)?安全(?:要求|标准)|使用安全|确保(?:使用)?安全|安全无风险|(?:已(?:经)?取得|已经?获得|通过).{0,35}(?:认证|批准)/g;
+  for(const sentence of String(c.reason||'').split(/[。！？!?；;\n]/)){
+    for(const match of sentence.matchAll(claim)){
+      const before=sentence.slice(0,match.index).split(/但是|然而|不过|但/).at(-1).slice(-45);
+      const after=sentence.slice(match.index+match[0].length,match.index+match[0].length+30);
+      const negated=/(?:不能|无法|不足以|不代表|不等于|尚未|未能|未证明|未经证实|不得|不应|不保证|不能据此|没有证据).{0,24}$/.test(before)
+        ||/^(?:的|这一|这个|说法|结论|所需|相关|\s){0,8}(?:证据不足|依据不足|尚未证实|无法确认|没有依据)/.test(after);
+      const attributed=/(?:卖家|商家|广告|页面|商品描述|营销|标签).{0,10}(?:声称|宣称|标注|写着|标称|称|提到).{0,12}$/.test(before);
+      if(!negated&&!attributed)return true;
+    }
+  }
+  return false;
+}
+function assessmentUnfinished(row){
+  return ['clear','no_match','not_applicable'].includes(row?.status)
+    &&/(?:无法|不能|不足以|未能)(?:完成|进行|充分)?(?:评估|判断|核实|确认)(?:其|该|本|商品|产品|实际|具体|是否|安全|风险)|未提供足够信息|尚未(?:完成|核实)|仍需核实|尚不能确认|不能确定|存在.{0,12}冲突|尚待核实/.test(String(row?.reason||''));
+}
+function sourceSafetyConflict(row,facts){
+  if(row?.area!=='safety'||!['clear','no_match','not_applicable'].includes(row.status))return '';
+  const primary=facts.filter(f=>/^(?:title|bullets|power_source|attributes|included_components)(?:\.|$)/.test(f.field||'')).map(f=>f.quote).join('\n');
+  const powered=/\b\d+(?:\.\d+)?\s*(?:w|watts?|v|volts?)\b|\b(?:electric|motor|powered)\b|电动|电机|供电/i.test(primary);
+  const reason=String(row.reason||'');
+  if(powered&&/(?:未|没有)(?:发现|识别|涉及|显示)[^。；\n]{0,80}(?:供电|电气|电机|电压)|(?:无|没有|不含)电池[^。；\n]{0,45}(?:不适用|无需|不涉及|范围)/.test(reason))return '安全判断与原文的供电或电机事实不一致';
+  const cutter=powered&&/\b(?:saw|grinder|cutting|drilling)\b|切割|打磨|锯片/i.test(primary);
+  if(cutter&&!/电气|供电|电压|电机|电动|切割|打磨|锯|刀|飞溅|护罩|防护|操作|转动|转速/.test(reason))return '电动切割或打磨设备缺少针对其实际结构的安全判断';
+  return '';
+}
 function completePassAudit(a){
   if(!a||a.decision!=='passed'||a.audit_completion_contract!==2||a.checks_complete!==true||a.review_hold
     ||a.manual_approval_blocked||a.conflicts?.length||a.manual_questions?.length||a.required_unverified?.length
     ||a.missing_source_evidence?.length||a.missing_policy_references?.length||a.required_checks_not_completed?.length||a.missing_audit_areas?.length
     ||typeof a._request_id!=='string'||a._request_id.length<8||!(/^[a-f0-9]{64}$/i).test(a._input_hash||''))return false;
   const checks=a.review_checks;
+  if(Array.isArray(checks)&&checks.some(c=>unsupportedSafetyClaim(c)||assessmentUnfinished(c)||sourceSafetyConflict(c,a.review_evidence||a.evidence||[])))return false;
   return Array.isArray(checks)&&checks.length===5&&REQUIRED_AUDIT_AREAS.every(area=>{
     const rows=checks.filter(c=>c.area===area);return rows.length===1&&['clear','not_applicable'].includes(rows[0].status)
       &&Array.isArray(rows[0].fact_ids)&&rows[0].fact_ids.length>0&&rows[0].policy_basis!=='uncited';
   })&&['materials','after_sales','scope'].every(key=>a.seller_review?.[key]?.fact_ids?.length>0);
 }
 function canManualPass(i){
-  return i.collectStatus==='collected'&&inputCheck({...i.collected,requestedAsin:i.asin}).ok;
+  return i.collectStatus==='collected'&&!savedCollectionProblem(i)&&inputCheck({...i.collected,requestedAsin:i.asin}).ok;
 }
 function sourceAvailability(i){
   const f=i.collected||{},r=f._raw?.data||f._raw?.product||f._raw?.item||f._raw||{};
-  const stock=f.stock??r.stock??r.inventory??r['库存'];
-  const availability=text(f.availability??r.availability??'');
-  const fba=f.is_fba??r.is_fba??f.fulfillment??r.fulfillment;
-  const soldOut=stock!=null&&text(stock).trim()!==''&&Number(stock)===0;
-  if(soldOut||/unavailable|out of stock|不可售|无货|缺货/i.test(availability))return {ok:false,reason:'采集资料显示当前无货或不可售，请重新核对货源'};
-  if(fba===false||/^(?:false|0|fbm)$/i.test(text(fba).trim()))return {ok:false,reason:'当前货源不是FBA，不符合你的采购方式'};
-  return {ok:true,reason:'库存、卖家、配送和退货需在导出前复核；采集只代表当时状态'};
+  const stock=f.stock_count??f.stock??r.stock_count??r.stock??r.inventory??r['库存'];
+  const availability=text(f.stock_status??f.availability??r.stock_status??r.availability??'');
+  const fba=f.is_fba??r.is_fba??f.fulfillment??r.fulfillment,fulfillment=text(fba).trim();
+  if((stock!=null&&text(stock).trim()!==''&&Number(stock)===0)||/unavailable|out of stock|不可售|无货|缺货/i.test(availability))return {ok:false,reason:'采集资料显示当前无货或不可售，请重新核对并更新货源'};
+  if(fba===false||/^(?:false|0|fbm)$/i.test(fulfillment))return {ok:false,reason:'当前货源不是FBA，不符合你的采购方式'};
+  const knownFba=fba===true||/^(?:true|1|fba|fulfilled by amazon|amazon fulfillment)$/i.test(fulfillment);
+  if(!knownFba&&!externalReviewReady(i))return {ok:false,reason:'采集资料尚未确认FBA货源，请更新采集或完成导出前货源复核'};
+  return {ok:true,reason:'采集只代表当时状态，下单前仍需核对货源'};
 }
 function externalReviewReady(i){
   const r=i.externalReview;
@@ -480,7 +512,8 @@ async function saveExternalReview(){
     recallChecked:!!$('reviewRecall').checked,sourceChecked:!!$('reviewSource').checked,recallSource:$('reviewRecallSource').value.trim(),
     notes:$('reviewExternalNotes').value.trim().slice(0,2000),time:now()};
   if(!externalReviewReady({...i,externalReview:next}))return toast('请核对召回与货源，填写查询网址和核对记录');
-  if(!sourceAvailability(i).ok)return toast(sourceAvailability(i).reason+'，更新采集资料后再复核');
+  const source=sourceAvailability({...i,externalReview:next});
+  if(!source.ok)return toast(source.reason+'，更新采集资料后再复核');
   const previous=i.externalReview;i.externalReview=next;app.detailBusy=true;
   try{await saveData(b);detailDirty=false;openDetail(i.itemId,{preserveNavigation:true});return true;}
   catch(e){i.externalReview=previous;throw e;}
@@ -525,6 +558,7 @@ function exportCheck(i){
   }
   if(!copyAuthorized(i))return {ok:false,reason:i.audit?.required_checks_not_completed?.length?'审核缺少：'+i.audit.required_checks_not_completed.join('、'):'审核未完成，请补审缺项或由人工作出决定'};
   if(i.reviewStatus!=='passed')return {ok:false,reason:i.reviewStatus==='verify'?'需要人工核验':'尚未审核通过'};
+  const source=sourceAvailability(i);if(!source.ok)return source;
   if(i.copyStatus!=='completed'||!i.copyData)return {ok:false,reason:i.copyStatus==='error'||i.copyStatus==='verify'?'文案处理失败，请重新清理文案':'文案尚未完成'};
   if(!substantive(stripBrandLabelLines(i.copyData.title,brandOf(i))))return {ok:false,reason:'清理后标题为空'};
   if(!Object.hasOwn(i.copyData,'bullets')||!Object.hasOwn(i.copyData,'description'))return {ok:false,reason:'文案缺少五点或长描述，请重新清理文案'};
@@ -532,7 +566,8 @@ function exportCheck(i){
   return {ok:false,reason:'资料已变化或审核与文案版本不对应，请重新审核'};
 }
 function ready(i){return !app.stopping&&!app.saving&&exportCheck(i).ok;}
-function needsManual(i){return i.reviewStatus==='verify'||(i.reviewStatus==='passed'&&i.copyStatus==='verify');}
+function sourceNeedsReview(i){return i.reviewStatus==='passed'&&i.collectStatus==='collected'&&!sourceAvailability(i).ok;}
+function needsManual(i){return i.reviewStatus==='verify'||(i.reviewStatus==='passed'&&(i.copyStatus==='verify'||sourceNeedsReview(i)));}
 function existingManual(i){
   const m=i.manualDecision;
   return m&&['passed','excluded'].includes(m.decision)&&i.reviewStatus===m.decision&&m.dataRevision===(i.dataRevision||0)?m:null;
@@ -555,7 +590,7 @@ function manualSuggestion(i){
   const history=Array.isArray(i.manualHistory)?i.manualHistory:[];
   return text((existingManual(i)||history.findLast(entry=>entry?.dataRevision===(i.dataRevision||0)))?.reason);
 }
-function canRecheckVerification(i){return i.collectStatus==='collected'&&needsManual(i);}
+function canRecheckVerification(i){return i.collectStatus==='collected'&&(i.reviewStatus==='verify'||i.copyStatus==='verify');}
 function auditEvidenceGaps(i){
   const a=i.audit;if(!a||a.decision!=='passed')return [];
   const gaps=[];
@@ -566,6 +601,7 @@ function auditEvidenceGaps(i){
   if(a.missing_policy_references?.length)gaps.push('政策依据缺失');
   if(a.conflicts?.length||a.manual_questions?.length||a.required_unverified?.length)gaps.push('总评与待核验问题冲突');
   const checks=Array.isArray(a.review_checks)?a.review_checks:[];
+  for(const c of checks){if(unsupportedSafetyClaim(c))gaps.push("安全判断不能由页面宣传直接推出");if(assessmentUnfinished(c))gaps.push("检查状态与尚未完成的判断矛盾");const conflict=sourceSafetyConflict(c,a.review_evidence||a.evidence||[]);if(conflict)gaps.push(conflict);}
   for(const area of REQUIRED_AUDIT_AREAS){
     const rows=checks.filter(c=>c?.area===area);
     if(rows.length!==1||!['clear','not_applicable'].includes(rows[0]?.status)
@@ -576,7 +612,17 @@ function auditEvidenceGaps(i){
   if(!a._request_id||!(/^[a-f0-9]{64}$/i).test(a._input_hash||''))gaps.push('审核任务身份不完整');
   return [...new Set(gaps)];
 }
+function savedCollectionProblem(i){
+  if(i.reviewStatus!=='skipped')return null;
+  const check=inputCheck({...i.collected,requestedAsin:i.asin}),d=i.collectionDiagnostic||{};
+  if(check.kind==='identity'||/variant_offset/.test(d.error_type||''))return {issue:'variant_mismatch',reason:'原采集页面与请求SKU不一致；需纠正采集对应关系，不能按资料不足淘汰'};
+  if(['failed','failure','error','cancelled','canceled'].includes(text(d.status).toLowerCase()))return {issue:'upstream_failed',reason:'原采集任务失败，本次商品资料尚未确认；保留历史资料，不按资料不足淘汰'};
+  return null;
+}
 function systemIssue(i){
+  const collection=savedCollectionProblem(i);
+  if(collection)return {kind:'collection',message:collection.reason};
+  if(['error','sync_error'].includes(i.collectStatus))return {kind:'collection',message:i.reason||'原采集任务的结果尚未确认'};
   if(['skipped','excluded','not_selected'].includes(i.reviewStatus))return null;
   if(manualPassCurrent(i)){
     if(confirmedBlocker(i))return null;
@@ -601,7 +647,7 @@ function systemIssue(i){
     if(gaps.length||!completePassAudit(i.audit)||auditHasBlockingRisk(i.audit))
       return {kind:'audit_repair',message:'审核回复未完成必要检查：'+(gaps.slice(0,3).join('；')||'总评与分项存在冲突')};
     if(i.copyStatus==='error')return {kind:'copy',message:i.reason||'文案处理失败，请重新清理文案'};
-    if(i.copyStatus==='completed'&&!exportCheck(i).ok)
+    if(i.copyStatus==='completed'&&!sourceNeedsReview(i)&&!exportCheck(i).ok)
       return {kind:'copy',message:'清理后文案与当前商品资料不对应，请重新清理文案'};
   }
   return null;
@@ -617,9 +663,9 @@ function recoveryAction(i,b){
 function isSystemErrorItem(i){
   return !!systemIssue(i);
 }
-function hasFailure(i) {return ['error','sync_error'].includes(i.collectStatus)||['error','unconfirmed'].includes(i.reviewStatus)||i.copyStatus==='error';}
+function hasFailure(i) {return !!savedCollectionProblem(i)||['error','sync_error'].includes(i.collectStatus)||['error','unconfirmed'].includes(i.reviewStatus)||i.copyStatus==='error';}
 function canResyncCollection(b,i){
-  return ['error','sync_error'].includes(i.collectStatus)
+  return (['error','sync_error'].includes(i.collectStatus)||!!savedCollectionProblem(i))
     &&!['auditing','unconfirmed'].includes(i.reviewStatus)
     &&!!b.collection?.members?.some(m=>m.id===i.itemId&&m.revision===(i.dataRevision||0));
 }
@@ -679,8 +725,6 @@ function queuedRecoveryEntry(i,b){
 }
 function itemStatus(i,b){
   b??=app.batches.find(batch=>batch.items?.some(row=>row.itemId===i.itemId));
-  if(i.reviewStatus==='skipped')return ['已淘汰','err'];
-  if(['excluded','not_selected'].includes(i.reviewStatus))return ['已淘汰','err'];
   const recovery=queuedRecoveryEntry(i,b);
   if(recovery){
     if(b?.runStatus==='paused')return ['已暂停','warn'];
@@ -688,6 +732,9 @@ function itemStatus(i,b){
     if(i.reviewStatus==='auditing')return ['审核中','run'];
     if(['collect_sync','copy'].includes(recovery.action))return ['处理中','run'];
   }
+  if(savedCollectionProblem(i)||['error','sync_error'].includes(i.collectStatus))return ['系统异常','warn'];
+  if(i.reviewStatus==='skipped')return ['已淘汰','err'];
+  if(['excluded','not_selected'].includes(i.reviewStatus))return ['已淘汰','err'];
   if(manualPassCurrent(i)&&confirmedBlocker(i))return ['待人工','warn'];
   if(exportCheck(i).ok)return ['可导出','pass'];
   if(systemIssue(i))return ['系统异常','warn'];
@@ -1109,7 +1156,9 @@ function applyRows(b,attempt,rows,terminal,onlyIds){
       const diagnostic=collectionDiagnostic(row,attempt,i.asin);
       // The collector returns one SKU even when its product fields are empty.
       // A completed empty SKU is a product-screening exclusion, not an API failure.
-      if(row&&['upstream_failed','no_batch_data'].includes(issue)){
+      const emptyCurrent=row&&issue==='no_batch_data'&&['done','completed','success','succeeded'].includes(text(row.batch_task_status).toLowerCase())
+        &&inputCheck({...normalizeCollectedData(row),requestedAsin:i.asin}).kind==='missing';
+      if(emptyCurrent){
         i.collected={...normalizeCollectedData(row),requestedAsin:i.asin};
         i.collectedAt=now();i.collectionRef={name:attempt.name,id:attempt.remoteId};
         i.collectionDiagnostic=diagnostic;delete i.collectionIssue;
@@ -1175,7 +1224,6 @@ function auditWaitingText(i){
  return i.auditReceiptConfirmed ? ' AI 审核中，请稍候' : '正在确认 AI 接收状态';
 }
 function itemReason(i,b){
-  if(i.reviewStatus==='skipped')return '资料不足';
   const recovery=queuedRecoveryEntry(i,b);
   if(recovery){
     if(b?.runStatus==='paused')return '重试任务已暂停，恢复后继续处理原队列';
@@ -1186,6 +1234,8 @@ function itemReason(i,b){
     if(recovery.action==='collect_sync')return '正在查询原采集结果';
     if(recovery.action==='copy')return '正在重新清理文案';
   }
+  if(savedCollectionProblem(i))return savedCollectionProblem(i).reason;
+  if(i.reviewStatus==='skipped')return '资料不足';
   const issue=systemIssue(i);if(issue)return (i.systemIssueHistory?.length>1?'重试后仍为系统异常：':'')+issue.message;
   if(manualPassCurrent(i)&&confirmedBlocker(i))return '人工通过与已确认的商品阻断事实冲突，禁止导出';
   if(b?.runStatus==='queued'&&itemStatus(i,b)[0]==='排队待审核')return '已排队，等待恢复原任务';
@@ -1194,6 +1244,7 @@ function itemReason(i,b){
   if(i.collectStatus==='collecting')return '正在采集原任务资料';
   if(i.reviewStatus==='auditing')return auditWaitingText(i);
   if(i.reviewStatus==='pending')return '等待审核';
+  if(sourceNeedsReview(i))return sourceAvailability(i).reason;
   if(i.reviewStatus==='passed'&&i.copyStatus==='pending')return '审核有效，等待清理文案';
   if(i.reviewStatus==='passed'&&i.copyStatus==='processing')return '正在清理文案';
   if(i.reviewStatus==='passed'&&exportCheck(i).ok)return '审核通过，文案清理完成';
@@ -1216,10 +1267,14 @@ function blockAuditRecovery(i,reason){
 }
 
 async function auditItem(b,i,recover=false){
-  const check=inputCheck({...i.collected,requestedAsin:i.asin});if(!check.ok){i.reviewStatus='skipped';i.reason='资料不足';await saveData(b);return;}
+  const check=inputCheck({...i.collected,requestedAsin:i.asin});if(!check.ok){
+    if(check.kind==='identity'){i.collectStatus='sync_error';i.collectionIssue='variant_mismatch';i.reviewStatus='pending';i.reason=check.reason+'；请核对原采集任务，不审核其他变体';}
+    else{i.reviewStatus='skipped';i.reason='资料不足';}
+    invalidate(i);await saveData(b);return;
+  }
    const rev=i.dataRevision||0,decisionRevision=i.decisionRevision||0,fields=JSON.parse(JSON.stringify(i.collected||{}));
   const priorNote=recover?i.auditRequestReviewNote:[manualSuggestion(i),...matchingManualStandards(i)].filter(Boolean).join('；');
-  const note=typeof priorNote==='string'&&priorNote.trim()?('以下人工意见为最低优先级参考；不得覆盖已确认禁售、必要销售条件、经营规则或替代商品证据。'+priorNote.trim()).slice(0,2000).trimEnd():'';
+  const note=recover?text(i.auditRequestReviewNote):typeof priorNote==='string'&&priorNote.trim()?('以下人工意见为最低优先级参考；不得覆盖已确认禁售、必要销售条件、经营规则或替代商品证据。'+priorNote.trim()).slice(0,2000).trimEnd():'';
   const expectedHash=await auditInputHash(fields,i.asin,rev,note);
   if((i.dataRevision||0)!==rev||(i.decisionRevision||0)!==decisionRevision)return;
   if(!recover&&(b.runStatus==='paused'||app.stopping))return;
@@ -1243,6 +1298,8 @@ async function auditItem(b,i,recover=false){
     await api('/api/audit',{method:'POST',body:{requestId:i.auditRequestId,batchId:b.id,itemId:i.itemId,asin:i.asin,dataRevision:rev,fields,...(note?{manualReviewNote:note}:{}),...(i.auditRetrySource?{previousAuditRequestId:i.auditRetrySource}:{})},timeout:105000});
   if((i.dataRevision||0)!==rev||(i.decisionRevision||0)!==decisionRevision||i.auditRequestId!==requestId)return;
    if(d.pending){if((d.input_hash&&d.input_hash!==expectedHash)||(d.data_revision!=null&&d.data_revision!==rev)){blockAuditRecovery(i,'原任务接收的商品资料与本次资料不一致，已停止恢复');mustSave=true;}else waitForOriginal(d.detail,d.started_at,d.receipt_confirmed,d.overdue);}
+  else if(d.error==='product_data_missing'){i.reviewStatus='skipped';i.reason='资料不足';i.auditFailureKnown=false;i.auditNextCheckAt=0;mustSave=true;}
+  else if(d.error==='collection_identity_error'){i.collectStatus='sync_error';i.collectionIssue='variant_mismatch';i.reviewStatus='pending';i.reason=d.detail;i.auditNextCheckAt=0;mustSave=true;}
   else if(d.error){i.reviewStatus='error';i.auditFailureKnown=true;i.auditNextCheckAt=0;i.reason='审核未完成：'+(d.detail||d.error);i.auditError={code:d.error,detail:d.detail,request_id:i.auditRequestId,time:now(),diagnostic_summary:d.diagnostic_summary||null};mustSave=true;}
     else if(d.success&&d.audit){
       if(d.input_hash!==expectedHash||d.audit._input_hash!==expectedHash
@@ -1695,6 +1752,7 @@ function auditNextStep(issue){
     invalid_policy_reference:'系统重新核对适用政策与具体条款，不凭错误引用作决定。'};
   if(steps[issue.failureKind])return steps[issue.failureKind];
   if(issue.kind==='audit_lookup')return '系统核对原任务结果，确认前不重复提交。';
+  if(issue.kind==='collection')return '先查询原采集任务。若原任务已明确失败且不能恢复，可在更多操作中重新采集；旧资料不能代表本次采集成功。';
   if(issue.kind==='binding')return '核对原任务与商品资料的对应关系，不能直接人工通过。';
   if(issue.kind==='copy')return '重新清理并检查文案，不重做已完成的商品审核。';
   return '由系统针对具体失败原因补审；已有分析且存在可核实的问题时转待人工。';
@@ -1728,7 +1786,7 @@ async function loadAuditRecordPanel(panel){
 function renderDetailFooter(i){const busy=!!app.detailBusy,blocked=busy||app.processing;
   const retry=recoveryAction(i,batch()),retryButtons={collect_sync:'查询原采集结果',retrieve:'查询原审核结果',reaudit:'补审缺项',copy:'重新清理文案'};
   const retryAction={collect_sync:'sync-original',retrieve:'retrieve',reaudit:'reaudit',copy:'recopy'}[retry];
-  const actions=['excluded','not_selected','skipped'].includes(i.reviewStatus)?`<button data-action="manual-save" ${blocked?'disabled':''}>保存人工意见</button>`:queuedRecoveryEntry(i,batch())?'':systemIssue(i)?retryAction?`<button class="primary" data-action="${retryAction}" ${blocked?'disabled':''}>${retryButtons[retry]}</button>`:'':existingManual(i)?`<button class="primary" data-action="manual-save" ${blocked?'disabled':''}>保存</button>`
+  const actions=queuedRecoveryEntry(i,batch())?'':systemIssue(i)?retryAction?`<button class="primary" data-action="${retryAction}" ${blocked?'disabled':''}>${retryButtons[retry]}</button>`:'':sourceNeedsReview(i)?`<button class="primary" data-action="recollect" ${blocked?'disabled':''}>重新采集货源</button><button data-action="manual-exclude" ${blocked?'disabled':''}>淘汰</button>`:['excluded','not_selected','skipped'].includes(i.reviewStatus)?`<button data-action="manual-save" ${blocked?'disabled':''}>保存人工意见</button>`:existingManual(i)?`<button class="primary" data-action="manual-save" ${blocked?'disabled':''}>保存</button>`
     :i.reviewStatus==='verify'?`<button class="primary" data-action="manual-pass" ${blocked||!canManualPass(i)?'disabled':''}>通过</button><button data-action="manual-exclude" ${blocked?'disabled':''}>淘汰</button>`
     :needsManual(i)?`<button class="primary" data-action="manual-pass" ${blocked||!canManualPass(i)?'disabled':''}>人工通过</button><button data-action="manual-exclude" ${blocked?'disabled':''}>淘汰</button>`
     :ready(i)?'':'';
@@ -1755,12 +1813,12 @@ function openDetail(iid,{preserveNavigation=false}={}) {
     ...(Array.isArray(a.required_checks_not_completed)?a.required_checks_not_completed:[])
   ])]:[];
   let html=`<div class="review-layout"><section class="product-column"><div class="detail-tabs" role="tablist"><button id="sourceTab" role="tab" data-action="tab-source">采集资料</button><button id="copyTab" role="tab" data-action="tab-copy" ${i.copyData?'':'disabled'}>清理后文案</button></div><div id="detailSource"></div></section>
-    <section class="review-column"><div class="review-card"><div class="review-card-head"><h4>审核状态</h4>${badge(...resultBadge)}</div>${field('具体理由',issue?issue.message:conclusion?friendlyAuditReason(a.reason||i.reason||'等待处理'):itemReason(i,b))}`;
+    <section class="review-column"><div class="review-card"><div class="review-card-head"><h4>审核状态</h4>${badge(...resultBadge)}</div>${field('具体理由',issue?issue.message:sourceNeedsReview(i)?sourceAvailability(i).reason:conclusion?friendlyAuditReason(a.reason||i.reason||'等待处理'):itemReason(i,b))}`;
   if(issue)html+=field('下一步处理',auditNextStep(issue));
   if(a.ai_summary&&a.ai_summary!==a.reason)html+=field('AI 判断摘要',a.ai_summary);
   if(a._request_id||i.auditRequestId)html+=auditRecordPanel(i);
   if(manual&&manual.decision!=='excluded')html+=`<div class="review-note"><label for="manualStatus">人工处理</label><select id="manualStatus" class="manual-status-select"><option value="passed" ${manual.decision==='passed'?'selected':!canManualPass(i)?'disabled':''}>通过</option><option value="excluded" ${manual.decision==='excluded'?'selected':''}>淘汰</option></select></div>`;
-  if(i.reviewStatus==='skipped')html+='<p class="muted">资料不足；未调用 AI。</p>';
+  if(i.reviewStatus==='skipped')html+='<p class="muted">'+(savedCollectionProblem(i)?'本次采集资料未确认；未调用 AI。':'资料不足；未调用 AI。')+'</p>';
   if(currentResult&&a.prohibited_recheck_incomplete)html+=`<p class="danger-text" role="note">${manual?'原 AI 提醒：复查后仍未给出禁售与限售结论。':'AI 复查后仍未完成禁售与限售检查，暂不能通过或导出，请重新审核。'}</p>`;
   if(currentResult&&a.manual_approval_blocked&&!a.prohibited_recheck_incomplete&&i.reviewStatus==='verify')html+='<p class="danger-text" role="note">AI 提出了尚未解决的风险，当前不能人工通过。请重新审核或淘汰。</p>';
   if(currentResult&&a.missing_source_evidence?.length)html+=field(MISSING_SOURCE_NOTICE,'无原文引用：'+a.missing_source_evidence.join('、'));
@@ -1779,11 +1837,15 @@ function openDetail(iid,{preserveNavigation=false}={}) {
   if(currentResult&&a.seller_review?.materials?.requirements?.length)html+=field('销售材料',a.seller_review.materials.requirements);
   if(currentResult)html+=renderAuditBasis(i);
   html+='</div>';
+  if(sourceNeedsReview(i)){
+    html+='<p class="muted">商品审核与当前货源分开核对。重新采集会取得新资料再审核；人工通过不能覆盖明确的FBM或无货结果。</p>';
+    if(/尚未确认FBA/.test(sourceAvailability(i).reason))html+=externalReviewPanel(i);
+  }
   if(i.auditRecoveryBlocked)html+='<p class="muted">原任务资料无法对应，系统不会自动重新提交。请核对资料后，在更多操作中手动重新审核。</p>';
   if(i.reviewStatus==='passed'&&!exportCheck(i).ok)html+=`<p class="${confirmedBlocker(i)?'danger-text':'muted'}">${esc(exportCheck(i).reason)}</p>`;
   if(currentResult&&(a.seller_review||a.scope==='hard_rule'))html+=`<details class="advanced"><summary>经营检查详情</summary>${renderSellerReview(i)}</details>`;
   if(['auditing','unconfirmed'].includes(i.reviewStatus))html+=`<p class="muted">${i.reviewStatus==='unconfirmed'?'已停止自动等待。再次查询只读取原任务。':app.processing?'正在等待原任务结果。':'处理已暂停，继续后查询原任务。'}</p>${i.reviewStatus==='unconfirmed'?'<button data-action="retrieve">再次查询结果</button>':''}`;
-  html+=`<details class="advanced"><summary>更多操作</summary><div class="row-actions"><button data-action="reaudit" ${app.processing||i.collectStatus!=='collected'?'disabled':''}>重新审核此商品</button>${canResyncCollection(batch(),i)?`<button data-action="sync-original" ${app.processing?'disabled':''}>同步此商品原任务结果</button>`:''}<button data-action="toggle-edit">修正资料</button></div><div id="detailEditPanel" hidden>${detailPanel('edit',i)}</div></details></section></div>`;
+  html+=`<details class="advanced"><summary>更多操作</summary><div class="row-actions"><button data-action="reaudit" ${app.processing||i.collectStatus!=='collected'||savedCollectionProblem(i)?'disabled':''}>重新审核此商品</button>${canResyncCollection(batch(),i)?`<button data-action="sync-original" ${app.processing?'disabled':''}>同步此商品原任务结果</button>`:''}${savedCollectionProblem(i)||['error','sync_error'].includes(i.collectStatus)?`<button data-action="recollect" ${app.processing?'disabled':''}>重新采集此商品</button>`:''}<button data-action="toggle-edit">修正资料</button></div><div id="detailEditPanel" hidden>${detailPanel('edit',i)}</div></details></section></div>`;
   if(ready(i))html+='<details class="advanced"><summary>其他操作</summary><button data-action="export-one">导出此商品</button></details>';
   $('dtBody').innerHTML=html;
   if($('manualStatus'))$('manualStatus').value=manual?.decision||'';
@@ -1888,7 +1950,7 @@ function exportRows(b,selected=false) {
   if(exportPrefs.price)cols.push(['当前金额',latestCollectedPrice]);
   const rows=[cols.map(c=>c[0]),...good.map(i=>cols.map(c=>text(c[1](i))))];
   if(rows.some(r=>r.some(v=>v.length>32767)))throw new Error('存在超过Excel单元格32767字符上限的字段，未截断或导出；请先处理长文本');
-  return {rows,count:good.length,omitted:scope.length-good.length,legacy:good.filter(i=>exportCheck(i).legacy).length};
+  return {rows,count:good.length,omitted:scope.length-good.length,missingTotal:exportPrefs.price?good.filter(i=>!latestCollectedPrice(i)).length:0,legacy:good.filter(i=>exportCheck(i).legacy).length};
 }
 function ensureExcel(){if(window.XLSX)return;throw new Error('Excel组件未加载：请将 vendor/xlsx.full.min.js 与 index.html 一同部署，然后刷新页面');}
 function downloadRows(rows,name) {
@@ -1896,7 +1958,7 @@ function downloadRows(rows,name) {
   const ws=XLSX.utils.aoa_to_sheet(rows);for(let r=1;r<rows.length;r++){const cell=ws[XLSX.utils.encode_cell({r,c:0})];if(cell){cell.t='s';cell.z='@';}}
   const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'商品结果');XLSX.writeFile(wb,name.replace(/[\\/:*?"<>|]/g,'_')+'.xlsx');
 }
-function doExport(bid,selected=false){const b=batch(bid);const d=exportRows(b,selected);if(d.legacy&&!confirm(`其中${d.legacy}条是旧版已完成记录，未记录资料版本。本次按原通过结论和文案导出，不代表已按新规则重审。是否继续？`))return;downloadRows(d.rows,b.name+'_通过');toast(`已导出${d.count}条${d.omitted?'，跳过未就绪'+d.omitted+'条':''}`);}
+function doExport(bid,selected=false){const b=batch(bid);const d=exportRows(b,selected);if(d.legacy&&!confirm(`其中${d.legacy}条是旧版已完成记录，未记录资料版本。本次按原通过结论和文案导出，不代表已按新规则重审。是否继续？`))return;downloadRows(d.rows,b.name+'_通过');toast(`已导出${d.count}条${d.omitted?'，跳过未就绪'+d.omitted+'条':''}${d.missingTotal?'；'+d.missingTotal+'条未返回采集总价，金额留空':''}`);}
 function exportFailures(){const b=batch();const rows=[['SKU','Amazon链接','失败环节','失败原因'],...b.items.filter(hasFailure).map(i=>[i.asin,amazon(i),['error','sync_error'].includes(i.collectStatus)?'采集／结果同步':['error','unconfirmed'].includes(i.reviewStatus)?'审核':'文案',i.reason])];if(rows.length===1)return toast('没有接口或程序失败项');downloadRows(rows,b.name+'_失败清单');}
 function closeDialog(d){
   if(['batchAdminDialog','batchTrashDialog'].includes(d.id)&&batchAdmin.busy){toast('正在保存管理员操作，请稍候');return false;}
