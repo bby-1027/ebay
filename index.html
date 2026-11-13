@@ -323,7 +323,6 @@ function installConnectionRecovery(){
   window.addEventListener('online',()=>fail(maintainConnection(true)));
   setInterval(()=>fail(maintainConnection()),5000);
 }
-
 function collectedPrice(value){
   if(value==null)return '';
   if(typeof value==='object'){
@@ -333,12 +332,27 @@ function collectedPrice(value){
   }
   const result=text(value).trim();return substantive(result)?result:'';
 }
+function collectedMoney(value){
+  if(value==null)return null;
+  if(typeof value==='object')value=value.amount??value.value??value.current??value.price;
+  const match=text(value).replace(/,/g,'').match(/-?\d+(?:\.\d+)?/);
+  if(!match)return null;
+  const amount=Number(match[0]);return Number.isFinite(amount)?amount:null;
+}
 function latestCollectedPrice(i){
   const f=i.collected||{},raw=f._raw||{},r=raw.data||raw.product||raw.item||raw;
-  for(const source of [r,raw,f])for(const key of ['总价','total_price','totalPrice','total_amount']){
+  const sources=[r,raw,f];
+  for(const source of sources)for(const key of ['总价','total_price','totalPrice','total_amount']){
     const price=collectedPrice(source[key]);if(price)return price;
   }
-  return '';
+  const first=(keys)=>{for(const source of sources)for(const key of keys)if(source[key]!=null&&text(source[key]).trim())return source[key];};
+  const buybox=collectedMoney(first(['buybox_price','buyboxPrice','BuyBox 价格','BuyBox价格']));
+  if(buybox==null)return '';
+  const shippingValue=first(['buybox_shipping','buyboxShipping','BuyBox 运费','BuyBox运费']);
+  const shippingText=text(shippingValue).trim();
+  const free=/^free(?:\s|$)/i.test(shippingText)||/免运费/.test(shippingText);
+  const shipping=free?0:collectedMoney(shippingValue);
+  return shipping==null?'':`$${(buybox+shipping).toFixed(2)}`;
 }
 function normalizeCollectedData(raw) {
   const r=raw.data||raw.product||raw.item||raw;
