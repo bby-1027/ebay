@@ -116,7 +116,7 @@ dialog[open]{display:flex;flex-direction:column;width:760px;overflow:hidden}dial
   <div class="batch-heading"><div class="left"><button id="backHomeBtn">← 返回</button><h2 id="currentBatchName"></h2></div><div class="right"><button id="btnRunBatch" class="primary">开始处理</button><button id="btnExportItems">导出通过</button><details class="options-menu" id="batchMore"><summary>更多</summary><div><button id="renameBatch">重命名批次</button><button id="btnExportFailures">导出失败清单</button></div></details></div></div>
   <p id="batchProgress" class="batch-meta"></p>
   <div class="card">
-    <div class="toolbar"><div class="batch-retry-actions"><button id="btnBatchRecheck" hidden>重试系统异常</button><button id="btnStrictReview" hidden>复审旧版已通过</button></div><div style="display:flex;gap:10px"><input id="searchInput" class="search-input" placeholder="搜索SKU，多个用空格或逗号分隔"><select id="filterStatus" class="search-input" style="width:140px"><option value="all">全部商品</option><option value="work">待处理</option><option value="manual">待人工</option><option value="ready">可导出</option><option value="rejected">已淘汰</option><option value="error">系统异常</option></select></div></div>
+<div class="toolbar"><div class="batch-retry-actions"><button id="btnBatchRecheck" hidden>重试系统异常</button><button id="btnStrictReview" hidden>复审旧版已通过</button></div><div style="display:flex;gap:10px"><input id="searchInput" class="search-input" placeholder="搜索SKU，多个用空格或逗号分隔"><select id="filterStatus" class="search-input" style="width:140px"><option value="all">全部商品</option><option value="work">待处理</option><option value="manual">待人工</option><option value="source">货源待处理</option><option value="ready">可导出</option><option value="rejected">已淘汰</option><option value="error">系统异常</option></select></div></div>
     <div class="selection-strip"><span id="selectionInfo"></span><button class="linkbtn" id="selectAllFiltered" hidden>选择全部筛选结果</button><button class="linkbtn" id="clearSelection" hidden>取消选择</button></div>
     <div class="tablewrap"><table><thead><tr><th style="width:40px"><input type="checkbox" id="selectPage" aria-label="全选本页"></th><th>SKU</th><th>Amazon链接</th><th>状态</th><th>原因</th><th>操作</th></tr></thead><tbody id="itemRows"></tbody></table></div>
     <div class="subtoolbar" id="pagination"><button id="prevPage">上一页</button><span id="pageInfo"></span><button id="nextPage">下一页</button></div>
@@ -137,11 +137,11 @@ dialog[open]{display:flex;flex-direction:column;width:760px;overflow:hidden}dial
 // Connection settings are copied from the inspected deployment by build.py.
 const WORKER_URL = 'https://scraper-proxy.1172743763.workers.dev';
 const TOKEN = 'ebay1031';
-const BUILD = '2026-11-13-workflow-8';
+const BUILD = '2026-11-14-workflow-9';
 const PROHIBITION_REVIEW_VERSION=3;
 const MISSING_SOURCE_NOTICE='AI 审核结果缺少能对应到商品原文的证据';
 const AUDIT_CONCURRENCY = 2;
-const SELLER_POLICY_VERSION='2026-11-07-strict2';
+const SELLER_POLICY_VERSION='2026-11-14-core-candidate-v1';
 const $ = id => document.getElementById(id);
 const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const text = v => Array.isArray(v) ? v.map(text).join('\n') : v && typeof v === 'object' ? JSON.stringify(v) : String(v ?? '');
@@ -323,6 +323,7 @@ function installConnectionRecovery(){
   window.addEventListener('online',()=>fail(maintainConnection(true)));
   setInterval(()=>fail(maintainConnection()),5000);
 }
+
 function collectedPrice(value){
   if(value==null)return '';
   if(typeof value==='object'){
@@ -447,7 +448,7 @@ function unsupportedSafetyClaim(c){
       const after=sentence.slice(match.index+match[0].length,match.index+match[0].length+30);
       const negated=/(?:不能|无法|不足以|不代表|不等于|尚未|未能|未证明|未经证实|不得|不应|不保证|不能据此|没有证据).{0,24}$/.test(before)
         ||/^(?:的|这一|这个|说法|结论|所需|相关|\s){0,8}(?:证据不足|依据不足|尚未证实|无法确认|没有依据)/.test(after);
-            const attributed=/(?:卖家|商家|广告|页面|商品描述|营销|标签).{0,10}(?:声称|宣称|标注|写着|标称|称|提到).{0,12}$/.test(before)
+      const attributed=/(?:卖家|商家|广告|页面|商品描述|营销|标签).{0,10}(?:声称|宣称|标注|写着|标称|称|提到).{0,12}$/.test(before)
         &&!/(?:因此|所以|据此|由此|足以|可见|证明|表明|确认)/.test(before);
       if(!negated&&!attributed)return true;
     }
@@ -475,7 +476,9 @@ function completePassAudit(a){
     ||typeof a._request_id!=='string'||a._request_id.length<8||!(/^[a-f0-9]{64}$/i).test(a._input_hash||''))return false;
   const checks=a.review_checks;
   if(Array.isArray(checks)&&checks.some(c=>unsupportedSafetyClaim(c)||assessmentUnfinished(c)||sourceSafetyConflict(c,a.review_evidence||a.evidence||[])))return false;
-  return Array.isArray(checks)&&checks.length===5&&REQUIRED_AUDIT_AREAS.every(area=>{
+  const seller=a.seller_review||{};
+  return seller.materials?.status==='not_identified'&&seller.after_sales?.level==='low'&&seller.scope?.category==='ordinary'
+    &&Array.isArray(checks)&&checks.length===5&&REQUIRED_AUDIT_AREAS.every(area=>{
     const rows=checks.filter(c=>c.area===area);return rows.length===1&&['clear','not_applicable'].includes(rows[0].status)
       &&Array.isArray(rows[0].fact_ids)&&rows[0].fact_ids.length>0&&rows[0].policy_basis!=='uncited';
   })&&['materials','after_sales','scope'].every(key=>a.seller_review?.[key]?.fact_ids?.length>0);
@@ -540,8 +543,8 @@ async function saveExternalReview(){
 function sellerAuditCurrent(i){return i.audit?._seller_policy_version===SELLER_POLICY_VERSION;}
 function needsProhibitionRefresh(i){
   const a=i.audit,f=i.collected;
-  if(!f||a?._prohibition_review_version===PROHIBITION_REVIEW_VERSION)return false;
-  return !!a;
+  if(!f||!a)return false;
+  return a._prohibition_review_version!==PROHIBITION_REVIEW_VERSION||!sellerAuditCurrent(i);
 }
 function pendingProhibitionRefresh(i){return i.reviewStatus==='passed'&&needsProhibitionRefresh(i);}
 function confirmedBlocker(i){
@@ -584,7 +587,7 @@ function exportCheck(i){
 }
 function ready(i){return !app.stopping&&!app.saving&&exportCheck(i).ok;}
 function sourceNeedsReview(i){return i.reviewStatus==='passed'&&i.collectStatus==='collected'&&!sourceAvailability(i).ok;}
-function needsManual(i){return i.reviewStatus==='verify'||(i.reviewStatus==='passed'&&(i.copyStatus==='verify'||sourceNeedsReview(i)));}
+function needsManual(i){return i.reviewStatus==='verify'||(i.reviewStatus==='passed'&&i.copyStatus==='verify');}
 function existingManual(i){
   const m=i.manualDecision;
   return m&&['passed','excluded'].includes(m.decision)&&i.reviewStatus===m.decision&&m.dataRevision===(i.dataRevision||0)?m:null;
@@ -704,6 +707,7 @@ function counts(b) {
     auditEligible:a.filter(i=>i.collectStatus==='collected' && i.reviewStatus!=='skipped').length,
     audited:a.filter(i=>i.collectStatus==='collected'&&['passed','verify','excluded','not_selected'].includes(i.reviewStatus)).length,
     passed:a.filter(i=>i.reviewStatus==='passed').length,verify:a.filter(i=>needsManual(i)&&!auditIncomplete(i)).length,
+    sourcePending:a.filter(sourceNeedsReview).length,
     prohibitionRefresh:a.filter(pendingProhibitionRefresh).length,
     screened:a.filter(i=>i.reviewStatus==='skipped').length,excluded:a.filter(i=>i.reviewStatus==='excluded').length,risk:a.filter(i=>i.reviewStatus==='not_selected').length,
     failures:a.filter(hasFailure).length,auditFailed:a.filter(i=>i.collectStatus==='collected'&&(i.reviewStatus==='error'||auditIncomplete(i))).length,
@@ -726,7 +730,7 @@ function briefProgress(b,{compact=false}={}){const c=counts(b);
     const q=b.workQueue,label=q.kind==='single'?'单个处理':'重审';
     return `${label} ${q.cursor}/${q.entries.length}${q.note?' · '+q.note:''}`;
   }
-  const notes=(compact?[[c.auditFailed,'未完成']]:[[c.auditFailed,'审核未完成'],[c.verify,'待核验'],[c.prohibitionRefresh,'禁售待补审']])
+  const notes=(compact?[[c.auditFailed,'未完成'],[c.sourcePending,'货源待处理']]:[[c.auditFailed,'审核未完成'],[c.verify,'待核验'],[c.sourcePending,'货源待处理'],[c.prohibitionRefresh,'旧标准待复审']])
     .filter(([n])=>n).map(([n,label])=>` · ${label} ${n} 条`).join('');
   if(b.items.some(i=>['pending','collecting','sync_error'].includes(i.collectStatus)))return `资料接回 ${c.collected}/${c.total} · 采集失败 ${b.items.filter(i=>i.collectStatus==='error').length} · 待确认 ${b.items.filter(i=>i.collectStatus==='sync_error').length}`+notes;
   if(b.items.some(i=>i.collectStatus==='collected'&&['pending','auditing'].includes(i.reviewStatus))){
@@ -738,7 +742,7 @@ function briefProgress(b,{compact=false}={}){const c=counts(b);
   if(b.items.some(i=>i.reviewStatus==='passed'&&['pending','processing'].includes(i.copyStatus)))return `文案 ${c.copyEnded}/${c.passed}`+notes;
   return `自动处理已结束 · 有效资料 ${c.collected-c.screened}/${c.total} · 采集失败 ${b.items.filter(i=>i.collectStatus==='error').length} · 资料不足 ${c.screened}`+notes;}
 function statusSummary(b){
-  const labels=['排队待审核','待审核','审核中','处理中','已暂停','可导出','已淘汰','系统异常','待人工'];
+  const labels=['排队待审核','待审核','审核中','处理中','已暂停','可导出','已淘汰','系统异常','待人工','货源待处理'];
   const totals=Object.fromEntries(labels.map(label=>[label,0]));
   b.items.forEach(i=>totals[itemStatus(i,b)[0]]++);
   return '总计 '+b.items.length+' 条'+labels.filter(label=>totals[label]).map(label=>' | '+label+' '+totals[label]+' 条').join('');
@@ -764,6 +768,7 @@ function itemStatus(i,b){
   if(manualPassCurrent(i)&&confirmedBlocker(i))return ['待人工','warn'];
   if(exportCheck(i).ok)return ['可导出','pass'];
   if(systemIssue(i))return ['系统异常','warn'];
+  if(sourceNeedsReview(i))return ['货源待处理','wait'];
   if(needsManual(i))return ['待人工','warn'];
   if(b?.runStatus==='paused')return ['已暂停','warn'];
   if(i.collectStatus==='collecting'||i.reviewStatus==='auditing'||i.copyStatus==='processing')return ['处理中','run'];
@@ -943,7 +948,7 @@ function searchTerms(v){return text(v).trim().toLowerCase().split(/[\s,;，；�
 function filtered(b) {const terms=searchTerms(app.searchQuery);return b.items.filter(i=>{
   if(terms.length&&!terms.some(q=>`${i.asin} ${i.collected?.title||''}`.toLowerCase().includes(q)))return false;
   const selected=app.filterStatus;const status=itemStatus(i,b)[0];
-  const labels={ready:'可导出',rejected:'已淘汰',error:'系统异常',manual:'待人工'};
+  const labels={ready:'可导出',rejected:'已淘汰',error:'系统异常',manual:'待人工',source:'货源待处理'};
   return selected==='all'||selected==='work'&&['排队待审核','等待中','待审核','审核中','处理中','已暂停'].includes(status)||status===labels[selected];
 });}
 function renderItems() {
@@ -1192,7 +1197,7 @@ function applyRows(b,attempt,rows,terminal,onlyIds){
         i.reason='资料不足';i.audit=null;i.auditRevision=null;
         invalidate(i);changed=true;continue;
       }
-            const reason=collectionProblemMessage(i,issue,diagnostic);
+      const reason=collectionProblemMessage(i,issue,diagnostic);
       const status=issue==='upstream_failed'?'error':'sync_error';
       if(i.collectionIssue!==issue||i.collectStatus!==status||i.reason!==reason)changed=true;
       i.collectionIssue=issue;i.collectStatus=status;i.reason=reason;i.collectionDiagnostic=diagnostic;
@@ -1857,7 +1862,7 @@ function openDetail(iid,{preserveNavigation=false}={}) {
       .filter(q=>normalize(q)&&normalize(q)!==reason);
     if(questions.length)html+=`<div class="review-questions">${field(manual?'原 AI 提醒':'待人工确认',questions)}</div>`;
   }
-  if(needsManual(i)||manual||['excluded','not_selected','skipped'].includes(i.reviewStatus))html+=`<div class="review-note"><label for="manualReason">人工意见（选填）</label><textarea id="manualReason" rows="3" maxlength="500">${esc(manualSuggestion(i))}</textarea><small class="muted">保存后作为同类商品的最低优先级审核参考；不能覆盖禁售、必要销售条件或经营规则。</small></div>`;
+  if(needsManual(i)||sourceNeedsReview(i)||manual||['excluded','not_selected','skipped'].includes(i.reviewStatus))html+=`<div class="review-note"><label for="manualReason">人工意见（选填）</label><textarea id="manualReason" rows="3" maxlength="500">${esc(manualSuggestion(i))}</textarea><small class="muted">保存后作为同类商品的最低优先级审核参考；不能覆盖禁售、必要销售条件或经营规则。</small></div>`;
   
   if(missing.length)html+=field('缺少信息或未完成检查',missing);
   if(currentResult&&a.seller_review?.materials?.requirements?.length)html+=field('销售材料',a.seller_review.materials.requirements);
