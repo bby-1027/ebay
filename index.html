@@ -15,7 +15,7 @@ main{max-width:1260px;padding:30px 24px 64px;margin:auto}
 #itemRows tr:hover>td{background:#edf7f1}
 .title-col{max-width:320px;line-height:1.5;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;text-overflow:ellipsis}
 .badge{display:inline-block;white-space:nowrap;padding:3px 8px;border-radius:4px;font-size:12px;border:1px solid transparent}
-.b-pass{background:#e7f4ec;color:#28714a;border-color:#c3e6d3}.b-warn{background:#fff3dd;color:#966314;border-color:#f2d8a6}.b-err{background:#fceceb;color:#a34f48;border-color:#f2cac7}.b-run{background:#d9e9ff;color:#175cbe;border-color:#9fc5fa}.b-wait{background:#eff8ff;color:#5884a5;border-color:#d7eafb}.b-gray{background:#f0f2f0;color:#748079;border-color:#e2e5e2}
+.b-pass{background:#e7f4ec;color:#28714a;border-color:#c3e6d3}.b-warn{background:#fff7df;color:#8c6a28;border-color:#ebdcae}.b-error{background:#ffe0b5;color:#9d3e00;border-color:#e49b49;font-weight:600}.b-err{background:#fceceb;color:#a34f48;border-color:#f2cac7}.b-run{background:#d9e9ff;color:#175cbe;border-color:#9fc5fa}.b-wait{background:#eff8ff;color:#5884a5;border-color:#d7eafb}.b-gray{background:#f0f2f0;color:#748079;border-color:#e2e5e2}
 .toolbar{display:flex;justify-content:space-between;align-items:center;padding:12px 16px;background:#f9fbf9;border-bottom:1px solid var(--line);flex-wrap:wrap;gap:10px}
 .batch-bar{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
 .search-input{width:220px;padding:8px 12px;border:1px solid var(--line);border-radius:6px}
@@ -128,7 +128,7 @@ button,input,textarea,select,.review-note textarea{background:#f8faf3}.toolbar,t
 </section>
 </main>
 <dialog id="importDialog"><div class="dialoghead"><h3>导入新批次</h3><button class="close" data-close aria-label="关闭">×</button></div><div class="dialogbody"><div class="form-group"><label>批次名称（选填）</label><input type="text" id="inputBatchName" placeholder="默认按日期命名"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><label>SKU列表</label><input type="file" id="goodsFile" accept=".xlsx,.xls,.csv"></div><textarea id="skuInput" rows="7" placeholder="粘贴SKU，支持空格、逗号或换行。文件仅A列，首行为列名。"></textarea></div><p id="importSummary" class="muted"></p><p id="importError" style="color:#a53d38"></p></div><div class="dialogfoot"><button data-close>取消</button><button id="btnConfirmImport" class="primary">确认并开始</button></div></dialog>
-<dialog id="detailDialog"><div class="dialoghead"><div><div class="detail-id-line"><h3 id="dtTitle"></h3><span id="dtStatus" class="badge b-gray"></span></div><div id="detailMeta"></div></div><button class="close" data-close aria-label="关闭">×</button></div><div id="dtBody" class="dialogbody"></div><div id="dtFooter" class="dialogfoot"></div></dialog>
+<dialog id="detailDialog"><div class="dialoghead"><div><div class="detail-id-line"><h3 id="dtTitle"></h3><span id="dtStatus" class="badge b-gray"></span></div><div id="detailMeta"></div><p id="detailNotice" role="alert" aria-live="assertive" hidden></p></div><button class="close" data-close aria-label="关闭">×</button></div><div id="dtBody" class="dialogbody"></div><div id="dtFooter" class="dialogfoot"></div></dialog>
 <dialog id="settingsDialog" style="width:420px"><div class="dialoghead"><h3>设置</h3><button class="close" data-close aria-label="关闭">×</button></div><div class="dialogbody"><h4>导出字段</h4><p class="muted">仅保存在当前浏览器。</p><label style="display:block;margin-bottom:12px"><input type="checkbox" checked disabled> SKU（必选）</label><label style="display:block;margin-bottom:12px"><input type="checkbox" id="expBrand" checked> 品牌</label><label style="display:block;margin-bottom:12px"><input type="checkbox" id="expLink" checked> 链接</label><label style="display:block;margin-bottom:12px"><input type="checkbox" id="expTitle" checked> 标题</label><label style="display:block;margin-bottom:12px"><input type="checkbox" id="expBullets" checked> 五点</label><label style="display:block;margin-bottom:12px"><input type="checkbox" id="expDesc" checked> 长描述</label><label style="display:block;margin-bottom:12px"><input type="checkbox" id="expPrice" checked> 当前金额（采集总价，缺失留空）</label><p id="settingsError" role="alert"></p><details><summary>使用说明</summary><p id="settingsInfo" class="muted"></p></details></div><div class="dialogfoot"><button id="settingsSave" class="primary">保存</button></div></dialog>
 <dialog id="settingsConfirmDialog" aria-labelledby="settingsConfirmTitle" aria-describedby="settingsConfirmMessage"><div class="dialoghead"><h3 id="settingsConfirmTitle">保存更改？</h3></div><div class="dialogbody"><p id="settingsConfirmMessage">设置有未保存的更改，是否保存？</p><p id="settingsConfirmError" role="alert"></p></div><div class="dialogfoot"><button id="settingsContinue">继续编辑</button><button id="settingsDiscard">不保存退出</button><button id="settingsConfirmSave" class="primary" autofocus>保存并关闭</button></div></dialog>
 <dialog id="detailConfirmDialog" aria-labelledby="detailConfirmTitle"><div class="dialoghead"><h3 id="detailConfirmTitle">保存人工审核修改？</h3></div><div class="dialogbody"><p>人工结论或建议有修改。商品资料的编辑仍需通过资料区单独保存。</p></div><div class="dialogfoot"><button id="detailConfirmContinue">继续编辑</button><button id="detailConfirmDiscard">不保存并关闭</button><button id="detailConfirmSave" class="primary">保存并关闭</button></div></dialog>
@@ -138,17 +138,17 @@ button,input,textarea,select,.review-note textarea{background:#f8faf3}.toolbar,t
 <dialog id="decisionDialog" aria-labelledby="decisionTitle"><div class="dialoghead"><h3 id="decisionTitle">修改结论</h3><button class="close" data-action="decision-cancel" aria-label="关闭修改结论">×</button></div><div class="dialogbody"><label for="decisionChoice">选择结论</label><select id="decisionChoice"><option value="passed">通过</option><option value="excluded">淘汰</option><option value="similar">已找同款</option></select><label for="decisionNote">修改说明（选填）</label><textarea id="decisionNote" maxlength="500"></textarea><label for="decisionEvidence">原阻断判断有误的核实依据（存在禁售或必要条件阻断时必填）</label><textarea id="decisionEvidence" maxlength="1000"></textarea><p id="decisionError" role="alert"></p></div><div class="dialogfoot"><button data-action="decision-cancel">取消</button><button class="primary" data-action="decision-save">保存</button></div></dialog>
 <style>
 .image-strip{border:1px solid var(--line);border-radius:8px;padding:10px;margin-bottom:18px}.image-strip .image-track{display:flex;flex-wrap:nowrap;gap:10px;overflow-x:auto;padding-bottom:10px;overscroll-behavior-x:contain;scrollbar-gutter:stable}.image-track .product-image{flex:0 0 110px;height:112px;cursor:pointer}.image-track img{width:100px;height:100px;object-fit:contain}.image-strip .label{margin-bottom:8px}.overview-card{padding:12px;border-radius:8px;background:#edf5f0;margin-bottom:12px}.overview-card h4{font-size:14px;margin:0 0 7px}.overview-card p{margin:0;line-height:1.7}.review-brief p{margin:8px 0;line-height:1.65}.review-alert{color:#9b3d32;background:#fff2ef;padding:10px;border-radius:6px}.detail-tools{display:flex;gap:8px}.review-column details{margin-top:14px}.review-column summary{cursor:pointer}.review-column .review-evidence{font-size:13px;line-height:1.7}.review-evidence p{white-space:pre-wrap;overflow-wrap:anywhere}.decision-note{font-size:12px;color:var(--muted)}#decisionDialog{width:460px}#decisionDialog label{display:block;margin:12px 0 6px}#decisionDialog select,#decisionDialog textarea{width:100%;padding:10px;border:1px solid var(--line);border-radius:6px}#decisionError{color:#a53d38}#dtFooter{flex-shrink:0;flex-wrap:wrap}#detailDialog .dialoghead,#dtFooter{z-index:2;background:#fff}
-</style><div id="toast"></div>
+</style><style>#detailNotice{margin:10px 0 0;padding:11px 14px;border:1px solid #e6af6a;border-radius:7px;background:#fff0d9;color:#913d0b;font-size:14px;line-height:1.6;white-space:normal}#detailDialog .dialoghead>div{flex:1}#importError{background:#fff0d9;padding:12px;border-radius:7px}#importError:empty{display:none}</style><div id="toast"></div>
 <script>
 'use strict';
 // Connection settings are copied from the inspected deployment by build.py.
 const WORKER_URL = 'https://scraper-proxy.1172743763.workers.dev';
 const TOKEN = 'ebay1031';
-const BUILD = '2026-11-16-manual-12';
+const BUILD = '2026-11-16-materials-13';
 const PROHIBITION_REVIEW_VERSION=3;
 const MISSING_SOURCE_NOTICE='AI 审核结果缺少能对应到商品原文的证据';
 const AUDIT_CONCURRENCY = 2;
-const SELLER_POLICY_VERSION='2026-11-16-human-review-v1';
+const SELLER_POLICY_VERSION='2026-11-16-platform-materials-v2';
 const $ = id => document.getElementById(id);
 const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const text = v => Array.isArray(v) ? v.map(text).join('\n') : v && typeof v === 'object' ? JSON.stringify(v) : String(v ?? '');
@@ -188,7 +188,14 @@ function saveSettings(){
   exportPrefs=draft;if($('settingsConfirmDialog').open)$('settingsConfirmDialog').close();$('settingsDialog').close();return true;
 }
 function discardSettings(){syncSettingsControls();$('settingsConfirmDialog').close();$('settingsDialog').close();}
-function toast(s) { $('toast').textContent=s; $('toast').style.display='block'; clearTimeout(toast.timer); toast.timer=setTimeout(()=>$('toast').style.display='none',5000); }
+function showDetailNotice(message){
+ const box=$('detailNotice');if(!box)return;
+ box.textContent=message||'';box.hidden=!message;if(message){$('toast').style.display='none';clearTimeout(toast.timer);}
+}
+function toast(s) {
+ if($('detailDialog')?.open){showDetailNotice(s);return;}
+ $('toast').textContent=s;$('toast').style.display='block';clearTimeout(toast.timer);toast.timer=setTimeout(()=>$('toast').style.display='none',5000);
+}
 function batch(id=app.currentBatchId) {return app.batches.find(b=>b.id===id);}
 function itemOf(bid,iid) {return batch(bid)?.items.find(i=>i.itemId===iid);}
 function amazon(i) {return `https://www.amazon.com/dp/${i.asin}`;}
@@ -311,6 +318,14 @@ async function loadWorkbench({automatic=false}={}){
   else {const queued=app.batches.find(b=>b.runStatus==='queued');if(queued)fail(startBatch(queued.id));}
 }
 async function maintainConnection(force=false){
+  if(app.importIntent&&app.pendingSave&&!app.importBusy&&!app.processing&&!app.saving&&!app.fetching){
+    if(navigator.onLine===false||(app.nextImportRecoveryAt||0)>Date.now())return;
+    app.nextImportRecoveryAt=Date.now()+10000;
+    try{await fetchData({automatic:true});if(!app.pendingSave&&app.savedBatches?.has(app.importIntent.batchId)){
+      const id=app.importIntent.batchId;app.importIntent=null;app.resumeAfterSave=null;$('importDialog').close();$('btnConfirmImport').disabled=false;$('btnConfirmImport').textContent='确认并开始';app.view='home';render();fail(startBatch(id));
+    }}catch(error){$('importError').textContent='正在自动核对创建结果，请勿重复导入。'+(error.status===409?'云端记录已变化，请刷新核对。':'');}
+    return;
+  }
   if(navigator.onLine===false||app.processing||app.starting||app.fetching||app.saving
     ||app.detailBusy||app.adminBusy||detailDirty||document.querySelector('dialog[open]'))return;
   if(force){app.nextReadRetryAt=0;app.nextRecoveryAt=0;}
@@ -496,6 +511,18 @@ function canManualPass(i){
 function humanFinal(i){return !!existingManual(i);}
 function manualBlockCorrected(i){const m=existingManual(i);return m?.decision==='passed'&&m.blockCorrection?.auditId===(i.audit?._request_id||null)&&m.blockCorrection?.dataRevision===(i.dataRevision||0)&&m.blockCorrection?.evidence?.trim().length>=10;}
 
+function needsMaterialVerification(i){
+ const m=i.audit?.platform_materials||i.audit?.seller_review?.materials;
+ return !!m&&(['possible','required'].includes(m.status));
+}
+function materialSummary(i){
+ const m=i.audit?.platform_materials||i.audit?.seller_review?.materials;
+ if(!m)return '还没查清需要哪些材料，暂不能通过。';
+ const name=reviewChinese(m.requirements?.[0],'相关材料').slice(0,12);
+ if(m.status==='required')return m.supplier_status==='unavailable'?'需要'+name+'，货源无法提供。':m.supplier_status==='available'?'已取得'+name+'，还需核对本型号。':'需要'+name+'，未确认货源能否提供。';
+ if(m.status==='possible')return '还没查清是否需要材料，暂不能通过。';
+ return '本次未发现需额外提交的材料。';
+}
 function sourceAvailability(i){
   const f=i.collected||{},r=f._raw?.data||f._raw?.product||f._raw?.item||f._raw||{};
   const stock=f.stock_count??f.stock??r.stock_count??r.stock??r.inventory??r['库存'];
@@ -579,6 +606,7 @@ function legacyAudit(i){
 function exportCheck(i){
   if(confirmedBlocker(i)&&!manualBlockCorrected(i))return {ok:false,reason:'原阻断依据尚未纠正，不能导出'};
   if(!manualPassCurrent(i))return {ok:false,reason:'需要人工通过后才能导出'};
+  if(needsMaterialVerification(i)&&!manualBlockCorrected(i))return {ok:false,reason:'上架材料尚未核实，不能导出'};
   if(!manualPassCurrent(i)){
     if(pendingProhibitionRefresh(i))return {ok:false,reason:'旧结论需按最新标准完整复审'};
     if(!sellerAuditCurrent(i))return {ok:false,reason:'需要按最新审核标准重新审核'};
@@ -605,7 +633,8 @@ function existingManual(i){
 function matchingManualStandards(i){
   const category=text(i.collected?.category).trim();if(!category)return [];
   const seen=new Set(),notes=[];
-  for(const b of app.batches)for(const row of b.items||[]){
+  const owner=app.batches.find(b=>b.items?.includes(i));
+  for(const row of owner?.items||[]){
     if(row.itemId===i.itemId)continue;
     const m=row.manualSuggestion?.rememberOpinion?row.manualSuggestion:row.manualDecision?.rememberOpinion?row.manualDecision:null;
     const sourceCategory=text(m?.category||row.collected?.category).trim();
@@ -770,18 +799,18 @@ function itemStatus(i,b){
  if(m?.decision==='excluded')return ['淘汰','err'];
  const recovery=queuedRecoveryEntry(i,b);
  if(recovery)return i.reviewStatus==='auditing'?['审核中','run']:['待处理','wait'];
- if(savedCollectionProblem(i)||['error','sync_error'].includes(i.collectStatus))return ['系统异常','warn'];
+ if(savedCollectionProblem(i)||['error','sync_error'].includes(i.collectStatus))return ['系统异常','error'];
  if(['skipped','excluded','not_selected'].includes(i.reviewStatus))return ['淘汰','err'];
  if(i.reviewStatus==='similar')return ['已找同款','gray'];
  if(i.reviewStatus==='auditing')return ['审核中','run'];
  if(i.collectStatus==='collecting')return ['处理中','run'];
  if(m?.decision==='passed'){
-   if(systemIssue(i))return ['系统异常','warn'];
+   if(systemIssue(i))return ['系统异常','error'];
    if(exportCheck(i).ok)return ['可导出','pass'];
    if(!sourceAvailability(i).ok)return ['待人工','warn'];
    return ['处理中','run'];
  }
- if(systemIssue(i))return ['系统异常','warn'];
+ if(systemIssue(i))return ['系统异常','error'];
  if(['passed','verify','error','unconfirmed'].includes(i.reviewStatus))return ['待人工','warn'];
  return ['待处理','wait'];
 }
@@ -842,6 +871,7 @@ async function fetchData({automatic=false}={}) {
 function savedBatchSnapshot(b){const {items=[],...fields}=b;return {fields:JSON.parse(JSON.stringify(fields)),items:new Map(items.map(i=>[i.itemId,JSON.stringify(i)]))};}
 function rememberSavedPayload(payload){
   app.savedBatches??=new Map();
+  if(payload.createBatch)app.savedBatches.set(payload.createBatch.id,savedBatchSnapshot(payload.createBatch));
   if(payload.batches){app.savedBatches.clear();for(const b of payload.batches)app.savedBatches.set(b.id,savedBatchSnapshot(b));}
   else if(payload.batch)app.savedBatches.set(payload.batch.id,savedBatchSnapshot(payload.batch));
   else if(payload.patch){const p=payload.patch,old=app.savedBatches.get(p.batchId);if(old){old.fields=p.fields;for(const i of p.items)old.items.set(i.itemId,JSON.stringify(i));}}
@@ -881,11 +911,12 @@ function savedPayloadMatches(saved,payload){
     return JSON.stringify(canonical(fields))===JSON.stringify(canonical(p.fields))
       &&p.items.every(i=>current.has(i.itemId)&&JSON.stringify(canonical(current.get(i.itemId)))===JSON.stringify(canonical(i)));
   }
-  const expected=payload.batch?[payload.batch]:payload.batches;
-  const actual=payload.batch?saved.batches.filter(b=>b.id===payload.batch.id):saved.batches;
+  const expected=payload.createBatch?[payload.createBatch]:payload.batch?[payload.batch]:payload.batches;
+  const scopedBatch=payload.createBatch||payload.batch;
+  const actual=scopedBatch?saved.batches.filter(b=>b.id===scopedBatch.id):saved.batches;
   return JSON.stringify(canonical(expected))===JSON.stringify(canonical(actual));
 }
-function saveData(activeBatch) {
+function saveData(activeBatch,{create=false}={}) {
   app.saveEpoch=(app.saveEpoch||0)+1;app.saving=(app.saving||0)+1;
   const work=async()=>{
     try {
@@ -894,7 +925,7 @@ function saveData(activeBatch) {
         if(!useD1){const wait=1100-(Date.now()-(app.lastWrite||0));if(wait>0)await sleep(wait);}
         if(app.pendingSave)throw new Error('上次保存尚未确认，请先刷新核对');
         const receipted=useD1&&app.dataContract===2;
-        const changes=useD1&&activeBatch?(receipted?scopedSaveChanges(activeBatch):{batch:activeBatch}):{batches:app.batches};
+        const changes=useD1&&activeBatch?(create?{createBatch:activeBatch}:receipted?scopedSaveChanges(activeBatch):{batch:activeBatch}):{batches:app.batches};
         if(receipted&&changes.patch&&!changes.patch.items.length
           &&JSON.stringify(changes.patch.fields)===JSON.stringify(app.savedBatches?.get(activeBatch.id)?.fields))return true;
         const payload=JSON.parse(JSON.stringify({version:app.serverVersion,...changes}));
@@ -1660,7 +1691,7 @@ async function queueVerification(b,prohibition=false){
     Object.assign(i,{reviewStatus:'pending',audit:null,auditRequestId:null,auditRequestHash:null,auditReceiptConfirmed:false,
       auditRecoveryBlocked:false,auditFailureKnown:false,auditRecoverCount:0,auditWaitSince:null,auditNextCheckAt:0,reason:prohibition?'等待补审旧记录禁售与限售':'等待批量重审待核验商品'});
   }
-  try{await saveData();}
+  try{await saveData(b);}
   catch(e){entries.forEach(({index},n)=>{b.items[index]=previous[n];});render();throw e;}
 }
 async function retryFailures() {
@@ -1686,7 +1717,7 @@ async function retryFailures() {
     }
     if(i.copyStatus==='error')i.copyStatus='pending';
   }
-  await saveData();await startBatch(b.id);
+  await saveData(b);await startBatch(b.id);
 }
 function field(label,value){return `<div class="field"><div class="label">${esc(label)}</div><div class="text">${esc(text(value)||'未提供')}</div></div>`;}
 function imageLinks(v){if(typeof v==='string'){try{v=JSON.parse(v);}catch{v=v.split(/[\s,]+/);}}return (Array.isArray(v)?v:[]).filter(x=>typeof x==='string'&&/^https:\/\//i.test(x));}
@@ -1791,10 +1822,10 @@ function reviewPresentation(i){
  const prohibited=checks.find(c=>c.area==='prohibited'),materials=a.seller_review?.materials,risk=a.seller_review?.after_sales;
  const overview=productOverview(i);
  const rows=[
- ['商品说明',overview,38],
- ['禁售检查',issue?'审核未完成，需人工核实':reviewChinese(prohibited?.reason,'未取得完整判断'),20],
- ['材料要求',reviewChinese(materials?.reason,'适用要求待核实'),18],
- ['经营风险',reviewChinese(risk?.reason,'请人工核对实际使用风险'),18]
+ ['商品说明',overview,26],
+ ['禁售检查',issue?'审核未完成，需人工核实':reviewChinese(prohibited?.reason,'未取得完整判断'),16],
+ ['上架材料',materialSummary(i),32],
+ ['经营风险',reviewChinese(risk?.reason,'请人工核对使用风险'),10]
  ];
  // Default overview and summaries share a strict total 100-character budget, including labels.
  let remaining=100;
@@ -1812,7 +1843,9 @@ function renderHumanEvidence(i){
  const rows=checks.map((c,index)=>'<article><strong>'+esc(labels[c.area]||'分项判断')+'</strong><p>'+esc(reviewChinese(c.reason))+'</p><button class="linkbtn" data-action="source-evidence" data-check="'+index+'">在左侧查看商品原文依据</button></article>').join('');
  const sellers=['materials','after_sales','scope'].map((key,index)=>a.seller_review?.[key]?'<article><strong>'+['材料要求','经营与售后','实际用途'][index]+'</strong><p>'+esc(reviewChinese(a.seller_review[key].reason))+'</p></article>':'').join('');
  const policies=refs.map(r=>'<article><p>'+esc(reviewChinese(r.clause_zh,'这条旧记录没有中文政策说明'))+'</p><p>'+esc(reviewChinese(r.explanation,''))+'</p>'+(/^https:\/\/(?:www\.)?ebay\.com\//i.test(r.source||'')?'<a href="'+esc(r.source)+'" target="_blank" rel="noopener">打开官方政策 ↗</a>':'')+'</article>').join('');
- return '<details><summary>展开判断说明与依据</summary><div class="review-evidence">'+(rows+sellers||'<p>尚未取得完整分析，请查看左侧原始资料。</p>')+'</div></details><details><summary>展开政策依据</summary><div class="review-evidence">'+(policies||'<p>本次没有可展示的中文政策依据，不能据此认定已排除全部风险。</p>')+'</div></details>';
+ const m=a.platform_materials||a.seller_review?.materials;const stages={before_listing:'上架前',listing:'填写刊登时',on_request:'收到平台通知时',import:'进口美国时',shipping:'安排运输时',not_identified:'本次未识别到额外提交要求',unclear:'还没查清提供时机'};
+ const materialDetail=m?'<details><summary>上架材料：具体要求与核实情况</summary><p>'+esc(materialSummary(i))+'</p><p>为什么涉及：'+esc(reviewChinese(m.applicability_reason||m.reason))+'</p><p>提供时机：'+esc(stages[m.submission_stage]||stages.unclear)+'</p><p>货源情况：'+esc(reviewChinese(m.supplier_reason,'尚未确认当前货源能否提供'))+'</p></details>':'';
+ return materialDetail+'<details><summary>展开判断说明与依据</summary><div class="review-evidence">'+(rows+sellers||'<p>尚未取得完整分析，请查看左侧原始资料。</p>')+'</div></details><details><summary>展开政策依据</summary><div class="review-evidence">'+(policies||'<p>本次没有可展示的中文政策依据，不能据此认定已排除全部风险。</p>')+'</div></details>';
 }
 
 function recordDetailBaseline(){const current=itemOf(app.currentBatchId,app.detailItemId),f=current?.collected||{};app.detailBaseline={manualReason:current?manualSuggestion(current):'',manualStatus:existingManual(current||{})?.decision||'',editTitle:text(f.title),editBullets:text(f.bullets),editDesc:text(f.description)};}
@@ -1878,7 +1911,7 @@ function openDetail(iid,{preserveNavigation=false}={}){
  if(!preserveNavigation||app.detailNav?.batchId!==b.id||!app.detailNav?.ids.includes(iid)){
    const ids=filtered(b).map(x=>x.itemId);app.detailNav={batchId:b.id,filter:app.filterStatus,ids:ids.includes(iid)?ids:[iid]};
  }
- if(changed){app.detailExpanded={};app.detailTab='source';}app.detailItemId=iid;detailDirty=false;
+ if(changed){app.detailExpanded={};app.detailTab='source';showDetailNotice('');}app.detailItemId=iid;detailDirty=false;
  app.lastViewed={batchId:b.id,itemId:iid};renderItems();
  $('dtTitle').textContent=i.asin;const status=itemStatus(i,b);$('dtStatus').textContent=status[0];$('dtStatus').className='badge b-'+status[1];
  $('detailMeta').innerHTML='<span>品牌：<strong>'+esc(brandOf(i)||'未提供')+'</strong></span><a href="'+amazon(i)+'" target="_blank" rel="noopener">亚马逊原链接 ↗</a>';
@@ -1923,6 +1956,7 @@ async function saveHumanDecision(b,i,decision,{advance=false,note='',evidence=''
  if(i.reviewStatus==='auditing'||i.collectStatus==='collecting')throw Error('当前商品仍在处理中，请等待完成后决定');
  if(decision==='passed'){
    if(!canManualPass(i))throw Error('商品资料缺失或对应错误，请先修正资料或重新采集');
+   if(needsMaterialVerification(i)&&!manualBlockCorrected(i)&&evidence.trim().length<10)throw Error('上架材料尚未核实，请在修改结论中记录适用要求及货源材料的核实依据，再决定是否通过');
    if(!sourceAvailability(i).ok)throw Error('当前货源尚不满足要求，请更新货源，或选择淘汰、已找同款');
    if(confirmedBlocker(i)&&!manualBlockCorrected(i)&&evidence.trim().length<10)throw Error('原记录存在禁售或必要条件阻断，请在修改结论中填写核实依据，不能直接解除真实禁售');
  }
@@ -1930,7 +1964,7 @@ async function saveHumanDecision(b,i,decision,{advance=false,note='',evidence=''
  app.detailBusy=true;renderDetailFooter(i);let committed=false;
  try{
    archive(i);i.decisionRevision=(i.decisionRevision||0)+1;
-   const correction=decision==='passed'&&confirmedBlocker(i)?{auditId:i.audit?._request_id||null,dataRevision:i.dataRevision||0,evidence:evidence.trim()||existingManual(i)?.blockCorrection?.evidence,time:now()}:undefined;
+   const correction=decision==='passed'&&(confirmedBlocker(i)||needsMaterialVerification(i))?{auditId:i.audit?._request_id||null,dataRevision:i.dataRevision||0,evidence:evidence.trim()||existingManual(i)?.blockCorrection?.evidence,time:now()}:undefined;
    i.manualDecision={decision,reason:note.trim().slice(0,500),time:now(),dataRevision:i.dataRevision||0,rememberOpinion:!!remember,blockCorrection:correction};
    (i.manualHistory??=[]).push({...i.manualDecision});i.reviewStatus=decision;
    i.auditRecoveryBlocked=false;i.auditFailureKnown=false;
@@ -1969,6 +2003,7 @@ async function detailAction(action){
    try{await saveHumanDecision(b,i,$('decisionChoice').value,{note:$('decisionNote').value,evidence:$('decisionEvidence').value});}
    catch(error){$('decisionError').textContent=error.message;}return;
  }
+ if(action==='manual-pass'&&needsMaterialVerification(i)&&!manualBlockCorrected(i)){openDecisionDialog(i);$('decisionError').textContent='请先核实上架材料，并填写核实依据；未查清前不能直接通过。';return;}
  if(['manual-pass','manual-exclude','manual-similar'].includes(action))return saveHumanDecision(b,i,{'manual-pass':'passed','manual-exclude':'excluded','manual-similar':'similar'}[action],{advance:true,note:$('manualReason')?.value||'',remember:!!$('rememberOpinion')?.checked});
  if(action==='detail-prev'||action==='detail-next')return navigateDetail(action==='detail-prev'?-1:1);
  if(action==='tab-source'||action==='tab-copy'){app.detailTab=action==='tab-copy'?'copy':'source';renderDetailSource(i);return;}
@@ -2026,6 +2061,7 @@ function downloadRows(rows,name) {
 function doExport(bid,selected=false){const b=batch(bid);const d=exportRows(b,selected);if(d.legacy&&!confirm(`其中${d.legacy}条是旧版已完成记录，未记录资料版本。本次按原通过结论和文案导出，不代表已按新规则重审。是否继续？`))return;downloadRows(d.rows,b.name+'_通过');toast(`已导出${d.count}条${d.omitted?'，跳过未就绪'+d.omitted+'条':''}${d.missingTotal?'；'+d.missingTotal+'条未返回采集总价，金额留空':''}`);}
 function exportFailures(){const b=batch();const rows=[['SKU','Amazon链接','失败环节','失败原因'],...b.items.filter(hasFailure).map(i=>[i.asin,amazon(i),['error','sync_error'].includes(i.collectStatus)?'采集／结果同步':['error','unconfirmed'].includes(i.reviewStatus)?'审核':'文案',i.reason])];if(rows.length===1)return toast('没有接口或程序失败项');downloadRows(rows,b.name+'_失败清单');}
 function closeDialog(d){
+  if(d.id==='importDialog'&&app.importBusy){$('importError').textContent='正在创建批次，请稍候。';return false;}
   if(d.id==='decisionDialog')return closeDecisionDialog();
   if(['batchAdminDialog','batchTrashDialog'].includes(d.id)&&batchAdmin.busy){toast('正在保存管理员操作，请稍候');return false;}
   if(d.id==='settingsDialog'&&settingsChanged()){$('settingsConfirmError').textContent='';if(!$('settingsConfirmDialog').open)$('settingsConfirmDialog').showModal();return false;}
@@ -2048,25 +2084,39 @@ function importSummary(){
   const invalid=values.filter(v=>!asin(v)),valid=[...values.map(asin).filter(Boolean),...app.fileAsins];
   const unique=new Set(valid),seen=new Set(),duplicates=new Set();
   for(const id of valid){if(seen.has(id))duplicates.add(id);seen.add(id);}
-  const existing=new Set(app.batches.flatMap(b=>b.items.map(i=>i.asin)));
-  const historical=[...unique].filter(id=>existing.has(id));
   const sample=list=>list.slice(0,20).join('、')+(list.length>20?'等 '+list.length+' 条':'');
   $('importSummary').textContent=`粘贴 ${values.length} 条，文件 ${app.fileAsins.length} 条；合并去重后格式有效SKU ${unique.size} 条（未验证商品是否存在）。`
     +(duplicates.size?' 重复项已合并：'+sample([...duplicates])+'。':'')
     +(invalid.length?' 无效内容：'+sample(invalid)+'；必须修正后才能提交。':'')
-    +(historical.length?' 已有批次中出现：'+sample(historical)+'；再次提交将创建新批次，不会复用旧审核结论。':'')
+    +' 新批次独立采集与审核，不读取其他批次的历史结果。'
     +(app.fileError||'');
 }
 async function confirmImport(){
-  if(!app.readAt)throw new Error('尚未读取已有批次，请先重新连接；当前输入仍保留。');
-  if(app.stopping||app.pendingSave)throw new Error('上次保存尚未确认，请先查询原保存结果；当前输入仍保留。');
-  if(app.adminBusy)throw new Error('批次管理正在保存，请稍候再导入');
-  if(app.fileError)throw new Error(app.fileError);const values=$('skuInput').value.split(/[\s,;，；]+/).filter(Boolean);
-  if(values.some(v=>!asin(v)))throw new Error('粘贴内容存在无效SKU，请修正');const ids=[...new Set([...values.map(asin),...app.fileAsins])];if(!ids.length)throw new Error('请提供SKU');
-  const b={id:'b_'+uid(),name:$('inputBatchName').value.trim()||'批次_'+new Date().toLocaleDateString('sv-SE'),createdAt:now(),flowVersion:1,runStatus:app.processing||app.starting?'queued':'idle',items:ids.map(a=>({itemId:uid(),asin:a,collectStatus:'pending',reviewStatus:'pending',copyStatus:'pending',dataRevision:1,reason:'等待处理'}))};
-  app.batches.push(b);await saveData();$('importDialog').close();app.view='home';render();
-  if(!app.processing&&!app.starting)fail(startBatch(b.id));else {render();toast('新批次等待中；不会打断当前任务或提前提交采集、审核');}
+ if(app.importBusy)return;
+ app.importBusy=true;const button=$('btnConfirmImport');button.disabled=true;button.textContent='正在创建批次…';$('importError').textContent='';
+ let created=null;
+ try{
+   if(!app.readAt)throw Error('尚未连接批次后台，请先重新连接，输入仍保留。');
+   if(app.storage!=='d1'||app.dataContract!==2)throw Error('后台尚未支持独立创建批次，请部署配套后台后重试。');
+   if(app.stopping||app.pendingSave)throw Error('上次保存尚未确认，系统正在核对，请稍候。');
+   if(app.adminBusy)throw Error('批次管理正在保存，请稍候。');
+   if(app.fileError)throw Error(app.fileError);
+   const values=$('skuInput').value.split(/[\s,;，；]+/).filter(Boolean);
+   if(values.some(v=>!asin(v)))throw Error('存在无效SKU，请修正');
+   const ids=[...new Set([...values.map(asin),...app.fileAsins])];if(!ids.length)throw Error('请提供SKU');
+   created={id:'b_'+uid(),name:$('inputBatchName').value.trim()||'批次_'+new Date().toLocaleDateString('sv-SE'),createdAt:now(),flowVersion:1,runStatus:app.processing||app.starting?'queued':'idle',items:ids.map(a=>({itemId:uid(),asin:a,collectStatus:'pending',reviewStatus:'pending',copyStatus:'pending',dataRevision:1,reason:'等待处理'}))};
+   app.importIntent={batchId:created.id};app.batches.push(created);
+   await saveData(created,{create:true});
+   $('importDialog').close();app.importIntent=null;app.view='home';render();
+   if(!app.processing&&!app.starting)fail(startBatch(created.id));
+   else toast('新批次已创建，等待当前任务结束后处理。');
+ }catch(error){
+   if(created&&!app.pendingSave&&!app.savedBatches?.has(created.id))app.batches=app.batches.filter(b=>b.id!==created.id);
+   $('importError').textContent=app.pendingSave?'创建结果尚未确认，系统会查询原保存记录，请勿重复提交。':error.message;
+   throw error;
+ }finally{app.importBusy=false;button.disabled=!!app.pendingSave;button.textContent=app.pendingSave?'正在确认创建结果…':'确认并开始';}
 }
+
 const batchAdmin={mode:false,selected:new Set(),trashSelected:new Set(),trashEntries:[],action:null,ids:[],operationId:null,busy:false,backendReady:false};
 function batchAdminSelection(){
   batchAdmin.selected=new Set([...batchAdmin.selected].filter(id=>app.batches.some(b=>b.id===id)));
@@ -2230,17 +2280,17 @@ async function init() {
   $('btnRunBatch').onclick=()=>{const b=batch(app.currentBatchId);if(b)fail(b.runStatus==='running'&&app.processing&&app.activeId===b.id?setPaused():startBatch(b.id,{recheckProhibition:stage(b)==='需要复审'&&b.items.some(pendingProhibitionRefresh)}));};
     $('btnBatchRecheck').onclick=()=>fail(startBatch(app.currentBatchId,{recheckSystemError:true}));
   $('btnStrictReview').onclick=()=>fail(startBatch(app.currentBatchId,{recheckProhibition:true}));
-  $('renameBatch').onclick=()=>{if(app.processing)return toast('请先暂停并等待当前步骤保存');const b=batch(),v=prompt('批次名称',b.name);if(v?.trim()){b.name=v.trim();fail(saveData().then(render));}};
+  $('renameBatch').onclick=()=>{if(app.processing)return toast('请先暂停并等待当前步骤保存');const b=batch(),v=prompt('批次名称',b.name);if(v?.trim()){b.name=v.trim();fail(saveData(b).then(render));}};
   $('btnExportItems').onclick=()=>{try{doExport(app.currentBatchId,app.selected.size>0);}catch(e){toast(e.message);}};$('btnExportFailures').onclick=()=>{try{exportFailures();}catch(e){toast(e.message);}};
   $('searchInput').oninput=e=>{app.searchQuery=e.target.value;app.page=0;renderItems();};$('filterStatus').onchange=e=>{app.filterStatus=e.target.value;app.page=0;renderItems();};
   $('searchInput').addEventListener('paste',e=>{const value=e.clipboardData?.getData('text');if(value&&/[\r\n]/.test(value)){e.preventDefault();const el=e.target,start=el.selectionStart??el.value.length,end=el.selectionEnd??start;el.value=el.value.slice(0,start)+value.replace(/[\r\n]+/g,' ')+el.value.slice(end);app.searchQuery=el.value;app.page=0;renderItems();}});
   $('selectPage').onclick=e=>{filtered(batch()).slice(app.page*50,app.page*50+50).forEach(i=>e.target.checked?app.selected.add(i.itemId):app.selected.delete(i.itemId));renderItems();};
   $('selectAllFiltered').onclick=()=>{filtered(batch()).forEach(i=>app.selected.add(i.itemId));renderItems();};$('clearSelection').onclick=()=>{app.selected.clear();renderItems();};
   $('prevPage').onclick=()=>{app.page--;renderItems();};$('nextPage').onclick=()=>{app.page++;renderItems();};
-  $('importBtn').onclick=()=>{app.fileAsins=[];app.fileError='';$('skuInput').value='';$('goodsFile').value='';$('inputBatchName').value='';$('importError').textContent='';importSummary();$('importDialog').showModal();};
+  $('importBtn').onclick=()=>{if(app.importBusy||app.importIntent){$('importDialog').showModal();return;}app.fileAsins=[];app.fileError='';$('skuInput').value='';$('goodsFile').value='';$('inputBatchName').value='';$('importError').textContent='';importSummary();$('importDialog').showModal();};
   $('skuInput').oninput=importSummary;
   $('goodsFile').onchange=async e=>{app.fileAsins=[];app.fileError='';try{const f=e.target.files[0];if(f){ensureExcel();const w=XLSX.read(await f.arrayBuffer(),{type:'array'});app.fileAsins=parseImportRows(XLSX.utils.sheet_to_json(w.Sheets[w.SheetNames[0]],{header:1,defval:''}));}}catch(e){app.fileError=e.message;}importSummary();};
-  $('btnConfirmImport').onclick=()=>{const button=$('btnConfirmImport');button.disabled=true;confirmImport().catch(e=>$('importError').textContent=e.message).finally(()=>button.disabled=false);};
+  $('btnConfirmImport').onclick=()=>{confirmImport().catch(()=>{});};
   document.addEventListener('change',e=>{const id=e.target.dataset.select;if(id){e.target.checked?app.selected.add(id):app.selected.delete(id);renderItems();}});
   document.addEventListener('input',e=>{if(e.target.closest('#detailDialog'))updateDetailDirty();});
   document.addEventListener('toggle',e=>{const d=e.target;if(d.dataset?.auditRecord&&d.open)fail(loadAuditRecordPanel(d));if(d.dataset?.panel&&d.open&&!d.dataset.loaded){const i=itemOf(app.currentBatchId,app.detailItemId);if(!i)return;d.querySelector('.panel-content').innerHTML=detailPanel(d.dataset.panel,i);d.dataset.loaded='1';}},true);
