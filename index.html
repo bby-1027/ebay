@@ -564,19 +564,19 @@ function canManualPass(i){
 }
 function humanFinal(i){return !!existingManual(i);}
 function manualBlockCorrected(i){const m=existingManual(i);return m?.decision==='passed'&&m.blockCorrection?.auditId===(i.audit?._request_id||null)&&m.blockCorrection?.dataRevision===(i.dataRevision||0)&&m.blockCorrection?.evidence?.trim().length>=10;}
-
 function needsMaterialVerification(i){
  const m=i.audit?.platform_materials||i.audit?.seller_review?.materials;
- return !!m&&(['possible','required'].includes(m.status))||!m&&(humanProhibitionEligible(i.audit)||i.audit?._audit_mode==='prohibition_only');
+ // AI漏答或适用性待判断是人工审阅提示，不是强制填写说明的依据。
+ return m?.status==='required';
 }
 function materialSummary(i){
  const m=i.audit?.platform_materials||i.audit?.seller_review?.materials;
  if(i.audit?.screening_stop?.layer==='prohibited')return '已按禁售要求淘汰，材料要求未继续核实。';
  if(i.audit?.screening_stop?.layer==='business')return '本次按经营风险淘汰，材料要求未继续核实。';
- if(!m)return '还没查清需要哪些材料，暂不能通过。';
+ if(!m)return '材料检查未完成，请人工判断是否有适用要求。';
  const name=reviewChinese(m.requirements?.[0],'相关材料').slice(0,12);
  if(m.status==='required')return m.supplier_status==='unavailable'?'需要'+name+'，货源无法提供。':m.supplier_status==='available'?'已取得'+name+'，还需核对本型号。':'需要'+name+'，未确认货源能否提供。';
- if(m.status==='possible')return '还没查清是否需要材料，暂不能通过。';
+ if(m.status==='possible')return '是否需要材料尚待人工判断。';
  return '本次未发现需额外提交的材料。';
 }
 function sourceAvailability(i){
@@ -584,11 +584,18 @@ function sourceAvailability(i){
   const stock=f.stock_count??f.stock??r.stock_count??r.stock??r.inventory??r['库存'];
   const availability=text(f.stock_status??f.availability??r.stock_status??r.availability??'');
   const fba=f.is_fba??r.is_fba??f.fulfillment??r.fulfillment,fulfillment=text(fba).trim();
-  if((stock!=null&&text(stock).trim()!==''&&Number(stock)===0)||/unavailable|out of stock|不可售|无货|缺货/i.test(availability))return {ok:false,reason:'采集资料显示当前无货或不可售，请重新核对并更新货源'};
-  if(fba===false||/^(?:false|0|fbm)$/i.test(fulfillment))return {ok:false,reason:'当前货源不是FBA，不符合你的采购方式'};
-  const knownFba=fba===true||/^(?:true|1|fba|fulfilled by amazon|amazon fulfillment)$/i.test(fulfillment);
-  if(!knownFba&&!externalReviewReady(i))return {ok:false,reason:'采集资料尚未确认FBA货源，请更新采集或完成导出前货源复核'};
+  if((stock!=null&&text(stock).trim()!==''&&Number(stock)===0)||/unavailable|out of stock|不可售|无货|缺货/i.test(availability))return {ok:false,blocked:true,reason:'采集资料显示当前无货或不可售，请重新核对并更新货源'};
+  if(fba===false||/^(?:false|0|fbm|no|否|非\s*fba|non[- ]?fba|not fba|自配送|卖家(?:自)?配送|merchant fulfilled|fulfilled by merchant)$/i.test(fulfillment))return {ok:false,blocked:true,reason:'当前货源不是FBA，不符合你的采购方式'};
+  const knownFba=fba===true||/^(?:true|1|yes|是|fba|fulfilled by amazon|amazon fulfillment|亚马逊配送)$/i.test(fulfillment);
+  if(!knownFba&&!manualSourceConfirmed(i)&&!externalReviewReady(i))return {ok:false,canConfirm:true,reason:'采集资料尚未确认FBA货源；请人工核对，点击通过即记录已确认FBA且当前可购买'};
+  if(manualSourceConfirmed(i))return {ok:true,source:'human',reason:'货源已由人工确认为FBA且当时可购买；下单前仍需再次核对'};
   return {ok:true,reason:'采集只代表当时状态，下单前仍需核对货源'};
+}
+function manualSourceConfirmed(i){
+ const m=existingManual(i),r=m?.sourceConfirmation,b=app.batches.find(b=>b.items?.some(row=>row.itemId===i.itemId));
+ return m?.decision==='passed'&&r?.source==='human'&&r.fba===true&&r.available===true
+   &&r.batchId===b?.id&&r.itemId===i.itemId&&r.asin===i.asin&&r.dataRevision===(i.dataRevision||0)
+   &&r.auditRequestId===(i.audit?._request_id||null)&&r.time===m.time;
 }
 function externalReviewReady(i){
   const r=i.externalReview;
@@ -1873,8 +1880,9 @@ function renderDetailSource(i){
  const f=i.collected||{},copy=app.detailTab==='copy',data=i.copyData,clean=v=>stripBrandLabelLines(v,brandOf(i));
  const images=imageLinks(f.images).length?`<div class="image-strip"><div class="label">商品图片 · 左右滑动查看更多 · 点击放大</div><div class="image-track">${renderProductImages(f.images)}</div></div>`:'<p class="muted">本次未取得商品图片。</p>';
  $('detailSource').innerHTML=images+(copy?(data?readableField('标题',clean(data.title),'copy-title')+readableField('五点',clean(data.bullets),'copy-bullets')+readableField('长描述',clean(data.description),'copy-desc'):'<p>文案尚未完成。</p>'):readableField('标题',f.title,'source-title')+readableField('五点',f.bullets,'source-bullets')+readableField('长描述',f.description,'source-desc')+field('采集总价',latestCollectedPrice(i)||'未取得')+field('货源情况',sourceAvailability(i).reason));
- if(savedCollectionProblem(i)||['error','sync_error'].includes(i.collectStatus)||!sourceAvailability(i).ok)$('detailSource').innerHTML='<p class="review-alert">请核对本次商品资料与货源，未确认正确前不能直接通过。</p><button data-action="recollect">重新采集此商品</button>'+$('detailSource').innerHTML;
- $('sourceTab').setAttribute('aria-selected',String(!copy));$('copyTab').setAttribute('aria-selected',String(copy));
+   const source=sourceAvailability(i);
+  if(savedCollectionProblem(i)||['error','sync_error'].includes(i.collectStatus)||source.blocked)$('detailSource').innerHTML='<p class="review-alert">本次资料错误或货源不符合要求，不能通过。请更新资料与货源，或选择淘汰、已找同款。</p><button data-action="recollect">重新采集此商品</button>'+$('detailSource').innerHTML;
+  else if(source.canConfirm)$('detailSource').innerHTML='<p class="review-alert">货源信息尚未确认。请人工核对FBA和可购买状态，点击“通过”即记录已核对，无需填写备注。</p>'+$('detailSource').innerHTML;
 }
 function reviewChinese(value,fallback='尚未取得可读的中文说明'){
  const raw=text(value).normalize('NFKC');
@@ -1978,7 +1986,7 @@ async function loadAuditRecordPanel(panel){
 function renderDetailFooter(i){
  const busy=!!app.detailBusy,working=i.reviewStatus==='auditing'||i.collectStatus==='collecting';
  const done=humanFinal(i)||['excluded','not_selected','skipped','similar'].includes(i.reviewStatus)&&!savedCollectionProblem(i);
- const blocked=busy||working?'disabled':'',gate=prohibitionGate(i),passBlocked=busy||working?'disabled':'';
+ const blocked=busy||working?'disabled':'',gate=prohibitionGate(i),passBlocked=busy||working||sourceAvailability(i).blocked?'disabled':'';
  const actions=done?'<button class="primary" data-action="decision-open" '+(busy?'disabled':'')+'>修改结论</button>'
    :'<button class="primary" data-action="manual-pass" '+passBlocked+'>通过</button><button class="danger" data-action="manual-exclude" '+blocked+'>淘汰</button><button data-action="manual-similar" '+blocked+'>已找同款</button>';
  const retryCopy=manualPassCurrent(i)&&gate.ok&&i.copyStatus==='error'?'<button data-action="recopy" '+blocked+'>重新准备文案</button>':'';
@@ -2034,7 +2042,8 @@ function openDecisionDialog(i){
  app.decisionBaseline={decision:manual?.decision||(['excluded','not_selected','skipped'].includes(i.reviewStatus)?'excluded':'passed'),
    note:$('manualReason')?.value??manualSuggestion(i),evidence:''};
  app.decisionItem={batchId:app.currentBatchId,itemId:i.itemId,revision:i.dataRevision||0,decisionRevision:i.decisionRevision||0};
- $('decisionChoice').value=app.decisionBaseline.decision;$('decisionNote').value=app.decisionBaseline.note;
+  $('decisionChoice').value=app.decisionBaseline.decision;$('decisionNote').value=app.decisionBaseline.note;
+ const passOption=$('decisionChoice').querySelector('option[value="passed"]');if(passOption)passOption.disabled=!!sourceAvailability(i).blocked;
  $('decisionEvidence').value='';$('decisionError').textContent='';
  $('manualProhibitionFields').hidden=prohibitionGate(i).ok||!humanProhibitionEligible(i.audit);
  for(const id of ['manualBanEvidence','manualIpEvidence'])$(id).value='';
@@ -2059,7 +2068,8 @@ async function saveHumanDecision(b,i,decision,{advance=false,note='',evidence=''
    const gate=prohibitionGate(prohibition?{...i,manualProhibition:prohibition}:i);if(!gate.ok)throw Error(gate.reason);
    if(!canManualPass(i))throw Error('商品资料缺失或对应错误，请先修正资料或重新采集');
    if(needsMaterialVerification(i)&&!manualBlockCorrected(i)&&evidence.trim().length<10)throw Error('上架材料尚未核实，请记录适用要求及货源材料的核实依据，再决定是否通过');
-   if(!sourceAvailability(i).ok)throw Error('当前货源尚不满足要求，请更新货源，或选择淘汰、已找同款');
+   const source=sourceAvailability(i);
+   if(!source.ok&&!source.canConfirm)throw Error(source.reason+'；请更新货源，或选择淘汰、已找同款');
    if(confirmedBlocker(i)&&!manualBlockCorrected(i)&&evidence.trim().length<10)throw Error('原记录存在禁售或必要条件阻断，请填写核实依据，不能直接解除真实禁售');
  }
  const draft=JSON.parse(JSON.stringify(i)),priorIds=[...(app.detailNav?.ids||[])],priorIndex=priorIds.indexOf(i.itemId);
@@ -2071,7 +2081,9 @@ async function saveHumanDecision(b,i,decision,{advance=false,note='',evidence=''
    const correction=decision==='passed'&&(confirmedBlocker(i)||needsMaterialVerification(i))?{
      auditId:i.audit?._request_id||null,dataRevision:i.dataRevision||0,
      evidence:evidence.trim()||existingManual(i)?.blockCorrection?.evidence,time:now()}:undefined;
-   draft.manualDecision={decision,reason:note.trim().slice(0,500),time:now(),dataRevision:i.dataRevision||0,rememberOpinion:!!remember,blockCorrection:correction};
+     draft.manualDecision={decision,reason:note.trim().slice(0,500),time:now(),dataRevision:i.dataRevision||0,rememberOpinion:!!remember,blockCorrection:correction};
+   if(decision==='passed')draft.manualDecision.sourceConfirmation={source:'human',fba:true,available:true,batchId:b.id,
+     itemId:i.itemId,asin:i.asin,dataRevision:i.dataRevision||0,auditRequestId:i.audit?._request_id||null,time:draft.manualDecision.time};
    (draft.manualHistory??=[]).push({...draft.manualDecision});draft.reviewStatus=decision;
    draft.auditRecoveryBlocked=false;draft.auditFailureKnown=false;delete draft.copyError;
    if(draft.manualSuggestion&&!remember)delete draft.manualSuggestion;
@@ -2128,7 +2140,7 @@ async function detailAction(action){
  if(action==='manual-pass'){
    const gate=prohibitionGate(i);
    if(!gate.ok){
-     if(humanProhibitionEligible(i.audit)){openDecisionDialog(i);$('decisionError').textContent='请完成下面的人工禁售、侵权核验；材料要求未明确时，也需填写核实依据。';}
+         if(humanProhibitionEligible(i.audit)){openDecisionDialog(i);$('decisionError').textContent='请完成下面的人工禁售、侵权核验，再决定是否通过。';}
      else showDetailNotice(gate.reason+' 请点击左下角“补做禁售检查”；核查通过后，再点击“通过”。');return;
    }
    showDetailNotice('');
