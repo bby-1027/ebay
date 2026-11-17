@@ -1939,7 +1939,7 @@ async function loadAuditRecordPanel(panel){
 function renderDetailFooter(i){
  const busy=!!app.detailBusy,working=i.reviewStatus==='auditing'||i.collectStatus==='collecting';
  const done=humanFinal(i)||['excluded','not_selected','skipped','similar'].includes(i.reviewStatus)&&!savedCollectionProblem(i);
- const blocked=busy||working?'disabled':'',gate=prohibitionGate(i),passBlocked=busy||working||!gate.ok?'disabled':'';
+  const blocked=busy||working?'disabled':'',gate=prohibitionGate(i),passBlocked=busy||working?'disabled':'';
  const actions=done?'<button class="primary" data-action="decision-open" '+(busy?'disabled':'')+'>修改结论</button>'
    :'<button class="primary" data-action="manual-pass" '+passBlocked+'>通过</button><button class="danger" data-action="manual-exclude" '+blocked+'>淘汰</button><button data-action="manual-similar" '+blocked+'>已找同款</button>';
  const retryCopy=manualPassCurrent(i)&&gate.ok&&i.copyStatus==='error'?'<button data-action="recopy" '+blocked+'>重新准备文案</button>':'';
@@ -2079,7 +2079,12 @@ async function detailAction(action){
    try{await saveHumanDecision(b,i,$('decisionChoice').value,{note:$('decisionNote').value,evidence:$('decisionEvidence').value,remember:!!$('rememberOpinion')?.checked});}
    catch(error){$('decisionError').textContent=app.pendingSave?'保存结果尚未确认，原结论仍显示保留。请稍后核对，暂勿重复保存。':error.message;}return;
  }
- if(action==='manual-pass'&&needsMaterialVerification(i)&&!manualBlockCorrected(i)){openDecisionDialog(i);$('decisionError').textContent='请先核实上架材料，并填写核实依据；未查清前不能直接通过。';return;}
+  if(action==='manual-pass'){
+   const gate=prohibitionGate(i);
+   if(!gate.ok){showDetailNotice(gate.reason+' 请点击左下角“补做禁售检查”；核查通过后，再点击“通过”。');return;}
+   showDetailNotice('');
+ }
+ if(action==='manual-pass'&&needsMaterialVerification(i)&&!manualBlockCorrected(i)){openDecisionDialog(i);$('decisionError').textContent='请先核实上架材料，并填写核实依据；未查清前不能直接通过。';return;} 
  if(['manual-pass','manual-exclude','manual-similar'].includes(action))return saveHumanDecision(b,i,{'manual-pass':'passed','manual-exclude':'excluded','manual-similar':'similar'}[action],{advance:true,note:$('manualReason')?.value||'',remember:!!$('rememberOpinion')?.checked});
  if(action==='detail-prev'||action==='detail-next')return navigateDetail(action==='detail-prev'?-1:1);
  if(action==='tab-source'||action==='tab-copy'){app.detailTab=action==='tab-copy'?'copy':'source';renderDetailSource(i);return;}
