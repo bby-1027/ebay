@@ -144,11 +144,11 @@ button,input,textarea,select,.review-note textarea{background:#f8faf3}.toolbar,t
 // Connection settings are copied from the inspected deployment by build.py.
 const WORKER_URL = 'https://scraper-proxy.1172743763.workers.dev';
 const TOKEN = 'ebay1031';
-const BUILD = '2026-11-16-materials-13';
+const BUILD = '2026-11-17-risk-14';
 const PROHIBITION_REVIEW_VERSION=3;
 const MISSING_SOURCE_NOTICE='AI 审核结果缺少能对应到商品原文的证据';
 const AUDIT_CONCURRENCY = 2;
-const SELLER_POLICY_VERSION='2026-11-16-platform-materials-v2';
+const SELLER_POLICY_VERSION='2026-11-17-three-layer-v3';
 const $ = id => document.getElementById(id);
 const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const text = v => Array.isArray(v) ? v.map(text).join('\n') : v && typeof v === 'object' ? JSON.stringify(v) : String(v ?? '');
@@ -517,6 +517,8 @@ function needsMaterialVerification(i){
 }
 function materialSummary(i){
  const m=i.audit?.platform_materials||i.audit?.seller_review?.materials;
+ if(i.audit?.screening_stop?.layer==='prohibited')return '已按禁售要求淘汰，材料要求未继续核实。';
+ if(i.audit?.screening_stop?.layer==='business')return '本次按经营风险淘汰，材料要求未继续核实。';
  if(!m)return '还没查清需要哪些材料，暂不能通过。';
  const name=reviewChinese(m.requirements?.[0],'相关材料').slice(0,12);
  if(m.status==='required')return m.supplier_status==='unavailable'?'需要'+name+'，货源无法提供。':m.supplier_status==='available'?'已取得'+name+'，还需核对本型号。':'需要'+name+'，未确认货源能否提供。';
@@ -1046,52 +1048,25 @@ function unfinishedBatch(b){
     ||['pending','auditing'].includes(i.reviewStatus)||(copyAuthorized(i)&&['pending','processing'].includes(i.copyStatus))));
 }
 function batchControl(b){
-  if(app.pendingSave||app.stopping)return {label:'正在确认结果',disabled:true,hidden:false};
-  if(b.runStatus==='queued')return {label:'排队中',disabled:true,hidden:false};
-
-  const busy=!!(app.saving||app.starting||app.detailBusy||app.adminBusy);
-
-  if(app.processing&&app.activeId===b.id)return {
-    label:b.runStatus==='paused'?'正在暂停':'暂停处理',
-    disabled:b.runStatus==='paused',
-    hidden:false
-  };
-
-  if(b.runStatus==='paused'&&!batchFinal(b))return {
-    label:'继续处理',
-    disabled:busy,
-    hidden:false
-  };
-
-  if(!unfinishedBatch(b))return {label:'处理已结束',disabled:true,hidden:true};
-
-  return {label:'开始处理',disabled:busy,hidden:false};
+ if(app.pendingSave||app.stopping)return {label:'正在确认结果',disabled:true,hidden:false};
+ if(b.runStatus==='queued')return {label:'排队中',disabled:true,hidden:false};
+ const busy=!!(app.saving||app.starting||app.detailBusy||app.adminBusy);
+ if(app.processing&&app.activeId===b.id)return {label:b.runStatus==='paused'?'正在暂停':'暂停处理',disabled:b.runStatus==='paused',hidden:false};
+ if(b.runStatus==='paused'&&!batchFinal(b))return {label:'继续处理',disabled:busy,hidden:false};
+ if(!unfinishedBatch(b))return {label:'处理已结束',disabled:true,hidden:true};
+ return {label:'开始处理',disabled:busy,hidden:false};
 }
 function beginRun(b){
   if(b.pauseKind){(b.pauseHistory??=[]).push({kind:b.pauseKind,note:b.workQueue?.note||b.note||'',time:now()});}
   b.pauseKind=null;b.note='';b.runIssueStreak=null;
 }
 function recordAuditOutcome(b,i){
-  if(!i.auditRequestId||i.reviewStatus==='auditing')return;
-
-  const key=i.auditRequestId+':'+i.reviewStatus;
-  if(i.lastCountedAuditOutcome===key)return;
-  i.lastCountedAuditOutcome=key;
-
-  const code=['error','unconfirmed'].includes(i.reviewStatus)
-    ?i.audit?.failure_kind||i.auditError?.code||i.audit?.audit_issue||(i.reviewStatus==='unconfirmed'?'audit_result_unconfirmed':'audit_validation')
-    :null;
-
-  if(code){
-    (i.systemIssueHistory??=[]).push({
-      requestId:i.auditRequestId,
-      code,
-      reason:i.reason,
-      time:now()
-    });
-  }
-
-  b.runIssueStreak=null;
+ if(!i.auditRequestId||i.reviewStatus==='auditing')return;
+ const key=i.auditRequestId+':'+i.reviewStatus;if(i.lastCountedAuditOutcome===key)return;
+ i.lastCountedAuditOutcome=key;
+ const code=['error','unconfirmed'].includes(i.reviewStatus)?i.audit?.failure_kind||i.auditError?.code||i.audit?.audit_issue||(i.reviewStatus==='unconfirmed'?'audit_result_unconfirmed':'audit_validation'):null;
+ if(code)(i.systemIssueHistory??=[]).push({requestId:i.auditRequestId,code,reason:i.reason,time:now()});
+ b.runIssueStreak=null;
 }
 async function setPaused(){const b=batch(app.activeId);if(!b)return;
   b.intentRevision=(b.intentRevision||0)+1;b.pauseKind='user';b.runStatus='paused';app.resumeAfterSave=null;
@@ -1846,7 +1821,7 @@ function reviewPresentation(i){
  ['商品说明',overview,26],
  ['禁售检查',issue?'审核未完成，需人工核实':reviewChinese(prohibited?.reason,'未取得完整判断'),16],
  ['上架材料',materialSummary(i),32],
- ['经营风险',reviewChinese(risk?.reason,'请人工核对使用风险'),10]
+ ['经营风险',reviewChinese(risk?.reason||a.business_rule?.reason,'请人工核对使用风险'),10]
  ];
  // Default overview and summaries share a strict total 100-character budget, including labels.
  let remaining=100;
