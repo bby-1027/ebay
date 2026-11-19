@@ -94,7 +94,7 @@ dialog[open]{display:flex;flex-direction:column;width:760px;overflow:hidden}dial
 </style>
 <style>
 .batch-manage-bar{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;padding:12px 14px;background:#fff;border:1px solid var(--line);border-radius:8px;margin-bottom:14px}
-.batch-manage-bar[hidden]{display:none}.batch-manage-bar>div,.batch-trash-tools{display:flex;align-items:center;flex-wrap:wrap;gap:12px}.batch-trash-tools{margin:12px 0 18px}
+#batchManageBtn.batch-manage-exit{min-width:166px;font-weight:700;border-width:2px;box-shadow:0 2px 6px #216b5220}.batch-manage-bar[hidden]{display:none}.batch-manage-bar>div,.batch-trash-tools{display:flex;align-items:center;flex-wrap:wrap;gap:12px}.batch-trash-tools{margin:12px 0 18px}
 .danger-text{color:#a53d38}.danger-button{color:#a53d38;border-color:#d7aaa4;background:#fff}#batchSelectedCount,#trashSelectedCount{font-size:12px;color:var(--muted)}
 #batchAdminDialog{width:560px}#batchAdminNames{max-height:150px;overflow:auto;padding-left:22px;font-size:13px;line-height:1.8}#batchAdminNames:empty{display:none}
 #batchAdminPassword{box-sizing:border-box;width:100%;margin:10px 0 4px}#batchAdminError{color:#a53d38;font-size:13px;white-space:pre-wrap}#batchAdminError:empty{display:none}
@@ -154,7 +154,7 @@ button,input,textarea,select,.review-note textarea{background:#f8faf3}.toolbar,t
 // Connection settings are copied from the inspected deployment by build.py.
 const WORKER_URL = 'https://scraper-proxy.1172743763.workers.dev';
 const TOKEN = 'ebay1031';
-const BUILD = '2026-11-19-risk-24';
+const BUILD = '2026-11-19-admin-25';
 const PROHIBITION_REVIEW_VERSION=4;
 const MISSING_SOURCE_NOTICE='AI 审核结果缺少能对应到商品原文的证据';
 const AUDIT_CONCURRENCY = 2;
@@ -217,6 +217,10 @@ function requestOperation(path,method){
   if(route==='/api/data_receipt')return '查询原保存回执';
   if(route==='/api/audit_result')return '查询原审核任务';
   if(route==='/api/audit')return '提交审核任务';
+  if(route==='/api/admin/batches/delete')return '删除批次';
+  if(route==='/api/admin/batches/restore')return '恢复批次';
+  if(route==='/api/admin/operations/status')return '核对原删除结果';
+  if(route==='/api/admin/trash/list')return '读取回收站';
   if(/\/status$/.test(route)||route.includes('/results'))return '查询原采集任务';
   return '连接后台';
 }
@@ -229,7 +233,7 @@ async function api(path,{method='GET',body,timeout=20000}={}){
     const r=await fetch(WORKER_URL+path,{method,cache:method==='GET'?'no-store':'default',headers:{'Content-Type':'application/json','X-Workbench-Token':TOKEN},
       ...(body!==undefined?{body:JSON.stringify(body)}:{}),signal:controller.signal});
     const data=await r.json().catch(()=>null);
-    if(!r.ok){const e=new Error(operation+'失败：'+(r.status===401?'身份校验失败，请核对前后端连接配置':r.status===403?'后台拒绝访问':data?.detail||'后台返回 HTTP '+r.status));e.status=r.status;throw e;}
+    if(!r.ok){const e=new Error(operation+'失败：'+(r.status===401?'身份校验失败，请核对前后端连接配置':r.status===403?(data?.detail||'后台拒绝访问'):data?.detail||'后台返回 HTTP '+r.status));e.status=r.status;throw e;}
     if(!data){const e=new Error(operation+'失败：后台未返回有效JSON');e.code='invalid_response';throw e;}
     return data;
   }catch(error){
@@ -2435,7 +2439,10 @@ const batchAdmin={mode:false,selected:new Set(),trashSelected:new Set(),trashEnt
 function batchAdminSelection(){
   batchAdmin.selected=new Set([...batchAdmin.selected].filter(id=>app.batches.some(b=>b.id===id)));
   $('batchManageBar').hidden=!batchAdmin.mode;
-  $('batchManageBtn').textContent=batchAdmin.mode?'退出批次管理':'批次管理';
+  $('batchManageBtn').textContent=batchAdmin.mode?'← 退出批次管理':'批次管理';
+  $('batchManageBtn').className=batchAdmin.mode?'primary batch-manage-exit':'';
+  $('batchManageBtn').setAttribute('aria-pressed',String(batchAdmin.mode));
+  $('batchManageBtn').title=batchAdmin.mode?'退出管理模式，不会删除或修改批次':'选择需要管理的批次';
   $('batchManageBtn').disabled=app.processing||!!app.saving||batchAdmin.busy;
   $('batchSelectedCount').textContent=`已选 ${batchAdmin.selected.size} 个批次`;
   $('deleteSelectedBatches').disabled=!batchAdmin.selected.size||app.processing||batchAdmin.busy;
@@ -2455,7 +2462,7 @@ function applyAdminData(data){
 async function requireAdminBackend(){
   if(batchAdmin.backendReady)return true;
   const info=await api('/api/workbench_info');
-  if(info.batch_admin_contract!==1)throw new Error('请先更新本次worker.js，后台尚未支持批次管理');
+  if(info.batch_admin_contract!==2)throw new Error('请先更新本次worker.js，后台尚未支持批次管理');
   batchAdmin.backendReady=true;return true;
 }
 async function openBatchAdmin(action,ids=[]){
@@ -2472,15 +2479,18 @@ async function openBatchAdmin(action,ids=[]){
     const running=ids.map(id=>batch(id)).filter(b=>b?.runStatus==='running');
     if(running.length)return toast('选中批次仍在运行，请先暂停后再删除');
   }
-  batchAdmin.action=action;batchAdmin.ids=[...ids];batchAdmin.operationId=uid();
+  const pending=action==='delete'?pendingAdminDelete():null;
+  if(pending){ids=[...pending.ids];batchAdmin.operationId=pending.operationId;}else batchAdmin.operationId=uid();
+  batchAdmin.action=action;batchAdmin.ids=[...ids];
   const selected=action==='delete'?ids.map(id=>batch(id)).filter(Boolean):batchAdmin.trashEntries.filter(x=>ids.includes(x.id));
   const count=selected.reduce((sum,b)=>sum+(b.items?.length||b.itemCount||0),0);
-  $('batchAdminTitle').textContent=action==='list'?'打开回收站':action==='delete'?'确认删除批次':'确认恢复批次';
+  $('batchAdminTitle').textContent=action==='list'?'打开回收站':action==='delete'?(pending?'核对上次删除结果':'确认删除批次'):'确认恢复批次';
   $('batchAdminSummary').textContent=action==='list'?'输入管理员密码查看7天内删除的批次。':`选中 ${selected.length} 个批次，共 ${count} 个商品。`;
   $('batchAdminNames').innerHTML=selected.map(b=>`<li>${esc(b.name||'未命名批次')}</li>`).join('');
   $('batchAdminNotice').textContent=action==='delete'?'删除后进入回收站，保留7天，到期后无法恢复。不会删除采集网站源记录或政策。':action==='restore'?'恢复原资料和结果，批次保持暂停，不会自动开始采集或审核。':'查看与恢复均需管理员密码；密码不会保存在浏览器。';
   $('batchAdminPassword').value='';$('batchAdminError').textContent='';$('batchAdminConfirm').disabled=false;
-  $('batchAdminConfirm').textContent=action==='list'?'打开回收站':action==='delete'?'删除并保留7天':'确认恢复';
+  $('batchAdminConfirm').textContent=action==='list'?'打开回收站':action==='delete'?(pending?'核对并重试原删除':'删除并保留7天'):'确认恢复';
+  if(pending)$('batchAdminSummary').textContent='上次删除 '+ids.length+' 个批次的结果尚未确认。本次先核对原结果，未完成时只沿用原操作编号重试。';
   $('batchAdminDialog').showModal();$('batchAdminPassword').focus();
   }finally{batchAdmin.opening=false;}
 }
@@ -2491,42 +2501,91 @@ function renderBatchTrash(){
   $('restoreSelectedBatches').disabled=!batchAdmin.trashSelected.size||batchAdmin.busy;
   $('trashSelectedCount').textContent=`已选 ${batchAdmin.trashSelected.size} 个批次`;
 }
+function keepPendingAdminDelete(value){
+ batchAdmin.pendingDelete=value;
+ try{sessionStorage.setItem('audit_admin_pending_delete',value?JSON.stringify(value):'');}catch{}
+}
+function pendingAdminDelete(){
+ if(batchAdmin.pendingDelete)return batchAdmin.pendingDelete;
+ try{const value=JSON.parse(sessionStorage.getItem('audit_admin_pending_delete')||'null');
+  if(value?.action==='delete'&&typeof value.operationId==='string'&&Array.isArray(value.ids))return batchAdmin.pendingDelete=value;
+ }catch{}
+ return null;
+}
+function validAdminDeleteAck(response,operation){
+ return response?.success===true&&response.admin_contract===2&&response.action==='delete'&&response.operationId===operation.operationId
+   &&Array.isArray(response.ids)&&response.ids.length===operation.ids.length&&new Set(response.ids).size===response.ids.length
+   &&response.ids.every(id=>operation.ids.includes(id))&&response.count===operation.ids.length&&Number.isSafeInteger(response.version);
+}
+function applyAdminDeleteAck(response,operation){
+ if(!validAdminDeleteAck(response,operation))throw new Error('删除回执与原操作不对应，尚未更新本地列表');
+ app.batches=app.batches.filter(b=>!response.ids.includes(b.id));app.serverVersion=Math.max(app.serverVersion||0,response.version);app.lastWrite=Date.now();
+ if(response.ids.includes(app.currentBatchId)){app.currentBatchId=null;app.view='home';app.selected.clear();}
+ batchAdmin.selected.clear();keepPendingAdminDelete(null);render();
+}
+async function recoverAdminDelete(password,operation){
+ let lastError;
+ for(let attempt=0;attempt<3;attempt++){
+  try{const r=await api('/api/admin/operations/status',{method:'POST',body:{password,ids:operation.ids,operationId:operation.operationId},timeout:12000});
+   if(r.success&&r.found===true){if(!validAdminDeleteAck(r,operation))throw new Error('原删除回执无法对应，仍待核对');return r;}
+   if(!r.success||r.found!==false)throw new Error('原删除回执暂时无法读取');lastError=undefined;
+  }catch(error){lastError=error;if(error.status&&error.status<500)break;}
+  if(attempt<2)await sleep(600*(attempt+1));
+ }
+ return {found:false,error:lastError};
+}
 async function submitBatchAdmin(){
-  if(batchAdmin.busy)return;
-  const password=$('batchAdminPassword').value;if(!password){$('batchAdminError').textContent='请输入管理员密码';return;}
-  batchAdmin.busy=true;app.adminBusy=true;$('batchAdminConfirm').disabled=true;$('batchAdminError').textContent='';
-  const action=batchAdmin.action,ids=[...batchAdmin.ids],operationId=batchAdmin.operationId;
-  try{
-    await app.writeTail.catch(()=>{});
-    if(app.stopping)throw new Error('上次保存尚未确认，请刷新后再管理批次');
-    const execute=async()=>{
-      if(action!=='list'){const wait=1100-(Date.now()-(app.lastWrite||0));if(wait>0)await sleep(wait);}
-      const path=action==='list'?'/api/admin/trash/list':'/api/admin/batches/'+(action==='delete'?'delete':'restore');
-      const response=await api(path,{method:'POST',body:{password,ids,operationId,version:app.serverVersion},timeout:60000});
-      if(!response.success)throw new Error(response.detail||'管理员操作未完成');
-      if(action==='list'){
-        batchAdmin.trashEntries=response.entries||[];batchAdmin.trashSelected.clear();
-        $('batchTrashNotice').textContent=response.unavailable?`有 ${response.unavailable} 条记录暂时未能读取，请稍后刷新。`:'删除后7天到期，恢复操作不会启动任务。';
-        $('batchAdminDialog').close();renderBatchTrash();if(!$('batchTrashDialog').open)$('batchTrashDialog').showModal();
-      }else{
-        app.lastWrite=Date.now();
-        applyAdminData(response.data);$('batchAdminDialog').close();
-        if(action==='restore'){batchAdmin.trashEntries=batchAdmin.trashEntries.filter(e=>!ids.includes(e.id));batchAdmin.trashSelected.clear();renderBatchTrash();}
-        toast(response.replayed?'本次操作此前已完成，已读取当前状态':action==='delete'?`已删除 ${response.count} 个批次，7天内可恢复`:`已恢复 ${response.count} 个批次，保持暂停`);
-      }
-    };
-    if(action==='list')await execute();else{
-      if(!navigator.locks)throw new Error('请使用支持处理窗口保护的新版Chrome');
-      await navigator.locks.request('ebay-workbench-processing-v1',{ifAvailable:true},async lock=>{if(!lock)throw new Error('另一页面正在处理，请先暂停后再管理批次');await execute();});
-    }
-  }catch(e){
-    const message=e.status===409?'云端状态已变化或记录尚未同步，请关闭弹窗并刷新后重试。':e.message;
-    $('batchAdminError').textContent=message;
-    if(!e.status||e.status>=500)$('batchAdminError').textContent+=' 如果响应中断，请先刷新核对；再次确认会沿用本次操作编号。';
-  }finally{
-    $('batchAdminPassword').value='';batchAdmin.busy=false;app.adminBusy=false;$('batchAdminConfirm').disabled=false;
-    if(app.view==='home')renderHome();
+ if(batchAdmin.busy)return;
+ const password=$('batchAdminPassword').value;if(!password){$('batchAdminError').textContent='请输入管理员密码';return;}
+ batchAdmin.busy=true;app.adminBusy=true;$('batchAdminConfirm').disabled=true;$('batchAdminError').textContent='';
+ const action=batchAdmin.action,ids=[...batchAdmin.ids],operationId=batchAdmin.operationId;
+ const priorPending=pendingAdminDelete();
+ const operation=priorPending?.operationId===operationId?{...priorPending,ids}:{action:'delete',ids,operationId,version:app.serverVersion};
+ let submitted=false;
+ try{
+  await app.writeTail.catch(()=>{});if(app.stopping)throw new Error('上次保存尚未确认，请刷新后再管理批次');
+  const execute=async()=>{
+   if(action!=='list'){const wait=1100-(Date.now()-(app.lastWrite||0));if(wait>0)await sleep(wait);}
+   if(action==='delete'){
+    const pending=pendingAdminDelete();
+    if(pending&&pending.operationId===operationId){const receipt=await recoverAdminDelete(password,pending);if(receipt.found){applyAdminDeleteAck(receipt,pending);$('batchAdminDialog').close();toast('原删除已完成，已核对并更新列表');return;}if(receipt.error){if(receipt.error.status===409)keepPendingAdminDelete(null);throw receipt.error;}}
+    keepPendingAdminDelete(operation);submitted=true;
+   }
+   const path=action==='list'?'/api/admin/trash/list':'/api/admin/batches/'+(action==='delete'?'delete':'restore');
+   const response=await api(path,{method:'POST',body:{password,ids,operationId,version:operation.version},timeout:60000});
+   if(!response.success)throw new Error(response.detail||'管理员操作未完成');
+   if(action==='delete'){
+    applyAdminDeleteAck(response,operation);$('batchAdminDialog').close();toast(response.replayed?'本次删除此前已完成，已核对原结果':`已删除 ${response.count} 个批次，7天内可恢复`);
+   }else if(action==='list'){
+    batchAdmin.trashEntries=response.entries||[];batchAdmin.trashSelected.clear();
+    $('batchTrashNotice').textContent=response.unavailable?`有 ${response.unavailable} 条记录暂时未能读取，请稍后刷新。`:'删除后7天到期，恢复操作不会启动任务。';
+    $('batchAdminDialog').close();renderBatchTrash();if(!$('batchTrashDialog').open)$('batchTrashDialog').showModal();
+   }else{
+    app.lastWrite=Date.now();applyAdminData(response.data);$('batchAdminDialog').close();
+    batchAdmin.trashEntries=batchAdmin.trashEntries.filter(e=>!ids.includes(e.id));batchAdmin.trashSelected.clear();renderBatchTrash();toast(response.replayed?'本次恢复此前已完成，已读取当前状态':`已恢复 ${response.count} 个批次，保持暂停`);
+   }
+  };
+  if(action==='list')await execute();else{
+   if(!navigator.locks)throw new Error('请使用支持处理窗口保护的新版Chrome');
+   await navigator.locks.request('ebay-workbench-processing-v1',{ifAvailable:true},async lock=>{if(!lock)throw new Error('另一页面正在处理，请先暂停后再管理批次');await execute();});
   }
+ }catch(error){
+  let recovered=false;
+  if(action==='delete'&&submitted){
+   $('batchAdminError').textContent='正在核对原删除结果，请稍候…';
+   const receipt=await recoverAdminDelete(password,operation);
+   if(receipt.found){applyAdminDeleteAck(receipt,operation);$('batchAdminDialog').close();toast('原删除已完成，已核对并更新列表');recovered=true;}
+   else if(error.status&&error.status<500){keepPendingAdminDelete(null);}
+  }
+  if(!recovered){
+   const uncertain=action==='delete'&&submitted&&pendingAdminDelete();
+   $('batchAdminError').textContent=uncertain?'删除结果尚未确认：原删除请求或结果回传未能连通。已保留原操作编号；没有自动重新提交删除。可重新输入密码核对原结果，或刷新后查看批次。':
+    error.status===409?'云端状态已变化，本次未完成；请关闭弹窗并刷新后重试。':error.message;
+   if(uncertain)$('batchAdminConfirm').textContent='核对并重试原删除';
+  }
+ }finally{
+  $('batchAdminPassword').value='';batchAdmin.busy=false;app.adminBusy=false;$('batchAdminConfirm').disabled=false;if(app.view==='home')renderHome();
+ }
 }
 function initBatchAdmin(){
   $('batchManageBtn').onclick=toggleBatchManagement;
