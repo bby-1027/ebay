@@ -642,9 +642,9 @@ function primaryReviewProblems(i){
      text:activeRisk?currentDecisionReason(i):issue?.kind==='audit_lookup'?'原任务结果尚未确认，请先查询原任务。':issue?reviewFailureText(i,issue):'任务结束后可补做禁售检查或人工核验。'});
  }else if(issue){
    problems.push({kind:issue.kind==='copy'?'copy':'system',title:reviewFailureText(i,issue),
-     text:(i.audit?.attempts_exhausted&&i.audit?.model_attempts>=3?'已尝试三次仍未完成。':'')+auditNextStep(issue)});
+  text:((i.audit?.attempts_exhausted&&i.audit?.model_attempts>=3?'已尝试三次仍未完成。':'')+auditNextStep(issue)).replace('已尝试三次仍未完成。由系统针对具体失败原因补审；已有分析且存在可核实的问题时转待人工。','')});   
  }
- if(source.blocked)problems.push({kind:'source',title:/不是FBA/.test(source.reason)?'当前货源非FBA，不能通过':'当前无货或不可售，不能通过',text:'可更新货源，或选择淘汰、已找同款。'});
+ if(source.blocked)problems.push({kind:'source',title:/不是FBA/.test(source.reason)?'当前货源非FBA，不能通过':'当前无货或不可售，不能通过',text:''});
  if(!problems.length&&!final&&gate.ok)problems.push({kind:'review',title:manualReviewFocus(i),text:'查看原资料后，可选择通过、淘汰或已找同款。'});
  return problems;
 }
