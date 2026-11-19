@@ -147,11 +147,11 @@ button,input,textarea,select,.review-note textarea{background:#f8faf3}.toolbar,t
 // Connection settings are copied from the inspected deployment by build.py.
 const WORKER_URL = 'https://scraper-proxy.1172743763.workers.dev';
 const TOKEN = 'ebay1031';
-const BUILD = '2026-11-18-three-layer-20';
+const BUILD = '2026-11-19-source-21';
 const PROHIBITION_REVIEW_VERSION=4;
 const MISSING_SOURCE_NOTICE='AI 审核结果缺少能对应到商品原文的证据';
 const AUDIT_CONCURRENCY = 2;
-const SELLER_POLICY_VERSION='2026-11-18-three-layer-v4';
+const SELLER_POLICY_VERSION='2026-11-19-three-layer-v5';
 const $ = id => document.getElementById(id);
 const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const text = v => Array.isArray(v) ? v.map(text).join('\n') : v && typeof v === 'object' ? JSON.stringify(v) : String(v ?? '');
@@ -572,6 +572,9 @@ function primaryReviewProblems(i){
  const final=existingManual(i),excluded=['excluded','not_selected','skipped'].includes(i.reviewStatus);
  if(final&&['excluded','similar'].includes(final.decision))return [{kind:'final',title:currentDecisionReason(i),text:'当前人工决定已保存。'}];
  if(collection||['error','sync_error'].includes(i.collectStatus))problems.push({kind:'collection',title:'本次商品资料未取得或对应错误',text:collection?.reason||collectionProblemMessage(i,i.collectionIssue||'upstream_failed',i.collectionDiagnostic)});
+ if(excluded&&!final&&['B','C','data'].includes(decisionCategory(i).category)){
+   return [{kind:'excluded',title:decisionCategory(i).label,text:currentDecisionReason(i)}];
+ }
  if(!gate.ok&&i.reviewStatus!=='skipped'){
    const activeRisk=['blocked','unresolved'].includes(gate.status);
    problems.push({kind:'prohibition',title:activeRisk?'存在禁售或侵权风险，当前已淘汰':'禁售核验未完成，不能通过',
@@ -1994,7 +1997,8 @@ function productOverview(i){
 }
 function reviewPresentation(i){
  const a=i.audit||{},issue=systemIssue(i),manual=existingManual(i),overview=productOverview(i),gate=prohibitionGate(i);
- const banText=gate.source==='human'?'已由人工核验':gate.ok?'本次文本禁售检查已完成':gate.status==='blocked'?'存在禁售阻断':gate.status==='unresolved'?'存在具体禁售疑点':'禁售核验未完成';
+ const endedBusiness=!manual&&['excluded','not_selected'].includes(i.reviewStatus)&&decisionCategory(i).category==='C';
+ const banText=endedBusiness&&!gate.ok&&!['blocked','unresolved'].includes(gate.status)?'未完成；本品已按经营标准淘汰':gate.source==='human'?'已由人工核验':gate.ok?'本次文本禁售检查已完成':gate.status==='blocked'?'存在禁售阻断':gate.status==='unresolved'?'存在具体禁售疑点':'禁售核验未完成';
  const riskText=reviewChinese(a.seller_review?.after_sales?.reason||a.business_rule?.reason||a.source_business_risk?.reason,'');
  const rows=[['商品说明',overview,60]];
  if(manual)rows.push(['当前结论',currentDecisionReason(i),300]);
@@ -2006,16 +2010,26 @@ function reviewPresentation(i){
  return {summary:rows.map(([label,value,limit])=>{const chars=Array.from(value);return {label,value:chars.length>limit?chars.slice(0,limit-1).join('')+'…':value};}),issue};
 }
 
+function renderSourceScreeningEvidence(screening){
+ if(!screening||!Array.isArray(screening.brand_matches)&&!Array.isArray(screening.chemical_matches))return '';
+ const link=(url,label)=>/^https:\/\//.test(url||'')?'<a href="'+esc(url)+'" target="_blank" rel="noopener noreferrer">'+label+' ↗</a>':'';
+ const brand=(screening.brand_matches||[]).map(h=>'<article><strong>涉及品牌或角色：'+esc(h.name)+'</strong><p>原文：'+esc(h.quote)+'</p><p>按本店经营名单排除，不等于已认定假冒或平台一律禁售。</p>'+link(h.source,'查看品牌或权利主体来源')
+   +(h.litigation?.historic_only?'<p>另有可核查的历史诉讼记录；不表示当前店铺受法院禁令约束。</p>'+h.litigation.cases.map(c=>'<p>'+esc(c.court)+' · '+esc(c.order_date)+' '+link(c.source,'查看历史法院记录')+'</p>').join(''):'')+'</article>').join('');
+ const chemical=(screening.chemical_matches||[]).map(c=>'<article><strong>实际内容物：'+esc(c.label)+'</strong><p>原文：'+esc(c.quote)+'</p><p>属于经营排除；是否违反平台禁售以独立禁售记录为准。</p></article>').join('');
+ return brand+chemical;
+}
+
 function renderHumanEvidence(i){
  const a=i.audit||{},checks=a.review_checks||[],refs=a.policy_references||[];
  const labels={prohibited:'禁售与限制',safety:'实际使用安全',ip:'知识产权',conditions:'销售条件',consistency:'商品资料核对'};
  const rows=checks.map((c,index)=>'<article><strong>'+esc(labels[c.area]||'分项判断')+'</strong><p>'+esc(reviewChinese(c.reason))+'</p><button class="linkbtn" data-action="source-evidence" data-check="'+index+'">在左侧查看商品原文依据</button></article>').join('');
+ const fixed=renderSourceScreeningEvidence(a.source_screening);
  let sellers=['materials','after_sales','scope'].map((key,index)=>a.seller_review?.[key]?'<article><strong>'+['材料要求','经营与售后','实际用途'][index]+'</strong><p>'+esc(reviewChinese(a.seller_review[key].reason))+'</p></article>':'').join('');
  if(a.business_rule?.reason&&!a.seller_review?.after_sales)sellers+='<article><strong>经营排除依据</strong><p>'+esc(reviewChinese(a.business_rule.reason))+'</p></article>';
  const policies=refs.map(r=>'<article><p>'+esc(reviewChinese(r.clause_zh,'这条旧记录没有中文政策说明'))+'</p><p>'+esc(reviewChinese(r.explanation,''))+'</p>'+(/^https:\/\/(?:www\.)?ebay\.com\//i.test(r.source||'')?'<a href="'+esc(r.source)+'" target="_blank" rel="noopener">打开官方政策 ↗</a>':'')+'</article>').join('');
  const m=a.platform_materials||a.seller_review?.materials;const stages={before_listing:'上架前',listing:'填写刊登时',on_request:'收到平台通知时',import:'进口美国时',shipping:'安排运输时',not_identified:'本次未识别到额外提交要求',unclear:'还没查清提供时机'};
  const materialDetail=m?'<details><summary>上架材料：具体要求与核实情况</summary><p>'+esc(materialSummary(i))+'</p><p>为什么涉及：'+esc(reviewChinese(m.applicability_reason||m.reason))+'</p><p>提供时机：'+esc(stages[m.submission_stage]||stages.unclear)+'</p><p>货源情况：'+esc(reviewChinese(m.supplier_reason,'尚未确认当前货源能否提供'))+'</p></details>':'';
- const body=materialDetail+'<details><summary>展开判断说明与依据</summary><div class="review-evidence">'+(rows+sellers||'<p>尚未取得完整分析，请查看左侧原始资料。</p>')+'</div></details><details><summary>展开政策依据</summary><div class="review-evidence">'+(policies||'<p>本次没有可展示的中文政策依据，不能据此认定已排除全部风险。</p>')+'</div></details>';
+ const body=materialDetail+'<details><summary>展开判断说明与依据</summary><div class="review-evidence">'+(fixed+rows+sellers||'<p>尚未取得完整分析，请查看左侧原始资料。</p>')+'</div></details><details><summary>展开政策依据</summary><div class="review-evidence">'+(policies||'<p>本次没有可展示的中文政策依据，不能据此认定已排除全部风险。</p>')+'</div></details>';
  return humanFinal(i)?'<details><summary>查看原自动审核判断与依据</summary><p>以下为原自动审核记录；当前结论以已保存的人工决定为准。</p>'+body+'</details>':body;
 }
 
@@ -2562,7 +2576,7 @@ async function init() {
 }
 async function checkBackend(){
   if(app.backendCompatible)return true;
-  try{const info=await api('/api/workbench_info',{timeout:10000});if(info.build!==BUILD||info.audit_contract!==2||info.audit_protocol!==3||info.audit_completion_contract!==2||!(info.audit_model_protocol>=20)||info.prohibition_gate_contract!==1||info.manual_prohibition_contract!==2||info.prohibition_review_version!==PROHIBITION_REVIEW_VERSION||info.data_contract!==2||info.seller_policy_version!==SELLER_POLICY_VERSION)throw new Error('版本不对应');app.backendCompatible=true;return true;}
+  try{const info=await api('/api/workbench_info',{timeout:10000});if(info.build!==BUILD||info.audit_contract!==2||info.audit_protocol!==3||info.audit_completion_contract!==2||!(info.audit_model_protocol>=21)||info.source_screening_contract!==1||info.prohibition_gate_contract!==1||info.manual_prohibition_contract!==2||info.prohibition_review_version!==PROHIBITION_REVIEW_VERSION||info.data_contract!==2||info.seller_policy_version!==SELLER_POLICY_VERSION)throw new Error('版本不对应');app.backendCompatible=true;return true;}
   catch(error){toast(error.code==='request_timeout'||error.code==='connection_lost'
     ?'暂时无法连接审核后台，请稍后重试。':'审核后台版本未配套，请同时部署本次 worker.js 和 index.html。旧数据仍保留，需按新标准审核后导出。');return false;}
 }
