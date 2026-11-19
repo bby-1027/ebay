@@ -54,7 +54,7 @@ dialog::backdrop{background:#1c332c66}.dialoghead{padding:16px 24px;border-botto
 .selection-strip{display:flex;gap:14px;align-items:center;padding:9px 16px;color:var(--muted);font-size:12px}.options-menu{position:relative;margin-left:18px}.options-menu>summary{list-style:none}.options-menu>summary::-webkit-details-marker{display:none}.options-menu>summary::after{content:" ▾"}.options-menu>summary{padding:9px;color:var(--muted)}.options-menu[open]>div{position:absolute;right:0;top:42px;min-width:170px;z-index:5;background:white;border:1px solid var(--line);border-radius:8px;padding:8px;box-shadow:0 4px 12px #0001}.options-menu button{display:block;border:0;width:100%;text-align:left}
 dialog[open]{display:flex;flex-direction:column;width:760px;overflow:hidden}dialog .dialoghead,dialog .dialogfoot{flex-shrink:0;position:static}dialog .dialogbody{min-height:0;overflow-y:auto;overflow-x:hidden}.dialoghead>div{min-width:0}.dialoghead h3{overflow-wrap:anywhere}#dtStatus{margin-top:6px;white-space:normal;max-width:100%}.compact-detail{min-width:0}.compact-detail .text{max-height:none;overflow:visible;background:transparent;border:0;padding:0;font-size:14px}.compact-detail>.field{padding:14px;background:#f7f9f7;border-radius:8px}.product-heading{display:flex;justify-content:space-between;align-items:flex-start;gap:18px;margin-bottom:18px;font-size:13px;color:var(--muted)}.product-heading span{overflow-wrap:anywhere;min-width:0}.product-heading a{flex-shrink:0}.compact-detail details{border-top:1px solid var(--line);padding-top:14px}.panel-content{padding-top:14px;min-width:0}.panel-content .text{white-space:pre-wrap;overflow-wrap:anywhere}.product-thumb{width:90px;height:90px;object-fit:contain;margin:5px}.manual-box{margin:18px 0}.advanced{color:var(--muted)}.advanced .row-actions{margin:12px 0}#pagination{justify-content:flex-end}.sku{white-space:nowrap}.search-input{width:300px}
 @media(max-width:760px){.batch-heading .left{flex-wrap:wrap}.search-input{width:100%}.product-heading{display:block}.product-heading a{display:block;margin-top:8px}.toolbar>div{width:100%}}
-#detailDialog[open]{width:1120px}#detailDialog .dialoghead{padding:18px 24px}.detail-id-line{display:flex;align-items:center;gap:12px}.detail-id-line #dtStatus{margin:0}#detailMeta{display:flex;align-items:center;gap:18px;color:var(--muted);font-size:13px;margin-top:8px}#detailMeta strong{color:#23332f;font-weight:500}.review-layout{display:grid;grid-template-columns:minmax(0,1.12fr) minmax(0,1fr);gap:28px}.product-column,.review-column{min-width:0}.product-column{padding-right:24px;border-right:1px solid var(--line)}.review-column h4{margin:0 0 18px;font-size:16px}.review-layout .field{margin-bottom:20px}.review-layout .label{font-size:12px;color:var(--muted);margin-bottom:7px}.review-layout .text{max-height:none;overflow:visible;background:transparent;border:0;padding:0;font-size:14px;line-height:1.7;white-space:pre-wrap;overflow-wrap:anywhere}.review-column>.field{padding:14px;background:#f7f9f7;border-radius:8px}.detail-tabs{display:flex;gap:8px;border-bottom:1px solid var(--line);margin-bottom:20px;padding-bottom:8px}.detail-tabs button{border:0;color:var(--muted);background:transparent}.detail-tabs button[aria-selected="true"]{background:#e7f4ec;color:var(--green);font-weight:600}.readable-field .text-expander{margin-top:6px}.review-note{margin:20px 0}.review-note label{display:block;font-size:13px;margin-bottom:8px}.review-note textarea,.review-layout textarea{display:block;box-sizing:border-box;width:100%;min-height:104px;border:1px solid var(--line);border-radius:8px;padding:12px;resize:vertical;font:inherit;line-height:1.6;margin:8px 0 16px}.review-column details{border-top:1px solid var(--line);padding-top:12px}.review-column summary{font-size:13px}.product-images{margin-top:16px}#dtFooter{display:grid;grid-template-columns:minmax(0,1fr) 244px minmax(0,1fr);align-items:end;gap:12px}
+#detailDialog[open]{width:1120px}#detailDialog .dialoghead{padding:18px 24px}.detail-id-line{display:flex;align-items:center;gap:12px}.detail-id-line #dtStatus{margin:0}#detailMeta{display:flex;flex-wrap:wrap;align-items:center;gap:18px;row-gap:8px;color:var(--muted);font-size:13px;margin-top:8px}#detailMeta span{min-width:0;overflow-wrap:anywhere}#detailMeta strong{color:#23332f;font-weight:500}.review-layout{display:grid;grid-template-columns:minmax(0,1.12fr) minmax(0,1fr);gap:28px}.product-column,.review-column{min-width:0}.product-column{padding-right:24px;border-right:1px solid var(--line)}.review-column h4{margin:0 0 18px;font-size:16px}.review-layout .field{margin-bottom:20px}.review-layout .label{font-size:12px;color:var(--muted);margin-bottom:7px}.review-layout .text{max-height:none;overflow:visible;background:transparent;border:0;padding:0;font-size:14px;line-height:1.7;white-space:pre-wrap;overflow-wrap:anywhere}.review-column>.field{padding:14px;background:#f7f9f7;border-radius:8px}.detail-tabs{display:flex;gap:8px;border-bottom:1px solid var(--line);margin-bottom:20px;padding-bottom:8px}.detail-tabs button{border:0;color:var(--muted);background:transparent}.detail-tabs button[aria-selected="true"]{background:#e7f4ec;color:var(--green);font-weight:600}.readable-field .text-expander{margin-top:6px}.review-note{margin:20px 0}.review-note label{display:block;font-size:13px;margin-bottom:8px}.review-note textarea,.review-layout textarea{display:block;box-sizing:border-box;width:100%;min-height:104px;border:1px solid var(--line);border-radius:8px;padding:12px;resize:vertical;font:inherit;line-height:1.6;margin:8px 0 16px}.review-column details{border-top:1px solid var(--line);padding-top:12px}.review-column summary{font-size:13px}.product-images{margin-top:16px}#dtFooter{display:grid;grid-template-columns:minmax(0,1fr) 244px minmax(0,1fr);align-items:end;gap:12px}
 #dtFooter>.detail-tools{grid-column:1;grid-row:1;display:flex;flex-wrap:wrap;align-items:flex-end;gap:8px;min-width:0}
 #dtFooter>.detail-navigation{grid-column:2;grid-row:1;display:grid;grid-template-columns:minmax(0,1fr) 72px minmax(0,1fr);align-items:center;gap:10px;width:244px;max-width:100%;min-width:0;margin:0;justify-self:center;align-self:end}
 #dtFooter>.detail-main-actions{grid-column:3;grid-row:1;display:flex;flex-wrap:wrap;justify-content:flex-end;align-items:flex-end;gap:10px;min-width:0}
@@ -154,7 +154,7 @@ button,input,textarea,select,.review-note textarea{background:#f8faf3}.toolbar,t
 // Connection settings are copied from the inspected deployment by build.py.
 const WORKER_URL = 'https://scraper-proxy.1172743763.workers.dev';
 const TOKEN = 'ebay1031';
-const BUILD = '2026-11-19-admin-25';
+const BUILD = '2026-11-19-brand-free-27';
 const PROHIBITION_REVIEW_VERSION=4;
 const MISSING_SOURCE_NOTICE='AI 审核结果缺少能对应到商品原文的证据';
 const AUDIT_CONCURRENCY = 2;
@@ -217,6 +217,7 @@ function requestOperation(path,method){
   if(route==='/api/data_receipt')return '查询原保存回执';
   if(route==='/api/audit_result')return '查询原审核任务';
   if(route==='/api/audit')return '提交审核任务';
+  if(route==='/api/brand_chinese')return '查询品牌中文名';
   if(route==='/api/admin/batches/delete')return '删除批次';
   if(route==='/api/admin/batches/restore')return '恢复批次';
   if(route==='/api/admin/operations/status')return '核对原删除结果';
@@ -1006,16 +1007,29 @@ function queuedRecoveryEntry(i,b){
   const index=q.entries.findIndex(entry=>entry.itemId===i.itemId&&!entry.completedAt&&entry.revision===(i.dataRevision||0));
   return index>=q.cursor?q.entries[index]:null;
 }
+function pausedItemStep(i,b){
+ b??=app.batches.find(batch=>batch.items?.includes(i));
+ if(b?.runStatus!=='paused'||app.activeId===b.id&&(app.processing||app.starting)
+   ||app.detailBusy&&app.detailItemId===i.itemId)return '';
+ if(['skipped','excluded','not_selected','similar'].includes(i.reviewStatus)
+   ||savedCollectionProblem(i)||['error','sync_error'].includes(i.collectStatus))return '';
+ if(i.collectStatus==='collecting')return '采集结果查询';
+ if(i.reviewStatus==='auditing')return '审核结果查询';
+ if(manualPassCurrent(i)&&sourceAvailability(i).ok&&!systemIssue(i)&&copyAuthorized(i)
+   &&['pending','processing'].includes(i.copyStatus))return '文案处理';
+ return '';
+}
 function itemStatus(i,b){
  b??=app.batches.find(batch=>batch.items?.some(row=>row.itemId===i.itemId));
  const m=existingManual(i);
  if(m?.decision==='similar')return ['已找同款','gray'];
  if(m?.decision==='excluded')return ['淘汰','err'];
  const recovery=queuedRecoveryEntry(i,b);
- if(recovery)return i.reviewStatus==='auditing'?['审核中','run']:['待处理','wait'];
+ if(recovery)return i.reviewStatus==='auditing'&&!pausedItemStep(i,b)?['审核中','run']:['待处理','wait'];
  if(savedCollectionProblem(i)||['error','sync_error'].includes(i.collectStatus))return ['系统异常','error'];
  if(['skipped','excluded','not_selected'].includes(i.reviewStatus))return ['淘汰','err'];
  if(i.reviewStatus==='similar')return ['已找同款','gray'];
+ if(pausedItemStep(i,b))return ['待处理','wait'];
  if(i.reviewStatus==='auditing')return ['审核中','run'];
  if(i.collectStatus==='collecting')return ['处理中','run'];
  if(m?.decision==='passed'){
@@ -1225,7 +1239,7 @@ function renderItems() {
   const pageRows=rows.slice(app.page*50,app.page*50+50);$('selectPage').checked=pageRows.length>0&&pageRows.every(i=>app.selected.has(i.itemId));$('selectPage').indeterminate=pageRows.some(i=>app.selected.has(i.itemId))&&!$('selectPage').checked;
   const pauseNote=b.runStatus==='paused'?(app.pendingSave||app.stopping?'保存结果待确认，核对后继续':b.workQueue?.note||b.note||'处理已暂停，可从原任务继续'):
     b.runStatus==='queued'?'正在等待恢复原任务':'';
-  $('batchProgress').textContent=statusSummary(b)+(pauseNote?' | '+pauseNote:'');
+  $('batchProgress').textContent='批次状态：'+badgeText(b)+' | '+statusSummary(b)+(pauseNote?' | '+pauseNote:'');
   const selected=b.items.filter(i=>app.selected.has(i.itemId));
   $('selectionInfo').textContent=selected.length?`已选 ${selected.length} 条，可导出 ${selected.filter(ready).length} 条`:`共 ${rows.length} 条`;
   $('selectAllFiltered').hidden=!selected.length||rows.length<=50;$('clearSelection').hidden=!selected.length;
@@ -1512,6 +1526,7 @@ function auditWaitingText(i){
  return i.auditReceiptConfirmed ? ' AI 审核中，请稍候' : '正在确认 AI 接收状态';
 }
 function itemReason(i,b){
+  b??=app.batches.find(batch=>batch.items?.includes(i));
   const recovery=queuedRecoveryEntry(i,b);
   if(recovery){
     if(b?.runStatus==='paused')return '重试任务已暂停，恢复后继续处理原队列';
@@ -1528,6 +1543,8 @@ function itemReason(i,b){
     return problems.length?problems.map(p=>p.title).join('；'):reviewFailureText(i);
   }
   if(['淘汰','已找同款','可导出'].includes(status))return currentDecisionReason(i);
+  const pausedStep=pausedItemStep(i,b);
+  if(pausedStep)return app.pendingSave||app.stopping?'保存结果待确认，核对后继续':`已暂停${pausedStep}；点击“继续处理”后从原任务继续`;
   if(status==='审核中')return auditWaitingText(i);
   if(status==='处理中'){
     if(i.collectStatus==='collecting')return '正在采集原任务资料';
@@ -2073,6 +2090,54 @@ function renderSourceScreeningEvidence(screening){
  return brand+chemical+review;
 }
 
+const brandChineseCache=new Map(),brandChinesePending=new Map();
+function brandChineseInput(i){return {brand:brandOf(i).normalize('NFKC').replace(/\s+/g,' ').trim(),context:text(i.collected?.title).normalize('NFKC').replace(/\s+/g,' ').trim().slice(0,300)};}
+function brandChineseKey(i){return JSON.stringify(brandChineseInput(i));}
+function brandChineseMissing(i){return !brandOf(i)||/^(?:generic|unbranded|none|null|n\/?a|unknown|无品牌|未提供|不适用)$/i.test(brandOf(i).trim());}
+function validBrandChineseResponse(r,input){
+ if(r?.success!==true||r.brand_cn_contract!==1||r.brand!==input.brand||r.context!==input.context
+  ||!['found','not_found','unavailable','not_configured'].includes(r.status))return false;
+ if(r.status==='found')return /^[\u3400-\u9fff·・\- ]{1,24}$/.test(r.brand_cn||'')&&Array.isArray(r.sources)&&r.sources.length>0&&r.sources.every(s=>{
+  try{const u=new URL(s.url);return u.protocol==='https:'&&!u.username&&!u.password&&typeof s.quote==='string';}catch{return false;}
+ });
+ return !r.brand_cn;
+}
+function renderBrandMeta(i){
+ const entry=brandChineseCache.get(brandChineseKey(i));
+ let chinese='查询中…',extra='',title='正在核对中文品牌名称';
+ if(brandChineseMissing(i)){chinese='无';title='原资料未提供具体品牌名称';}
+ else if(entry?.status==='found'){
+  chinese=entry.brand_cn;title=entry.sources.map(s=>s.title+'：'+s.quote).join('\n');
+  extra='';
+ }else if(entry?.status==='not_found'){chinese='无';title=entry.detail||'暂未取得可靠的中文名称';}
+ else if(entry?.status==='unavailable'||entry?.status==='not_configured'){
+  chinese='无';title=entry.detail||'暂未取得可靠的中文名称';
+  extra='';
+ }
+ const value=entry?.status==='found'&&!brandChineseMissing(i)?'<a href="'+esc(entry.sources[0].url)+'" target="_blank" rel="noopener noreferrer" title="'+esc(title)+'">'+esc(chinese)+'</a>':'<strong title="'+esc(title)+'">'+esc(chinese)+'</strong>';
+ $('detailMeta').innerHTML='<span>品牌：<strong>'+esc(brandOf(i)||'未提供')+'</strong></span><span>品牌中文：'+value+extra+'</span><a href="'+amazon(i)+'" target="_blank" rel="noopener">亚马逊链接 ↗</a>';
+}
+async function requestBrandChinese(input){return api('/api/brand_chinese',{method:'POST',body:input,timeout:40000});}
+async function loadBrandChinese(i,bid,{retry=false}={}){
+ if(brandChineseMissing(i))return;
+ const input=brandChineseInput(i),key=JSON.stringify(input),old=brandChineseCache.get(key);
+ const repaint=()=>{const current=itemOf(app.currentBatchId,app.detailItemId);if($('detailDialog').open&&app.currentBatchId===bid&&current?.itemId===i.itemId&&brandChineseKey(current)===key)renderBrandMeta(current);};
+ if(old&&(old.expires_at>Date.now()||!retry&&old.retry_at>Date.now())){repaint();return;}
+ let task=brandChinesePending.get(key);
+ if(!task){
+  brandChineseCache.delete(key);repaint();
+  task=(async()=>{
+   let result;
+   try{result=await requestBrandChinese(input);if(!validBrandChineseResponse(result,input))throw Error('品牌查询返回的资料不对应');}
+   catch{result={...input,status:'unavailable',brand_cn:'',sources:[],detail:'谷歌品牌查询暂未成功，请稍后重试。'};}
+   if(['unavailable','not_configured'].includes(result.status))result={...result,retry_at:Date.now()+60000};
+   else result={...result,expires_at:Math.min(Number(result.expires_at)||Date.now()+3600000,Date.now()+15552000000)};
+   brandChineseCache.set(key,result);return result;
+  })();brandChinesePending.set(key,task);
+ }
+ try{await task;}finally{if(brandChinesePending.get(key)===task)brandChinesePending.delete(key);repaint();}
+}
+
 function displayBrandName(i){
  const value=brandOf(i)||'未提供';
  const normalize=value=>text(value).normalize('NFKC').replace(/\s+/g,'').toLowerCase();
@@ -2173,7 +2238,7 @@ function openDetail(iid,{preserveNavigation=false}={}){
  if(changed){app.detailExpanded={};app.detailTab='source';showDetailNotice('');}app.detailItemId=iid;detailDirty=false;
  app.lastViewed={batchId:b.id,itemId:iid};renderItems();
  $('dtTitle').textContent=i.asin;const status=itemStatus(i,b);$('dtStatus').textContent=status[0];$('dtStatus').className='badge b-'+status[1];
- $('detailMeta').innerHTML='<span>品牌：<strong>'+esc(displayBrandName(i))+'</strong></span><a href="'+amazon(i)+'" target="_blank" rel="noopener">亚马逊原链接 ↗</a>';
+ renderBrandMeta(i);
  const {summary,issue}=reviewPresentation(i),insufficient=i.reviewStatus==='skipped'&&!savedCollectionProblem(i);
  let right=insufficient?'<p class="review-alert">资料不足，已淘汰。</p>':summary.map((row,index)=>index===0?'<section class="overview-card"><h4>商品说明</h4><p>'+esc(row.value)+'</p></section>':'<p style="white-space:normal;overflow-wrap:anywhere"><strong>'+esc(row.label)+'：</strong>'+esc(row.value)+'</p>').join('');
  if(humanFinal(i))right+='<p class="decision-note">当前结论由人工决定。'+esc(reviewChinese(existingManual(i).reason,''))+'</p>';
@@ -2185,6 +2250,7 @@ function openDetail(iid,{preserveNavigation=false}={}){
  renderPrimaryReview(i);renderDetailSource(i);renderDetailFooter(i);recordDetailBaseline();
  if(changed){$('dtBody').scrollTop=0;}
  if(!$('detailDialog').open)$('detailDialog').showModal();
+ void loadBrandChinese(i,b.id);
  return true;
 }
 
@@ -2672,6 +2738,7 @@ async function init() {
     const close=e.target.closest('[data-close]');if(close){closeDialog(close.closest('dialog'));return;}
     const el=e.target.closest('[data-action]');if(!el)return;const a=el.dataset.action;
     if(a==='sync-original'){if(detailDirty){toast('请先保存或放弃当前编辑');return;}$('detailDialog').close();fail(syncOriginalCollection(app.currentBatchId,app.detailItemId));return;}
+    if(a==='brand-cn-retry'){const i=itemOf(app.currentBatchId,app.detailItemId);if(i)void loadBrandChinese(i,app.currentBatchId,{retry:true});return;}
     if(a==='external-save'){fail(saveExternalReview());return;}
     if(a==='source-evidence'){const i=itemOf(app.currentBatchId,app.detailItemId),check=i?.audit?.review_checks?.[Number(el.dataset.check)];if(!i||!check)return;app.detailTab='source';renderDetailSource(i);const facts=i.audit.review_evidence||i.audit.evidence||[];const quotes=facts.filter(f=>check.fact_ids?.includes(f.fact_id)).map(f=>f.quote);$('detailSource').insertAdjacentHTML('afterbegin','<div class="overview-card"><strong>本项引用的商品原文</strong><p>'+esc(quotes.join('\n')||'旧记录未保留可对应的原文片段，请核对下方原资料')+'</p></div>');$('detailSource').parentElement.scrollTop=0;return;}
     if(a==='delete-batch'){fail(openBatchAdmin('delete',[el.dataset.bid]));return;}
