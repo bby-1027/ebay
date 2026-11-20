@@ -175,7 +175,7 @@ a{color:#28624f}button.linkbtn{color:#28624f}.danger-text{color:#994d43!importan
 // Connection settings are copied from the inspected deployment by build.py.
 const WORKER_URL = 'https://scraper-proxy.1172743763.workers.dev';
 const TOKEN = 'ebay1031';
-const BUILD = '2026-11-20-stage-29';
+const BUILD = '2026-11-20-speed-30';
 const PROHIBITION_REVIEW_VERSION=5;
 const MISSING_SOURCE_NOTICE='AI 审核结果缺少能对应到商品原文的证据';
 const AUDIT_CONCURRENCY = 2;
@@ -335,7 +335,7 @@ function renderConnectionState(){
   }
 
   message.textContent=label;
-  retry.hidden=!app.readRetryBlocked||unconfirmed;
+  retry.hidden=!app.readRetryBlocked;
   retry.disabled=!!(
     app.fetching||app.processing||app.starting||
     app.saving||app.detailBusy||app.adminBusy
@@ -363,7 +363,7 @@ async function maintainConnection(force=false){
     return;
   }
   if(navigator.onLine===false||app.processing||app.starting||app.fetching||app.saving
-    ||app.detailBusy||app.adminBusy||detailDirty||document.querySelector('dialog[open]'))return;
+    ||app.detailBusy||app.adminBusy||detailDirty||(document.querySelector('dialog[open]')&&!app.resumeAfterSave))return;
   if(force){app.nextReadRetryAt=0;app.nextRecoveryAt=0;}
   if(app.resumeAfterSave)return recoverInterruptedSave();
   if(!app.stopping&&!app.pendingSave&&!app.readError&&app.readAt&&(app.nextQueuedStartAt||0)<=Date.now()){
@@ -1132,13 +1132,13 @@ async function fetchLegacyData({automatic=false}={}) {
     if(app.pendingSave?.operationId&&app.dataContract===2){
       try{
         const pending=app.pendingSave,receipt=await recoverSaveReceipt(pending);
-        rememberSavedPayload(pending);app.pendingSave=null;app.serverVersion=receipt.version;
+        rememberSavedPayload(pending);app.pendingSave=null;app.pendingSaveBase=null;app.serverVersion=receipt.version;
         if(receipt.current_version!=null&&receipt.current_version!==receipt.version){const e=new Error('保存已完成，但其他页面又修改了记录，请刷新核对');e.status=409;throw e;}
         app.stopping=false;app.readAt=now();readConnectionSucceeded();render();return;
       }catch(error){
         if(error.status!==409||automatic)throw error;
         if(!confirm('服务器记录已变化。是否读取服务器记录？本地尚未保存的修改将被放弃。'))return;
-        app.pendingSave=null;app.resumeAfterSave=null;
+        app.pendingSave=null;app.pendingSaveBase=null;app.resumeAfterSave=null;
       }
     }
     if(app.dataContract===2&&app.readAt&&!app.pendingSave&&!app.stopping){
@@ -1158,7 +1158,7 @@ async function fetchLegacyData({automatic=false}={}) {
           if(!confirm('服务器记录与本地未确认的保存不同。是否读取服务器记录？本地尚未确认的修改将被放弃。'))return;
         }
       }
-      app.pendingSave=null;
+      app.pendingSave=null;app.pendingSaveBase=null;
     }
     if(Number(d.version||0)<Number(app.serverVersion||0)){toast('云端状态正在同步，请稍后刷新');return;} app.batches=Array.isArray(d.batches)?d.batches:[];app.serverVersion=d.version??0;
     app.batches.forEach(b=>{b.items=b.items||[];b.items.forEach(i=>{if(i.dataRevision==null&&i.auditRevision==null&&i.copyRevision==null)i.legacyUnversioned=true;i.dataRevision=i.dataRevision||0;});});
@@ -1276,8 +1276,12 @@ async function ensureBatchLoaded(id){
 async function fetchPagedData({automatic=false}={}){
  if(app.adminBusy||app.processing||app.saving||app.detailBusy||app.fetching)return;
  app.fetching=true;try{
-  if(app.pendingSave){const p=app.pendingSave,r=await recoverSaveReceipt(p);rememberSavedPayload(p);app.pendingSave=null;app.serverVersion=r.version;app.batches=app.batches.filter(b=>b._summaryOnly||b.id===app.importIntent?.batchId);app.savedBatches=new Map();
-   if(r.current_version!=null&&r.current_version!==r.version){app.stopping=false;throw Object.assign(Error('保存已完成，其他页面又更新了记录，请刷新状态'),{status:409});}}
+  if(app.pendingSave){
+   const p=app.pendingSave,r=await recoverSaveReceipt(p);rememberSavedPayload(p);app.pendingSave=null;app.pendingSaveBase=null;app.serverVersion=r.version;
+   if(r.current_version!=null&&r.current_version!==r.version){app.stopping=false;throw Object.assign(Error('保存已完成，其他页面又更新了记录，请刷新状态'),{status:409});}
+   // Keep loaded item objects and later results until the original runner has resumed.
+   app.stopping=false;app.readAt=now();readConnectionSucceeded();render();return;
+  }
   if(automatic&&app.readAt&&!app.readError&&!app.stopping){const v=await api('/api/data_version');if(v.version===app.serverVersion)return;}
   await readHomePage();
  }catch(error){readConnectionFailed(error);render();throw error;}finally{app.fetching=false;renderConnectionState();}
@@ -1312,18 +1316,86 @@ function scopedSaveChanges(b){
   return {patch:{batchId:b.id,fields,items:items.filter(i=>old.items.get(i.itemId)!==JSON.stringify(i))}};
 }
 async function saveFingerprint(payload){const bytes=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(JSON.stringify(payload)));return Array.from(new Uint8Array(bytes),b=>b.toString(16).padStart(2,'0')).join('');}
+function saveConflict(detail){const e=new Error(detail+'；已保留当前结果，请核对后继续。');e.status=409;return e;}
+function saveValueEqual(a,b){
+ const canonical=v=>Array.isArray(v)?v.map(canonical):v&&typeof v==='object'?Object.fromEntries(Object.keys(v).sort().map(k=>[k,canonical(v[k])])):v;
+ return JSON.stringify(canonical(a))===JSON.stringify(canonical(b));
+}
+function mergeSavedFields(base,local,remote){
+ const merged={...remote};
+ for(const key of new Set([...Object.keys(base),...Object.keys(local)])){
+  if(saveValueEqual(local[key],base[key]))continue;
+  if(!saveValueEqual(remote[key],base[key])&&!saveValueEqual(remote[key],local[key]))throw saveConflict('同一批次信息已被其他页面修改，未覆盖');
+  if(Object.hasOwn(local,key))merged[key]=local[key];else delete merged[key];
+ }
+ return merged;
+}
+async function readSaveRecoveryBatch(id,version){
+ let cursor=null,fields=null,total=null;const items=[],seen=new Set(),cursors=new Set();
+ do{
+  const q=new URLSearchParams({batch_id:id,version:String(version)});if(cursor)q.set('after',JSON.stringify(cursor));
+  const d=await api('/api/workbench/items?'+q);
+  if(d.read_contract!==1||d.version!==version||d.batch_id!==id||d.batch?.id!==id||!Array.isArray(d.batch.items)||d.returned!==d.batch.items.length||!Number.isSafeInteger(d.total_items))throw Error('保存核对记录不完整');
+  total??=d.total_items;if(total!==d.total_items)throw Error('保存核对商品数量变化');fields??=d.batch;
+  for(const i of d.batch.items){if(!i?.itemId||seen.has(i.itemId))throw Error('保存核对商品编号重复');seen.add(i.itemId);items.push(i);}
+  cursor=d.next_cursor;if(cursor){const k=JSON.stringify(cursor);if(!d.returned||cursors.has(k))throw Error('保存核对分页未完成');cursors.add(k);}
+ }while(cursor);
+ if(items.length!==total)throw Error('保存核对商品未读取完整');
+ return normaliseLoadedBatch({...fields,items});
+}
+async function reconcileSaveVersion(payload,version){
+ const p=payload.patch,base=app.pendingSaveBase;
+ if(!p||!base||base.operationId!==payload.operationId||base.batchId!==p.batchId||!Number.isSafeInteger(version)||version<=payload.version)throw saveConflict('云端记录已变化，不能安全接续本次保存');
+ const remote=await readSaveRecoveryBatch(p.batchId,version),{items:remoteItems,...remoteFields}=remote;
+ if((remoteFields.intentRevision||0)!==(base.snapshot.fields.intentRevision||0))throw saveConflict('其他页面已暂停或改变本批次任务，未自动恢复');
+ const fields=mergeSavedFields(base.snapshot.fields,p.fields,remoteFields),rows=new Map(remoteItems.map(i=>[i.itemId,i]));
+ for(const item of p.items){const before=base.snapshot.items.get(item.itemId),current=rows.get(item.itemId);
+  if(before==null||!current||!saveValueEqual(current,JSON.parse(before))&&!saveValueEqual(current,item))throw saveConflict('同一商品已被其他页面修改，未覆盖');}
+ // Preserve both remote sibling edits and any later local AI result waiting behind this save.
+ const live=batch(p.batchId);let liveFields=null,liveItems=null;
+ if(live&&!live._summaryOnly){
+  const {items,...lf}=live;liveFields=mergeSavedFields(base.snapshot.fields,lf,remoteFields);
+  liveItems=remoteItems.map(r=>{const l=items.find(i=>i.itemId===r.itemId),before=base.snapshot.items.get(r.itemId);
+   if(!l||before==null)throw saveConflict('批次商品集合已变化，未覆盖');
+   if(saveValueEqual(l,JSON.parse(before)))return r;
+   if(!saveValueEqual(r,JSON.parse(before))&&!saveValueEqual(r,l))throw saveConflict('当前商品有尚未合并的修改，未覆盖');return l;});
+  if(liveItems.length!==items.length)throw saveConflict('批次商品数量已变化，未覆盖');
+ }
+ const patch={batchId:p.batchId,fields,items:p.items};
+ const oldId=payload.operationId,needsWrite=!saveValueEqual(fields,remoteFields)||p.items.some(i=>!saveValueEqual(i,rows.get(i.itemId)));
+ if(liveFields){Object.assign(live,liveFields);live.items=liveItems;}
+ app.savedBatches??=new Map();app.savedBatches.set(p.batchId,savedBatchSnapshot(remote));
+ if(!needsWrite){payload.patch=patch;return {version,current_version:version,reconciled:true};}
+ const next={version,patch},fingerprint=await saveFingerprint(next);
+ Object.assign(payload,next,{operationId:uid(),payloadHash:fingerprint});
+ app.pendingSaveBase={operationId:payload.operationId,batchId:p.batchId,snapshot:savedBatchSnapshot(remote)};
+ (app.saveRecoveryHistory??=[]).push({previousOperationId:oldId,operationId:payload.operationId,at:now()});
+ app.saveRecoveryHistory=app.saveRecoveryHistory.slice(-10);
+ // This is a new version-guarded SAVE, never a new collection or AI request.
+ try{return await api('/api/data',{method:'POST',body:payload});}
+ catch(error){
+  if(error.status&&error.status<500&&error.status!==409)throw error;
+  const r=await api('/api/data_receipt?operation_id='+encodeURIComponent(payload.operationId));
+  if(r.found&&r.payload_hash===payload.payloadHash)return r;throw error;
+ }
+}
 async function recoverSaveReceipt(payload,{retry=true}={}){
-  const read=()=>api('/api/data_receipt?operation_id='+encodeURIComponent(payload.operationId));
-  const inspect=r=>{
-    if(r.found&&r.payload_hash===payload.payloadHash)return r;
-    if(r.found||r.current_version!==payload.version){const e=new Error('云端记录已变化，已停止自动恢复，请刷新核对');e.status=409;throw e;}
-    return null;
-  };
-  const first=await read(),confirmed=inspect(first);if(confirmed)return confirmed;
-  if(!retry)throw new Error('服务器尚未确认这次保存');
-  // Same operation ID and payload: a lost response cannot create a second write.
-  try{return await api('/api/data',{method:'POST',body:payload});}
-  catch(error){if(error.status&&error.status<500&&error.status!==409)throw error;const saved=inspect(await read());if(saved)return saved;throw error;}
+ const read=()=>api('/api/data_receipt?operation_id='+encodeURIComponent(payload.operationId));
+ const inspect=r=>{
+  if(r.found&&r.payload_hash===payload.payloadHash)return r;
+  if(r.found)throw saveConflict('保存编号对应不同内容，未覆盖');
+  if(r.current_version!==payload.version)return null;
+  return false;
+ };
+ const first=await read(),confirmed=inspect(first);if(confirmed)return confirmed;
+ if(first.current_version!==payload.version)return reconcileSaveVersion(payload,first.current_version);
+ if(!retry)throw Error('服务器尚未确认这次保存');
+ try{return await api('/api/data',{method:'POST',body:payload});}
+ catch(error){
+  if(error.status&&error.status<500&&error.status!==409)throw error;
+  const r=await read(),saved=inspect(r);if(saved)return saved;
+  if(r.current_version!==payload.version)return reconcileSaveVersion(payload,r.current_version);throw error;
+ }
 }
 // All writes in the supported single processing window are serialized. KV is not a cross-device lock.
 function savedPayloadMatches(saved,payload){
@@ -1364,10 +1436,11 @@ function saveData(activeBatch,{create=false,draftItem=null}={}) {
         const payload=JSON.parse(JSON.stringify({version:app.serverVersion,...changes}));
         if(receipted){const fingerprint=await saveFingerprint(payload);Object.assign(payload,{operationId:uid(),payloadHash:fingerprint});}
         app.pendingSave=payload;
+        app.pendingSaveBase=payload.patch?{operationId:payload.operationId,batchId:payload.patch.batchId,snapshot:app.savedBatches?.get(payload.patch.batchId)}:null;
         let d;
         try{d=await api('/api/data',{method:'POST',body:payload});}
         catch(error){
-          if(error.status&&error.status!==409&&error.status<500){app.pendingSave=null;throw error;}
+          if(error.status&&error.status!==409&&error.status<500){app.pendingSave=null;app.pendingSaveBase=null;throw error;}
           toast('正在查询服务器，确认刚才的保存结果');
           if(receipted)d=await recoverSaveReceipt(payload);
           else{
@@ -1384,7 +1457,7 @@ function saveData(activeBatch,{create=false,draftItem=null}={}) {
           }
         }
         rememberSavedPayload(payload);
-        app.pendingSave=null;
+        app.pendingSave=null;app.pendingSaveBase=null;
         if(d.current_version!=null&&d.current_version!==d.version){const e=new Error('保存已完成，但其他页面又修改了记录，请刷新核对');e.status=409;throw e;}
         app.serverVersion=d.version;app.lastWrite=Date.now();app.readAt=now();app.stopping=false;readConnectionSucceeded();renderConnectionState();return true;
       };
@@ -1394,12 +1467,12 @@ function saveData(activeBatch,{create=false,draftItem=null}={}) {
     }
       catch(e){
         const b=batch(app.activeId);
-        app.resumeAfterSave=!e.status||e.status>=500?{
+        app.resumeAfterSave=app.resumeAfterSave||(!e.status||e.status>=500?{
           batchId:b?.id||null,
           wasRunning:b?.runStatus==='running',intentRevision:b?.intentRevision||0,
           queueId:b?.workQueue?.id||null
-        }:null;
-        app.stopping=true;app.saveError=e.message;if(b)b.runStatus='paused';renderConnectionState();
+        }:null);
+        app.stopping=true;app.saveError=e.message;if(b)b.runStatus='paused';if(e.status===409)readConnectionFailed(e);renderConnectionState();
         toast(e.status===409?'数据已被其他页面修改，请刷新核对后继续。':`保存尚未确认，处理已暂停：${e.message}`);
         throw e;
       }
@@ -1798,20 +1871,20 @@ async function auditItem(b,i,recover=false){
  if(changedClock)i.auditWaitSince=now();
  const beforeStatus=i.reviewStatus,beforeReceipt=!!i.auditReceiptConfirmed;
  let mustSave=!recover||changedClock;
- function waitForOriginal(detail,serverStartedAt,confirmed,overdue){
+ function waitForOriginal(detail,serverStartedAt,confirmed,overdue,retryAfter=5000){
   const serverStamp=Date.parse(serverStartedAt),localStamp=Date.parse(i.auditWaitSince);
   if(Number.isFinite(serverStamp)&&serverStamp<=Date.now()&&serverStamp<localStamp){i.auditWaitSince=new Date(serverStamp).toISOString();mustSave=true;}
   i.auditReceiptConfirmed=!!i.auditReceiptConfirmed||confirmed===true||Number.isFinite(serverStamp);
   i.auditFailureKnown=false;i.auditRecoverCount=(i.auditRecoverCount||0)+1;
   if(overdue||auditElapsedMs(i,serverStartedAt)>=(i.auditStageProgress?900000:300000)){i.reviewStatus='unconfirmed';i.reason='原审核结果尚未确认，已停止自动等待。可查询原任务；不会自动重新提交或重复调用AI';i.auditNextCheckAt=0;}
-  else{i.reviewStatus='auditing';i.reason=detail||auditWaitingText(i);i.auditNextCheckAt=Date.now()+5000;}
+  else{i.reviewStatus='auditing';i.reason=detail||auditWaitingText(i);i.auditNextCheckAt=Date.now()+Math.max(250,Math.min(60000,Number(retryAfter)||5000));}
  }
  try{
-  const continuation=recover&&b.runStatus!=='paused'&&!app.stopping?i.auditContinuation:null;if(continuation)delete i.auditContinuation;
+  const continuation=recover&&b.runStatus!=='paused'&&!app.stopping&&i.auditContinuation?.ready!==false?i.auditContinuation:null;if(continuation)delete i.auditContinuation;
   const d=recover?(continuation?await api('/api/audit_continue',{method:'POST',body:{requestId,input_hash:expectedHash,sequence:continuation.sequence},timeout:60000}):await api('/api/audit_result?request_id='+encodeURIComponent(requestId))):
     await api('/api/audit',{method:'POST',body:{stage_contract:1,requestId:i.auditRequestId,batchId:b.id,itemId:i.itemId,asin:i.asin,dataRevision:rev,fields,...(i.auditRequestMode?{auditMode:i.auditRequestMode}:{}),...(note?{manualReviewNote:note}:{}),...(i.auditRetrySource?{previousAuditRequestId:i.auditRetrySource}:{})},timeout:60000});
   if((i.dataRevision||0)!==rev||(i.decisionRevision||0)!==decisionRevision||i.auditRequestId!==requestId)return;
-   if(d.pending){if(d.stage_contract===1&&d.input_hash===expectedHash&&Number.isSafeInteger(d.continuation_sequence)){if(i.auditStageSequence!==d.continuation_sequence){i.auditWaitSince=now();i.auditStageSequence=d.continuation_sequence;mustSave=true;}i.auditContinuation={sequence:d.continuation_sequence};i.auditStageProgress=d.stage_progress;}if((d.input_hash&&d.input_hash!==expectedHash)||(d.data_revision!=null&&d.data_revision!==rev)){blockAuditRecovery(i,'原任务接收的商品资料与本次资料不一致，已停止恢复');mustSave=true;}else waitForOriginal(d.detail,d.stage_contract===1?null:d.started_at,d.receipt_confirmed,d.overdue);}
+   if(d.pending){if(d.stage_contract===1&&d.input_hash===expectedHash&&Number.isSafeInteger(d.continuation_sequence)){if(i.auditStageSequence!==d.continuation_sequence){i.auditWaitSince=now();i.auditStageSequence=d.continuation_sequence;mustSave=true;}i.auditContinuation={sequence:d.continuation_sequence,ready:d.ready_for_continue!==false};i.auditStageProgress=d.stage_progress;}if((d.input_hash&&d.input_hash!==expectedHash)||(d.data_revision!=null&&d.data_revision!==rev)){blockAuditRecovery(i,'原任务接收的商品资料与本次资料不一致，已停止恢复');mustSave=true;}else waitForOriginal(d.detail,d.stage_contract===1?null:d.started_at,d.receipt_confirmed,d.overdue,d.stage_contract===1?(Number(d.retry_after_ms)||(d.ready_for_continue===false?1500:250)):5000);}
   else if(d.error==='product_data_missing'){i.reviewStatus='skipped';i.reason='资料不足';i.auditFailureKnown=false;i.auditNextCheckAt=0;mustSave=true;}
   else if(d.error==='collection_identity_error'){i.collectStatus='sync_error';i.collectionIssue='variant_mismatch';i.reviewStatus='pending';i.reason=d.detail;i.auditNextCheckAt=0;mustSave=true;}
   else if(d.error){i.reviewStatus='error';i.auditFailureKnown=true;i.auditNextCheckAt=0;i.reason='审核未完成：'+(d.detail||d.error);i.auditError={code:d.error,detail:d.detail,request_id:i.auditRequestId,time:now(),diagnostic_summary:d.diagnostic_summary||null};mustSave=true;}
@@ -2870,7 +2943,7 @@ function initBatchAdmin(){
 async function recoverInterruptedSave(){
   const resume=app.resumeAfterSave;
   if(!resume||navigator.onLine===false||app.recoveringSave||app.processing||app.starting
-    ||app.saving||app.detailBusy||app.adminBusy||app.fetching||detailDirty||document.querySelector('dialog[open]'))return;
+    ||app.saving||app.detailBusy||app.adminBusy||app.fetching||detailDirty)return;
   if((app.nextRecoveryAt||0)>Date.now())return;
   app.recoveringSave=true;
   try{
