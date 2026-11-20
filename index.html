@@ -175,7 +175,7 @@ a{color:#28624f}button.linkbtn{color:#28624f}.danger-text{color:#994d43!importan
 // Connection settings are copied from the inspected deployment by build.py.
 const WORKER_URL = 'https://scraper-proxy.1172743763.workers.dev';
 const TOKEN = 'ebay1031';
-const BUILD = '2026-11-20-speed-30';
+const BUILD = '2026-11-20-combined-31';
 const PROHIBITION_REVIEW_VERSION=5;
 const MISSING_SOURCE_NOTICE='AI 审核结果缺少能对应到商品原文的证据';
 const AUDIT_CONCURRENCY = 2;
@@ -1882,7 +1882,7 @@ async function auditItem(b,i,recover=false){
  try{
   const continuation=recover&&b.runStatus!=='paused'&&!app.stopping&&i.auditContinuation?.ready!==false?i.auditContinuation:null;if(continuation)delete i.auditContinuation;
   const d=recover?(continuation?await api('/api/audit_continue',{method:'POST',body:{requestId,input_hash:expectedHash,sequence:continuation.sequence},timeout:60000}):await api('/api/audit_result?request_id='+encodeURIComponent(requestId))):
-    await api('/api/audit',{method:'POST',body:{stage_contract:1,requestId:i.auditRequestId,batchId:b.id,itemId:i.itemId,asin:i.asin,dataRevision:rev,fields,...(i.auditRequestMode?{auditMode:i.auditRequestMode}:{}),...(note?{manualReviewNote:note}:{}),...(i.auditRetrySource?{previousAuditRequestId:i.auditRetrySource}:{})},timeout:60000});
+    await api('/api/audit',{method:'POST',body:{stage_contract:1,combined_initial:app.backendCombined===true,requestId:i.auditRequestId,batchId:b.id,itemId:i.itemId,asin:i.asin,dataRevision:rev,fields,...(i.auditRequestMode?{auditMode:i.auditRequestMode}:{}),...(note?{manualReviewNote:note}:{}),...(i.auditRetrySource?{previousAuditRequestId:i.auditRetrySource}:{})},timeout:60000});
   if((i.dataRevision||0)!==rev||(i.decisionRevision||0)!==decisionRevision||i.auditRequestId!==requestId)return;
    if(d.pending){if(d.stage_contract===1&&d.input_hash===expectedHash&&Number.isSafeInteger(d.continuation_sequence)){if(i.auditStageSequence!==d.continuation_sequence){i.auditWaitSince=now();i.auditStageSequence=d.continuation_sequence;mustSave=true;}i.auditContinuation={sequence:d.continuation_sequence,ready:d.ready_for_continue!==false};i.auditStageProgress=d.stage_progress;}if((d.input_hash&&d.input_hash!==expectedHash)||(d.data_revision!=null&&d.data_revision!==rev)){blockAuditRecovery(i,'原任务接收的商品资料与本次资料不一致，已停止恢复');mustSave=true;}else waitForOriginal(d.detail,d.stage_contract===1?null:d.started_at,d.receipt_confirmed,d.overdue,d.stage_contract===1?(Number(d.retry_after_ms)||(d.ready_for_continue===false?1500:250)):5000);}
   else if(d.error==='product_data_missing'){i.reviewStatus='skipped';i.reason='资料不足';i.auditFailureKnown=false;i.auditNextCheckAt=0;mustSave=true;}
@@ -2468,7 +2468,7 @@ async function loadAuditRecordPanel(panel){
     content.innerHTML=(record.source_request_id&&record.source_request_id!==id?'<p class="muted">本次复用了已核对的原任务记录，以下展示原任务保存的实际回复。</p>':'')
       +(record.stage_progress?'<p class="muted">'+Object.entries(record.stage_progress).map(([k,v])=>esc(({'prohibition':'禁售与侵权','materials':'上架材料','business':'经营风险'})[k]||'审核')+'：'+esc(v.attempts)+'次').join('；')+'</p>':'')
       +(record.system_detail?'<details><summary>系统诊断记录</summary><p>'+esc(record.system_detail)+'</p></details>':'')
-      +(outputs.length?outputs.map(o=>'<details><summary>AI 实际回复 · '+esc(({'prohibition':'禁售与侵权','materials':'上架材料','business':'经营风险'})[o.stage]||'审核')+' · 第 '+esc(o.attempt||'?')+' 次</summary><pre style="white-space:pre-wrap;overflow-wrap:anywhere">'+esc(o.content)+'</pre></details>').join('')
+      +(outputs.length?outputs.map(o=>'<details><summary>AI 实际回复 · '+esc(({'combined':'三层初审','prohibition':'禁售与侵权','materials':'上架材料','business':'经营风险'})[o.stage]||'审核')+' · 第 '+esc(o.attempt||'?')+' 次</summary><pre style="white-space:pre-wrap;overflow-wrap:anywhere">'+esc(o.content)+'</pre></details>').join('')
         :'<p class="muted">未保留可读取的 AI 原始回复，或其保留期已过；以上分项记录不冒充原始回复。</p>');
   }catch(error){content.textContent='暂时无法读取原审核记录：'+error.message;delete panel.dataset.loaded;}
 }
@@ -2796,7 +2796,8 @@ function applyAdminData(data){
 async function requireAdminBackend(){
   if(batchAdmin.backendReady)return true;
   const info=await api('/api/workbench_info');
-  if(info.batch_admin_contract!==2)throw new Error('请先更新本次worker.js，后台尚未支持批次管理');
+  if(info.batch_admin_contract!==2||info.batch_step_contract!==1||info.build!==BUILD)throw new Error('请同时更新本轮worker.js和index.html，后台尚未配套分段批次操作');
+  batchAdmin.stepsReady=true;
   batchAdmin.backendReady=true;return true;
 }
 async function openBatchAdmin(action,ids=[]){
@@ -2813,7 +2814,7 @@ async function openBatchAdmin(action,ids=[]){
     const running=ids.map(id=>batch(id)).filter(b=>b?.runStatus==='running');
     if(running.length)return toast('选中批次仍在运行，请先暂停后再删除');
   }
-  const pending=action==='delete'?pendingAdminDelete():null;
+  const pending=pendingBatchSteps(action);
   if(pending){ids=[...pending.ids];batchAdmin.operationId=pending.operationId;}else batchAdmin.operationId=uid();
   batchAdmin.action=action;batchAdmin.ids=[...ids];
   const selected=action==='delete'?ids.map(id=>batch(id)).filter(Boolean):batchAdmin.trashEntries.filter(x=>ids.includes(x.id));
@@ -2824,7 +2825,7 @@ async function openBatchAdmin(action,ids=[]){
   $('batchAdminNotice').textContent=action==='delete'?'删除后进入回收站，保留7天，到期后无法恢复。不会删除采集网站源记录或政策。':action==='restore'?'恢复原资料和结果，批次保持暂停，不会自动开始采集或审核。':'查看与恢复均需管理员密码；密码不会保存在浏览器。';
   $('batchAdminPassword').value='';$('batchAdminError').textContent='';$('batchAdminConfirm').disabled=false;
   $('batchAdminConfirm').textContent=action==='list'?'打开回收站':action==='delete'?(pending?'核对并重试原删除':'删除并保留7天'):'确认恢复';
-  if(pending)$('batchAdminSummary').textContent='上次删除 '+ids.length+' 个批次的结果尚未确认。本次先核对原结果，未完成时只沿用原操作编号重试。';
+  if(pending)$('batchAdminSummary').textContent='上次'+(action==='delete'?'删除':'恢复')+' '+ids.length+' 个批次的结果尚未确认。本次先核对原结果，再接续剩余批次。';
   $('batchAdminDialog').showModal();$('batchAdminPassword').focus();
   }finally{batchAdmin.opening=false;}
 }
@@ -2847,7 +2848,7 @@ function pendingAdminDelete(){
  return null;
 }
 function validAdminDeleteAck(response,operation){
- return response?.success===true&&response.admin_contract===2&&response.action==='delete'&&response.operationId===operation.operationId
+ return response?.success===true&&response.pending!==true&&response.admin_contract===2&&response.action==='delete'&&response.operationId===operation.operationId
    &&Array.isArray(response.ids)&&response.ids.length===operation.ids.length&&new Set(response.ids).size===response.ids.length
    &&response.ids.every(id=>operation.ids.includes(id))&&response.count===operation.ids.length&&Number.isSafeInteger(response.version);
 }
@@ -2868,7 +2869,79 @@ async function recoverAdminDelete(password,operation){
  }
  return {found:false,error:lastError};
 }
+function pendingBatchSteps(action){
+ if(action==='delete')return pendingAdminDelete();
+ if(action!=='restore')return null;
+ if(batchAdmin.pendingRestore)return batchAdmin.pendingRestore;
+ try{const p=JSON.parse(sessionStorage.getItem('audit_admin_pending_restore')||'null');if(p?.action==='restore'&&Array.isArray(p.ids)&&typeof p.operationId==='string')return batchAdmin.pendingRestore=p;}catch{}
+ return null;
+}
+function keepBatchSteps(action,value){
+ if(action==='delete')return keepPendingAdminDelete(value);
+ batchAdmin.pendingRestore=value;try{sessionStorage.setItem('audit_admin_pending_restore',value?JSON.stringify(value):'');}catch{}
+}
+function validBatchStep(r,op){
+ return r?.success===true&&r.admin_contract===2&&r.step_contract===1&&r.action===op.action&&r.operationId===op.operationId
+  &&Array.isArray(r.ids)&&r.ids.length===op.ids.length&&new Set(r.ids).size===r.ids.length&&r.ids.every(id=>op.ids.includes(id))
+  &&r.count===op.ids.length&&Number.isSafeInteger(r.version)&&Array.isArray(r.completed_ids)&&Array.isArray(r.remaining_ids)
+  &&new Set([...r.completed_ids,...r.remaining_ids]).size===op.ids.length&&r.completed_ids.length+r.remaining_ids.length===op.ids.length
+  &&r.completed_ids.every(id=>op.ids.includes(id))&&r.remaining_ids.every(id=>op.ids.includes(id))
+  &&r.completed_count===r.completed_ids.length&&r.pending===(r.remaining_ids.length>0);
+}
+async function submitBatchSteps31(){
+ if(batchAdmin.busy)return;
+ const password=$('batchAdminPassword').value;if(!password){$('batchAdminError').textContent='请输入管理员密码';return;}
+ const action=batchAdmin.action,label=action==='delete'?'删除':'恢复',prior=pendingBatchSteps(action);
+ const remembered=prior?.operationId===batchAdmin.operationId?prior:null;
+ const op={action,ids:[...(remembered?.ids||batchAdmin.ids)],operationId:batchAdmin.operationId,version:remembered?.version??app.serverVersion,step_contract:1,completed_ids:[...(remembered?.completed_ids||[])]};
+ let submitted=false,done=(op.completed_ids||[]).length;
+ const read=()=>api('/api/admin/operations/status',{method:'POST',body:{password,action,ids:op.ids,operationId:op.operationId,step_contract:1},timeout:12000});
+ const progress=r=>{
+  if(!validBatchStep(r,op))throw Error('分段操作回执与原批次不对应，未继续处理');
+  if(r.completed_count<done)throw Error('分段操作进度倒退，已停止核对');
+  if((op.completed_ids||[]).some(id=>!r.completed_ids.includes(id)))throw Error('已完成批次记录发生冲突，已停止核对');
+  done=r.completed_count;op.completed_ids=r.completed_ids;op.version=r.version;keepBatchSteps(action,op);
+  $('batchAdminSummary').textContent='已'+label+' '+done+' / '+op.ids.length+' 个批次；剩余 '+r.remaining_ids.length+' 个。';
+  $('batchAdminConfirm').textContent=label+'中 '+done+'/'+op.ids.length;
+ };
+ const finish=async r=>{
+  if(r.step_contract===1){progress(r);if(r.pending)throw Error('分段操作尚未完成');}
+  else if(action!=='delete'||!validAdminDeleteAck(r,op))throw Error('原操作回执无法对应');
+  if(action==='delete')applyAdminDeleteAck(r,op);
+  else{app.serverVersion=Math.max(app.serverVersion,r.version);app.batches=app.batches.filter(b=>!op.ids.includes(b.id));void readHomePage().catch(e=>toast('恢复已完成，列表暂未刷新：'+e.message));batchAdmin.trashEntries=batchAdmin.trashEntries.filter(e=>!op.ids.includes(e.id));batchAdmin.trashSelected.clear();renderBatchTrash();}
+  keepBatchSteps(action,null);$('batchAdminDialog').close();toast('已'+label+' '+op.ids.length+' 个批次'+(action==='delete'?'，7天内可恢复':'，保持暂停'));
+ };
+ batchAdmin.busy=true;app.adminBusy=true;$('batchAdminConfirm').disabled=true;$('batchAdminError').textContent='';
+ try{
+  await app.writeTail.catch(()=>{});if(app.stopping)throw Error('上次保存尚未确认，请先核对保存结果');
+  if(!navigator.locks)throw Error('请使用支持处理窗口保护的新版Chrome');
+  await navigator.locks.request('ebay-workbench-processing-v1',{ifAvailable:true},async lock=>{
+   if(!lock)throw Error('另一页面正在处理，请先暂停后再管理批次');
+   if(prior){const r=await read();if(r.found){if(r.step_contract!==1||!r.pending)return finish(r);progress(r);}else if(r.success&&r.found===false)op.version=r.version;else throw Error('原操作结果无法读取');}
+   keepBatchSteps(action,op);
+   for(let n=0;n<=op.ids.length;n++){
+    submitted=true;const before=done,r=await api('/api/admin/batches/'+action,{method:'POST',body:{password,...op,page_contract:1},timeout:45000});
+    if(r.step_contract!==1)return finish(r);
+    progress(r);if(!r.pending)return finish(r);
+    if(done===before)throw Error('当前批次尚未取得完成回执，已停止重复提交');
+   }
+   throw Error('分段操作未结束，请核对原结果');
+  });
+ }catch(error){
+  let recovered=false;
+  if(submitted)try{const r=await read();if(r.found){if(r.step_contract!==1||!r.pending){await finish(r);recovered=true;}else progress(r);}}catch(statusError){if(statusError.status&&statusError.status<500)error=statusError;}
+  if(!recovered){
+   if(error.status===410||error.status===409&&/已恢复|对应其他|编号.*不对应|所选批次已变化|已经存在/.test(error.message))keepBatchSteps(action,null);
+   const message=error.message||'未取得有效响应';
+   $('batchAdminError').textContent=label+'尚未完成：已完成 '+done+'/'+op.ids.length+' 个批次。'+message
+    +(pendingBatchSteps(action)?' 重新输入密码后可核对并接续剩余批次。':' 请刷新后重新选择未完成批次。');
+   $('batchAdminConfirm').textContent='核对并继续'+label;
+  }
+ }finally{$('batchAdminPassword').value='';batchAdmin.busy=false;app.adminBusy=false;$('batchAdminConfirm').disabled=false;if(app.view==='home')renderHome();}
+}
+
 async function submitBatchAdmin(){
+ if(batchAdmin.stepsReady&&batchAdmin.action!=='list')return submitBatchSteps31();
  if(batchAdmin.busy)return;
  const password=$('batchAdminPassword').value;if(!password){$('batchAdminError').textContent='请输入管理员密码';return;}
  batchAdmin.busy=true;app.adminBusy=true;$('batchAdminConfirm').disabled=true;$('batchAdminError').textContent='';
@@ -3037,7 +3110,7 @@ async function init() {
 }
 async function checkBackend(){
   if(app.backendCompatible)return true;
-  try{const info=await api('/api/workbench_info',{timeout:10000});if(info.build!==BUILD||info.audit_contract!==2||info.audit_protocol!==3||info.audit_completion_contract!==2||!(info.audit_model_protocol>=24)||info.source_screening_contract!==1||info.prohibition_gate_contract!==1||info.manual_prohibition_contract!==2||info.prohibition_review_version!==PROHIBITION_REVIEW_VERSION||info.data_contract!==2||info.workbench_read_contract!==1||info.audit_stage_contract!==1||info.seller_policy_version!==SELLER_POLICY_VERSION)throw new Error('版本不对应');app.backendCompatible=true;return true;}
+  try{const info=await api('/api/workbench_info',{timeout:10000});if(info.build!==BUILD||info.audit_contract!==2||info.audit_protocol!==3||info.audit_completion_contract!==2||!(info.audit_model_protocol>=24)||info.source_screening_contract!==1||info.prohibition_gate_contract!==1||info.manual_prohibition_contract!==2||info.prohibition_review_version!==PROHIBITION_REVIEW_VERSION||info.data_contract!==2||info.workbench_read_contract!==1||info.audit_stage_contract!==1||info.audit_combined_initial!==1||info.batch_step_contract!==1||info.seller_policy_version!==SELLER_POLICY_VERSION)throw new Error('版本不对应');app.backendCombined=info.audit_combined_initial===1;app.backendCompatible=true;return true;}
   catch(error){toast(error.code==='request_timeout'||error.code==='connection_lost'
     ?'暂时无法连接审核后台，请稍后重试。':'审核后台版本未配套，请同时部署本次 worker.js 和 index.html。旧数据仍保留，需按新标准审核后导出。');return false;}
 }
