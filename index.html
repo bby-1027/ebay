@@ -154,7 +154,7 @@ button,input,textarea,select,.review-note textarea{background:#f8faf3}.toolbar,t
 // Connection settings are copied from the inspected deployment by build.py.
 const WORKER_URL = 'https://scraper-proxy.1172743763.workers.dev';
 const TOKEN = 'ebay1031';
-const BUILD = '2026-11-20-glm4flash-capacity-recovery-34';
+const BUILD = '2026-11-20-glm47flash-gate-diagnostics-33';
 const PROHIBITION_REVIEW_VERSION=4;
 const MISSING_SOURCE_NOTICE='AI 审核结果缺少能对应到商品原文的证据';
 const AUDIT_CONCURRENCY = 2;
@@ -648,9 +648,6 @@ function renderPrimaryReview(i){
 }
 function plainSourceOverview(i){
  const t=text(i.collected?.title);
- if(/\b(?:pocket\s+(?:calendar|planner)|monthly\s+pocket\s+planner)\b/i.test(t))return '便携式月历计划本，用于记录日期和日程。';
- if(/\bchristmas\s+cards?\b/i.test(t))return '圣诞贺卡套装，用于书写或邮寄节日祝福。';
- if(/\b(?:refill\s+cartridges?|glue\s+boards?)\b/i.test(t)&&/\b(?:insect|fly|flying\s+insect)\b/i.test(t))return '捕虫灯替换粘胶板，用于粘捕飞虫；是否含诱引成分需核对原资料。';
  if(/\bchristmas\s+stocking\b/i.test(t))return '圣诞装饰袜，用于悬挂装饰或放置小礼物。';
  if(/\bmagnetic\s+dart\s*board\b/i.test(t))return '磁性飞镖盘套装，用于投掷游戏。';
  if(/\bmailbox\b/i.test(t)&&/\b(?:led|light)\b/i.test(t))return '邮箱照明灯，用于照亮邮箱内部。';
