@@ -148,13 +148,13 @@ button,input,textarea,select,.review-note textarea{background:#f8faf3}.toolbar,t
 <dialog id="humanBanDialog" aria-labelledby="humanBanTitle"><div class="dialoghead"><h3 id="humanBanTitle">人工核验</h3><button class="close" data-action="human-ban-cancel" aria-label="关闭人工核验">×</button></div><div class="dialogbody"><p id="humanBanContext"></p><label class="human-ban-choice"><input id="manualBanConfirmed" type="checkbox" checked> 已自行核验，未发现禁售或侵权阻断。</label><label for="manualBanNote">备注（选填）</label><textarea id="manualBanNote" maxlength="500"></textarea><p id="humanBanError" role="alert"></p></div><div class="dialogfoot"><button data-action="human-ban-cancel">取消</button><button id="humanBanSave" class="primary" data-action="human-ban-save">确认通过</button></div></dialog>
 <style>
 .image-strip{border:1px solid var(--line);border-radius:8px;padding:10px;margin-bottom:18px}.image-strip .image-track{display:flex;flex-wrap:nowrap;gap:10px;overflow-x:auto;padding-bottom:10px;overscroll-behavior-x:contain;scrollbar-gutter:stable}.image-track .product-image{flex:0 0 110px;height:112px;cursor:pointer}.image-track img{width:100px;height:100px;object-fit:contain}.image-strip .label{margin-bottom:8px}.overview-card{padding:12px;border-radius:8px;background:#edf5f0;margin-bottom:12px}.overview-card h4{font-size:14px;margin:0 0 7px}.overview-card p{margin:0;line-height:1.7}.review-brief p{margin:8px 0;line-height:1.65}.review-alert{color:#9b3d32;background:#fff2ef;padding:10px;border-radius:6px}.detail-tools{display:flex;gap:8px}.review-column details{margin-top:14px}.review-column summary{cursor:pointer}.review-column .review-evidence{font-size:13px;line-height:1.7}.review-evidence p{white-space:pre-wrap;overflow-wrap:anywhere}.decision-note{font-size:12px;color:var(--muted)}#decisionDialog{width:460px}#decisionDialog label{display:block;margin:12px 0 6px}#decisionDialog select,#decisionDialog textarea{width:100%;padding:10px;border:1px solid var(--line);border-radius:6px}#decisionError{color:#a53d38}#dtFooter{flex-shrink:0;flex-wrap:wrap}#detailDialog .dialoghead,#dtFooter{z-index:2;background:#fff}
-</style><style>#detailNotice{margin:10px 0 0;padding:11px 14px;border:1px solid #e6af6a;border-radius:7px;background:#fff0d9;color:#913d0b;font-size:14px;line-height:1.6;white-space:normal}#detailDialog .dialoghead>div{flex:1}#importError{background:#fff0d9;padding:12px;border-radius:7px}#importError:empty{display:none}</style><div id="toast"></div>
+</style><style>#detailNotice{margin:10px 0 0;padding:11px 14px;border:1px solid #e6af6a;border-radius:7px;background:#fff0d9;color:#913d0b;font-size:14px;line-height:1.6;white-space:normal}#detailDialog .dialoghead{position:relative;align-items:flex-start;padding-right:66px}#detailDialog .dialoghead>.close{position:absolute;top:14px;right:18px;z-index:3}#detailDialog .dialoghead>div{flex:1}#importError{background:#fff0d9;padding:12px;border-radius:7px}#importError:empty{display:none}</style><div id="toast"></div>
 <script>
 'use strict';
 // Connection settings are copied from the inspected deployment by build.py.
 const WORKER_URL = 'https://scraper-proxy.1172743763.workers.dev';
 const TOKEN = 'ebay1031';
-const BUILD = '2026-11-20-glm47flash-combined-32';
+const BUILD = '2026-11-20-glm47flash-gate-diagnostics-33';
 const PROHIBITION_REVIEW_VERSION=4;
 const MISSING_SOURCE_NOTICE='AI 审核结果缺少能对应到商品原文的证据';
 const AUDIT_CONCURRENCY = 2;
@@ -2050,14 +2050,15 @@ function reviewChinese(value,fallback='尚未取得可读的中文说明'){
 function productOverview(i){
  const supplied=i.audit?.product_overview||i.audit?.source_business_risk?.product_overview;
  const generic=/请结合左侧商品资料|根据所给原始资料核对|未取得有效的中文商品概述|根据原始资料核对实际商品|根据原始资料和实际商品/i;
- const overview=generic.test(text(supplied))?'':reviewChinese(supplied,'');
+ const overview=generic.test(text(supplied))||/^采集标题[:：]/.test(text(supplied))?'':reviewChinese(supplied,'');
  if(overview)return overview;
  const name=reviewChinese(i.audit?.identity?.name,''),use=reviewChinese(i.audit?.identity?.use,'');
  if(name&&name!==text(i.collected?.title))return name+(use?'，'+use:'');
  const known=plainSourceOverview(i);
  if(known)return known;
- const title=text(i.collected?.title).trim();
- return title?'采集标题：'+title:'商品资料不足，无法说明实际用途。';
+ return i.reviewStatus==='error'||i.audit?.review_hold
+   ?'本次审核未生成可核实的商品简述，请核对左侧原始资料。'
+   :'商品资料尚不足以生成可靠简述，请核对左侧原始资料。';
 }
 function reviewPresentation(i){
  const a=i.audit||{},issue=systemIssue(i),manual=existingManual(i),overview=productOverview(i),gate=prohibitionGate(i);
@@ -2196,10 +2197,20 @@ async function loadAuditRecordPanel(panel){
       ||(record.asin&&record.asin!==i.asin)||(record.data_revision!=null&&record.data_revision!==(i.auditRevision??i.dataRevision)))throw new Error('记录与本次审核无法对应');
     const outputs=Array.isArray(record.outputs)?record.outputs:[];
     if(record.pending){content.textContent='原审核任务尚未保存实际回复，系统仍按原任务确认；稍后打开此记录可重新读取。';delete panel.dataset.loaded;return;}
+    const attempts=Array.isArray(record.attempts)?record.attempts:[];
+    const attemptLines=attempts.map(x=>{
+      const step=x.attempt||'?';const mode=({combined_initial:'完整审核',prohibition_only:'禁售及侵权',remaining_checks:'其余检查'})[x.mode]||x.stage||'模型调用';
+      const parts=['第 '+step+' 次：'+mode];
+      if(x.finish_reason)parts.push('结束原因 '+x.finish_reason);
+      if(Number.isFinite(x.output_chars))parts.push('正文 '+x.output_chars+' 字符');
+      if(x.error)parts.push('错误 '+x.error);
+      return '<li>'+esc(parts.join('；'))+'</li>';
+    }).join('');
     content.innerHTML=(record.source_request_id&&record.source_request_id!==id?'<p class="muted">本次复用了已核对的原任务记录，以下展示原任务保存的实际回复。</p>':'')
       +(record.system_detail?'<details><summary>系统诊断记录</summary><p>'+esc(record.system_detail)+'</p></details>':'')
+      +(attemptLines?'<details><summary>模型调用过程</summary><ol>'+attemptLines+'</ol></details>':'')
       +(outputs.length?outputs.map(o=>'<details><summary>AI 实际回复 · 第 '+esc(o.attempt||'?')+' 次</summary><pre style="white-space:pre-wrap;overflow-wrap:anywhere">'+esc(o.content)+'</pre></details>').join('')
-        :'<p class="muted">未保留可读取的 AI 原始回复，或其保留期已过；以上分项记录不冒充原始回复。</p>');
+        :'<p class="muted">没有可读取的 AI 正文；请结合模型调用过程和系统诊断记录判断原因。以上分项记录不冒充原始回复。</p>');
   }catch(error){content.textContent='暂时无法读取原审核记录：'+error.message;delete panel.dataset.loaded;}
 }
 function renderDetailFooter(i){
