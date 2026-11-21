@@ -61,7 +61,7 @@ dialog[open]{display:flex;flex-direction:column;width:760px;overflow:hidden}dial
 #dtFooter>.detail-navigation span{font-size:12px;color:var(--muted);min-width:0;text-align:center;white-space:nowrap;font-variant-numeric:tabular-nums}
 #dtFooter>.detail-navigation button{width:100%;min-width:0;padding:9px 8px;white-space:nowrap}
 #dtFooter>.detail-tools button,#dtFooter>.detail-main-actions button{max-width:100%;white-space:normal}
-@media(max-width:700px){#dtFooter{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}#dtFooter>.detail-tools{grid-column:1;grid-row:1}#dtFooter>.detail-main-actions{grid-column:2;grid-row:1}#dtFooter>.detail-navigation{grid-column:1/-1;grid-row:2}}.short-reason{display:block;max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}#settingsError:empty,#settingsConfirmError:empty{display:none}#settingsError,#settingsConfirmError{color:#a53d38;font-size:13px}#settingsConfirmDialog .dialogfoot{flex-wrap:wrap}#settingsConfirmDialog{width:440px}
+@media(max-width:700px){#dtFooter{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}#dtFooter>.detail-tools{grid-column:1;grid-row:1}#dtFooter>.detail-main-actions{grid-column:2;grid-row:1}#dtFooter>.detail-navigation{grid-column:1/-1;grid-row:2}}.short-reason{display:block;max-width:420px;white-space:normal;overflow-wrap:anywhere;line-height:1.6}#settingsError:empty,#settingsConfirmError:empty{display:none}#settingsError,#settingsConfirmError{color:#a53d38;font-size:13px}#settingsConfirmDialog .dialogfoot{flex-wrap:wrap}#settingsConfirmDialog{width:440px}
 @media(max-width:850px){.review-layout{grid-template-columns:1fr}.product-column{border-right:0;padding-right:0;border-bottom:1px solid var(--line);padding-bottom:20px}#dtFooter{justify-content:flex-end}.detail-navigation{margin-right:auto}#detailMeta{flex-wrap:wrap;gap:10px}#detailDialog .dialoghead{padding:14px 18px}}
 </style><style>
 #detailDialog[open]{height:min(88vh,920px);display:flex;flex-direction:column}
@@ -628,9 +628,14 @@ function reviewState(i){
  {key:'materials',label:'上架材料',done:materials},{key:'business',label:'经营风险及商品资料核对',done:business}];
  return {stages,all:stages.every(x=>x.done),some:stages.some(x=>x.done),m,r};
 }
+function rejectedProduct(i){
+ const m=existingManual(i);
+ return m?m.decision==='excluded':['excluded','not_selected','skipped'].includes(i.reviewStatus);
+}
 function primaryReviewProblems(i){
  const source=sourceAvailability(i),collection=savedCollectionProblem(i),state=reviewState(i);
- if(existingManual(i)||['excluded','not_selected','skipped','similar'].includes(i.reviewStatus))return [];
+ if(rejectedProduct(i))return [{kind:'rejected',title:'已淘汰',text:currentDecisionReason(i)}];
+ if(existingManual(i)||i.reviewStatus==='similar')return [];
  if(collection||['error','sync_error'].includes(i.collectStatus))return [{kind:'system',title:'商品采集资料需要重新核对',text:collection?.reason||i.reason}];
  const rows=state.stages.filter(x=>!x.done).map(x=>({kind:'pending',title:x.label+'尚未完成',text:''}));
  if(state.m?.status==='possible'&&state.stages[1].done)rows.push({kind:'pending',title:'上架材料待核实',text:'请核实这款商品上架时需要提供哪些材料。'});
@@ -641,11 +646,13 @@ function primaryReviewProblems(i){
 function renderPrimaryReview(i){
  const el=$('reviewPrimary');if(!el)return;
  const state=reviewState(i),rows=primaryReviewProblems(i),final=existingManual(i)||['excluded','not_selected','skipped','similar'].includes(i.reviewStatus);
- el.hidden=!!final;el.className='review-primary'+(state.all?' review-completed':'');
- el.innerHTML=(state.all?'<strong>本轮自动审核已完成，待人工核验</strong>':'')+rows.map(r=>'<div class="primary-problem"><strong>'+esc(r.title)+'</strong>'+(r.text?'<span>'+esc(r.text)+'</span>':'')+'</div>').join('');
+ const rejected=rejectedProduct(i);
+ el.hidden=!!final&&!rejected;el.className='review-primary'+(state.all&&!rejected?' review-completed':'');
+ el.innerHTML=(state.all&&!rejected?'<strong>本轮自动审核已完成，待人工核验</strong>':'')+rows.map(r=>'<div class="primary-problem"><strong>'+esc(r.title)+'</strong>'+(r.text?'<span>'+esc(r.text)+'</span>':'')+'</div>').join('');
 }
 function plainSourceOverview(i){
  const t=text(i.collected?.title);
+ if(/\b(?:northern\s+lights?|galaxy|aurora|ocean\s+wave)\b/i.test(t)&&/\bprojector\b/i.test(t))return '极光氛围投影灯';
  if(/\b(?:pocket\s+(?:calendar|planner)|monthly\s+pocket\s+planner)\b/i.test(t))return '便携式月历计划本，用于记录日期和日程。';
  if(/\b(?:sound\s*bar|soundbar)\b/i.test(t))return /\bbluetooth\b/i.test(t)?'蓝牙电视声霸，用于连接电视、投影仪等设备播放声音。':'电视声霸，用于播放电视等设备的声音。';
  if(/\b(?:phone\s+cases?|cell\s+phone\s+cases?)\b/i.test(t))return '手机保护壳，用于保护所适配的手机。';
@@ -1087,7 +1094,7 @@ async function fetchData({automatic=false}={}) {
     }
     if(Number(d.version||0)<Number(app.serverVersion||0)){toast('云端状态正在同步，请稍后刷新');return;} app.batches=Array.isArray(d.batches)?d.batches:[];app.serverVersion=d.version??0;
     app.batches.forEach(b=>{b.items=b.items||[];b.items.forEach(i=>{if(i.dataRevision==null&&i.auditRevision==null&&i.copyRevision==null)i.legacyUnversioned=true;i.dataRevision=i.dataRevision||0;});});
-    app.storage=d.storage;app.dataContract=d.data_contract||0;rememberSavedPayload({batches:app.batches});app.readAt=now();app.stopping=false;readConnectionSucceeded();render();
+    app.storage=d.storage;app.dataContract=d.data_contract||0;rememberSavedPayload({batches:app.batches});app.readAt=now();app.stopping=false;app.batches.forEach(repairCompletedQueuePause);readConnectionSucceeded();render();
   } catch(error) {
     readConnectionFailed(error);
     if(!app.readAt)renderHome();
@@ -1279,12 +1286,33 @@ function enterBatch(id){app.currentBatchId=id;app.view='items';app.selected.clea
 function returnHome(){app.view='home';sessionStorage.setItem('audit_view','home');render();}
 function archive(i){if(i.audit)(i.auditHistory??=[]).push({audit:i.audit,dataRevision:i.auditRevision,manual:i.manualDecision||null,manualProhibition:i.manualProhibition||null});}
 function invalidate(i){if(i.copyData)(i.copyHistory??=[]).push({data:i.copyData,revision:i.copyRevision,time:now()});i.copyStatus='pending';i.copyData=null;i.copyRevision=null;}
-function unfinishedBatch(b){
-  const q=b.workQueue;
-  const queued=q&&q.state!=='completed'&&q.entries.slice(q.cursor).some(e=>!e.completedAt);
-  return !!(queued||b.suspendedQueue||b.items.some(i=>['pending','collecting'].includes(i.collectStatus)
-    ||['pending','auditing'].includes(i.reviewStatus)||(copyAuthorized(i)&&['pending','processing'].includes(i.copyStatus))));
+function itemHasAutomaticWork(i){
+ if(['pending','collecting'].includes(i.collectStatus))return true;
+ if(i.collectStatus==='collected'&&['pending','auditing'].includes(i.reviewStatus))return true;
+ return copyAuthorized(i)&&['pending','processing'].includes(i.copyStatus);
 }
+function queueHasAutomaticWork(b,q){
+ return !!(q&&q.state!=='completed'&&Array.isArray(q.entries)&&q.entries.slice(q.cursor||0).some(e=>{
+   if(e.completedAt||e.action==='blocked')return false;
+   const i=b.items.find(i=>i.itemId===e.itemId);
+   return i&&(i.dataRevision||0)===e.revision&&(!e.prepared||itemHasAutomaticWork(i));
+ }));
+}
+function unfinishedBatch(b){
+ return queueHasAutomaticWork(b,b.workQueue)||queueHasAutomaticWork(b,b.suspendedQueue)||b.items.some(itemHasAutomaticWork);
+}
+function settleCompletedQueue(b){
+ if(b.suspendedQueue&&!queueHasAutomaticWork(b,b.suspendedQueue)){
+   (b.workQueueHistory??=[]).push({...b.suspendedQueue,state:'completed',completedAt:now()});delete b.suspendedQueue;
+ }
+ const remaining=unfinishedBatch(b);
+ b.runStatus=remaining?'paused':counts(b).failures?'blocked':counts(b).verify?'waiting_review':'completed';
+ if(!remaining){b.pauseKind=null;b.note='';if(b.workQueue)b.workQueue.note='';}
+}
+function repairCompletedQueuePause(b){
+ if(b.runStatus==='paused'&&b.workQueue?.state==='completed'&&!unfinishedBatch(b))settleCompletedQueue(b);
+}
+
 function batchControl(b){
  if(app.pendingSave||app.stopping)return {label:'正在确认结果',disabled:true,hidden:false};
  if(b.runStatus==='queued')return {label:'排队中',disabled:true,hidden:false};
@@ -1766,7 +1794,8 @@ async function runWorkQueue(b,{singleItem,recheckVerification,recheckSystemError
       b.suspendedQueue=q;q=null;
     }
   }
-  const unfinished=q&&q.state!=='completed';
+  if(q&&!queueHasAutomaticWork(b,q)){q.state='completed';q.note='';}
+  const unfinished=queueHasAutomaticWork(b,q);
   if(recheckProhibition&&unfinished&&q.kind!=='strict')throw new Error('请先继续完成当前队列，再复审旧版已通过商品；不会覆盖原队列');
   if(recheckVerification&&unfinished&&q.kind==='single')throw new Error('单个商品任务尚未结束，请先点击继续处理接回原任务');
   if(singleItem&&unfinished){
@@ -1834,9 +1863,7 @@ async function runWorkQueue(b,{singleItem,recheckVerification,recheckSystemError
           if(entry.itemId===q.entries[0].itemId&&entry.revision===q.entries[0].revision)entry.completedAt=now();
         }
       }
-      const remaining=b.items.some(i=>['pending','collecting'].includes(i.collectStatus)||['pending','auditing'].includes(i.reviewStatus)
-        ||(copyAuthorized(i)&&['pending','processing'].includes(i.copyStatus)));
-      b.runStatus=b.suspendedQueue||remaining?'paused':counts(b).failures?'blocked':counts(b).verify?'waiting_review':'completed';
+      settleCompletedQueue(b);
       await saveData(b);
     }else if(!app.stopping){q.state='paused';await saveData(b);}
   }finally{app.processing=false;app.activeId=null;render();}
@@ -2090,11 +2117,17 @@ function productOverview(i){
 // Short complete sentences are chosen for the summary. Full findings live below.
 function conciseProductName(i){
  if(savedCollectionProblem(i)||['error','sync_error'].includes(i.collectStatus))return '未取得对应商品资料';
- const raw=productOverview(i).replace(/\.{3,}|…+/g,'').trim();
- const candidates=[raw,...raw.split(/[，。；：]/),reviewChinese(i.audit?.identity?.name,'')];
- const name=candidates.find(v=>v&&Array.from(v).length<=20&&!/核对|未生成|资料尚不足|请人工/.test(v));
- return name||'商品名称待核实';
+ const raw=productOverview(i).trim();
+ const clean=v=>reviewChinese(v,'').replace(/^[\s,，;；:：。]+|[\s,，;；:：。]+$/g,'').trim();
+ const usable=v=>v&&Array.from(v).length<=20&&!/…|\.{3}|核对|未生成|资料尚不足|请人工|适合青少$/.test(v)
+   &&! /^(?:用于|适合|适用|可以|能够|具有|支持|包括|采用)/.test(v);
+ // Prefer a whole name clause; never accept a sliced long description first.
+ const nameClause=clean(raw.split(/[,，。;；:：!?！？\n]/)[0]);
+ const known=clean(plainSourceOverview(i).split(/[,，。;；:：]/)[0]);
+ const identity=clean(i.audit?.identity?.name);
+ return [nameClause,identity,known,clean(raw)].find(usable)||'商品名称待核实';
 }
+
 function reviewPresentation(i){
  const a=i.audit||{},issue=systemIssue(i),gate=prohibitionGate(i),rs=reviewState(i);
  const collection=!!savedCollectionProblem(i)||['error','sync_error'].includes(i.collectStatus);
@@ -2109,8 +2142,15 @@ function reviewPresentation(i){
  const materialNames=(m?.requirements||[]).map(x=>reviewChinese(x,'')).filter(Boolean).join('、');
  const materialLine=materialNames&&Array.from(materialNames).length<=65?((m.status==='required'?'需要':'可能需要')+'：'+materialNames+'。'):mat;
  const risk=r?.level==='high'?'售后风险较高，详见判定依据':r?.level==='low'?'本次未发现明显售后风险':'售后风险待核实';
- const rows=[['商品说明',conciseProductName(i)],['禁售与侵权',ban],['上架材料',materialLine],['经营风险',risk]];
- return {summary:rows.map(([label,value],index)=>({label,value:ended&&index>1&&!rs.stages[index-1].done?'已淘汰，未继续审核':value,
+ const rejected=rejectedProduct(i),category=decisionCategory(i).category;
+ const materialRejected=rejected&&(category==='B'||a.business_rule?.code==='materials_risk'||a.screening_stop?.layer==='materials');
+ const businessRejected=rejected&&!materialRejected&&category==='C';
+ const rows=[['商品说明',conciseProductName(i)],
+ ['禁售与侵权',rejected&&category==='A'?'因禁售或侵权风险淘汰，具体原因见顶部':ban],
+ ['上架材料',materialRejected?'因上架材料要求淘汰，具体原因见顶部':materialLine],
+ ['经营风险',businessRejected?'按经营标准淘汰，具体原因见顶部':risk]];
+ return {summary:rows.map(([label,value],index)=>({label,value:rejected&&i.reviewStatus==='skipped'&&index>0?'资料不足，未开始审核':
+ rejected&&index>1&&!rs.stages[index-1].done&&!((index===2&&materialRejected)||(index===3&&businessRejected))?'已淘汰，未继续审核':value,
  highlight:index>0&&rs.some&&!rs.all&&rs.stages[index-1].done})),issue};
 }
 
