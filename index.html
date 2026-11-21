@@ -647,8 +647,9 @@ function renderPrimaryReview(i){
  const el=$('reviewPrimary');if(!el)return;
  const state=reviewState(i),rows=primaryReviewProblems(i),final=existingManual(i)||['excluded','not_selected','skipped','similar'].includes(i.reviewStatus);
  const rejected=rejectedProduct(i);
- el.hidden=!!final&&!rejected;el.className='review-primary'+(state.all&&!rejected?' review-completed':'');
- el.innerHTML=(state.all&&!rejected?'<strong>本轮自动审核已完成，待人工核验</strong>':'')+rows.map(r=>'<div class="primary-problem"><strong>'+esc(r.title)+'</strong>'+(r.text?'<span>'+esc(r.text)+'</span>':'')+'</div>').join('');
+ const completed=state.all&&!rejected&&rows.length===0&&!systemIssue(i);
+ el.hidden=!!final&&!rejected;el.className='review-primary'+(completed?' review-completed':'');
+ el.innerHTML=(completed?'<strong>本轮自动审核已完成，待人工核验</strong>':'')+rows.map(r=>'<div class="primary-problem"><strong>'+esc(r.title)+'</strong>'+(r.text?'<span>'+esc(r.text)+'</span>':'')+'</div>').join('');
 }
 function plainSourceOverview(i){
  const t=text(i.collected?.title);
