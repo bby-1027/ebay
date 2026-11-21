@@ -138,7 +138,7 @@ button,input,textarea,select,.review-note textarea{background:#f8faf3}.toolbar,t
 </main>
 <dialog id="importDialog"><div class="dialoghead"><h3>导入新批次</h3><button class="close" data-close aria-label="关闭">×</button></div><div class="dialogbody"><div class="form-group"><label>批次名称（选填）</label><input type="text" id="inputBatchName" placeholder="默认按日期命名"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><label>SKU列表</label><input type="file" id="goodsFile" accept=".xlsx,.xls,.csv"></div><textarea id="skuInput" rows="7" placeholder="粘贴SKU，支持空格、逗号或换行。文件仅A列，首行为列名。"></textarea></div><p id="importSummary" class="muted"></p><p id="importError" style="color:#a53d38"></p></div><div class="dialogfoot"><button data-close>取消</button><button id="btnConfirmImport" class="primary">确认并开始</button></div></dialog>
 <dialog id="detailDialog"><div class="dialoghead"><div><div class="detail-id-line"><h3 id="dtTitle"></h3><span id="dtStatus" class="badge b-gray"></span></div><div id="detailMeta"></div><section id="reviewPrimary" hidden role="status" aria-live="polite"></section><p id="detailNotice" role="alert" aria-live="assertive" hidden></p></div><button class="close" data-close aria-label="关闭">×</button></div><div id="dtBody" class="dialogbody"></div><div id="dtFooter" class="dialogfoot"></div></dialog>
-<dialog id="settingsDialog" style="width:420px"><div class="dialoghead"><h3>设置</h3><button class="close" data-close aria-label="关闭">×</button></div><div class="dialogbody"><h4>导出字段</h4><p class="muted">仅保存在当前浏览器。</p><label style="display:block;margin-bottom:12px"><input type="checkbox" checked disabled> SKU（必选）</label><label style="display:block;margin-bottom:12px"><input type="checkbox" id="expBrand" checked> 品牌</label><label style="display:block;margin-bottom:12px"><input type="checkbox" id="expLink" checked> 链接</label><label style="display:block;margin-bottom:12px"><input type="checkbox" id="expTitle" checked> 标题</label><label style="display:block;margin-bottom:12px"><input type="checkbox" id="expBullets" checked> 五点</label><label style="display:block;margin-bottom:12px"><input type="checkbox" id="expDesc" checked> 长描述</label><label style="display:block;margin-bottom:12px"><input type="checkbox" id="expPrice" checked> 当前金额（采集总价，缺失留空）</label><p id="settingsError" role="alert"></p><details><summary>使用说明</summary><p id="settingsInfo" class="muted"></p></details></div><div class="dialogfoot"><button id="settingsSave" class="primary">保存</button></div></dialog>
+<dialog id="settingsDialog" style="width:420px"><div class="dialoghead"><h3>设置</h3><button class="close" data-close aria-label="关闭">×</button></div><div class="dialogbody"><h4>导出字段</h4><p class="muted">仅保存在当前浏览器。</p><label style="display:block;margin-bottom:12px"><input type="checkbox" checked disabled> SKU（必选）</label><label style="display:block;margin-bottom:12px"><input type="checkbox" id="expBrand" checked> 品牌</label><label style="display:block;margin-bottom:12px"><input type="checkbox" id="expLink" checked> 链接</label><label style="display:block;margin-bottom:12px"><input type="checkbox" id="expTitle" checked> 标题</label><label style="display:block;margin-bottom:12px"><input type="checkbox" id="expBullets" checked> 五点</label><label style="display:block;margin-bottom:12px"><input type="checkbox" id="expDesc" checked> 长描述</label><label style="display:block;margin-bottom:12px"><input type="checkbox" id="expPrice" checked> 当前金额</label><p id="settingsError" role="alert"></p><details><summary>使用说明</summary><p id="settingsInfo" class="muted"></p></details></div><div class="dialogfoot"><button id="settingsSave" class="primary">保存</button></div></dialog>
 <dialog id="settingsConfirmDialog" aria-labelledby="settingsConfirmTitle" aria-describedby="settingsConfirmMessage"><div class="dialoghead"><h3 id="settingsConfirmTitle">保存更改？</h3></div><div class="dialogbody"><p id="settingsConfirmMessage">设置有未保存的更改，是否保存？</p><p id="settingsConfirmError" role="alert"></p></div><div class="dialogfoot"><button id="settingsContinue">继续编辑</button><button id="settingsDiscard">不保存退出</button><button id="settingsConfirmSave" class="primary" autofocus>保存并关闭</button></div></dialog>
 <dialog id="detailConfirmDialog" aria-labelledby="detailConfirmTitle"><div class="dialoghead"><h3 id="detailConfirmTitle">保存人工审核修改？</h3></div><div class="dialogbody"><p>人工结论或建议有修改。商品资料的编辑仍需通过资料区单独保存。</p></div><div class="dialogfoot"><button id="detailConfirmContinue">继续编辑</button><button id="detailConfirmDiscard">不保存并关闭</button><button id="detailConfirmSave" class="primary">保存并关闭</button></div></dialog>
 <dialog id="imagePreviewDialog" aria-label="商品大图"><div class="dialoghead"><h3>商品大图</h3><button class="close" data-close aria-label="关闭大图">×</button></div><div class="image-preview-body"><p id="previewStatus" role="status"></p><img id="previewImage" alt="商品大图，供人工查看" hidden></div><div class="dialogfoot"><button id="imagePrev" data-action="image-prev">上一张</button><button id="imageNext" data-action="image-next">下一张</button><button data-close>关闭</button></div></dialog>
@@ -2081,23 +2081,31 @@ function productOverview(i){
    ?'本次审核未生成可核实的商品简述，请核对左侧原始资料。'
    :'商品资料尚不足以生成可靠简述，请核对左侧原始资料。';
 }
+// Short complete sentences are chosen for the summary. Full findings live below.
+function conciseProductName(i){
+ if(savedCollectionProblem(i)||['error','sync_error'].includes(i.collectStatus))return '未取得对应商品资料';
+ const raw=productOverview(i).replace(/\.{3,}|…+/g,'').trim();
+ const candidates=[raw,...raw.split(/[，。；：]/),reviewChinese(i.audit?.identity?.name,'')];
+ const name=candidates.find(v=>v&&Array.from(v).length<=20&&!/核对|未生成|资料尚不足|请人工/.test(v));
+ return name||'商品名称待核实';
+}
 function reviewPresentation(i){
- const a=i.audit||{},issue=systemIssue(i),manual=existingManual(i),overview=productOverview(i),gate=prohibitionGate(i);
- const excluded=['excluded','not_selected','skipped'].includes(i.reviewStatus);
- const category=excluded?decisionCategory(i).category:null;
- const banText=gate.source==='human'?'人工已核验禁售与侵权':gate.status==='blocked'||gate.status==='unresolved'
-   ?reviewChinese(a.prohibition_review?.reason||currentDecisionReason(i),'存在具体禁售或侵权风险，已淘汰')
-   :gate.ok?'本次审核未发现禁售或侵权问题'
-   :category==='A'?reviewChinese(currentDecisionReason(i),'存在禁售或侵权疑点，已淘汰')
-   :'核验未完成，不能通过；详见审核记录';
- const m=a.platform_materials||a.seller_review?.materials;
- const materials=m?materialSummary(i):'材料检查未完成，不能认定无需提交';
- const riskBasis=reviewChinese(a.seller_review?.after_sales?.reason||a.business_rule?.reason||a.source_business_risk?.reason,'');
- const riskText='专利投诉及诉讼情况待人工核实；售后：'+(riskBasis||'待核实');
- const rows=[['商品说明',overview,20],['禁售与侵权',banText,70],['上架材料',materials,65],['经营风险',riskText,75]];
- let budget=300-rows.reduce((n,[label])=>n+Array.from(label).length+1,0);
- const rs=reviewState(i);
- return {summary:rows.map(([label,value,limit],index)=>{const chars=Array.from(value);const take=Math.max(12,Math.min(limit,budget));const shown=chars.length>take?chars.slice(0,take-1).join('')+'…':value;budget-=Array.from(shown).length;return {label,value:shown,full:value,highlight:index>0&&rs.some&&!rs.all&&rs.stages[index-1].done};}),issue};
+ const a=i.audit||{},issue=systemIssue(i),gate=prohibitionGate(i),rs=reviewState(i);
+ const collection=!!savedCollectionProblem(i)||['error','sync_error'].includes(i.collectStatus);
+ if(collection)return {summary:[{label:'商品说明',value:'未取得对应商品资料',highlight:false},
+ {label:'禁售与侵权',value:'未开始审核',highlight:false},{label:'上架材料',value:'未开始审核',highlight:false},
+ {label:'经营风险',value:'未开始审核',highlight:false}],issue};
+ const m=a.platform_materials||a.seller_review?.materials,r=a.seller_review?.after_sales;
+ const blocked=['blocked','unresolved'].includes(gate.status);
+ const ended=['excluded','not_selected','skipped'].includes(i.reviewStatus);
+ const ban=blocked?'存在禁售或侵权问题，已淘汰':gate.ok?'本次审核未发现禁售或侵权问题':'待完成禁售与侵权审核';
+ const mat=m?.status==='required'?'涉及强制上架材料，详见判定依据':m?.status==='possible'&&m.requirements?.length?'可能需要上架材料，详见判定依据':rs.stages[1].done?'本次未发现额外材料要求':'待核实';
+ const materialNames=(m?.requirements||[]).map(x=>reviewChinese(x,'')).filter(Boolean).join('、');
+ const materialLine=materialNames&&Array.from(materialNames).length<=65?((m.status==='required'?'需要':'可能需要')+'：'+materialNames+'。'):mat;
+ const risk=r?.level==='high'?'售后风险较高，详见判定依据':r?.level==='low'?'本次未发现明显售后风险':'售后风险待核实';
+ const rows=[['商品说明',conciseProductName(i)],['禁售与侵权',ban],['上架材料',materialLine],['经营风险',risk+'；专利投诉及诉讼情况待人工核实']];
+ return {summary:rows.map(([label,value],index)=>({label,value:ended&&index>1&&!rs.stages[index-1].done?'已淘汰，未继续审核':value,
+ highlight:index>0&&rs.some&&!rs.all&&rs.stages[index-1].done})),issue};
 }
 
 function renderSourceScreeningEvidence(screening){
@@ -2170,16 +2178,29 @@ function displayBrandName(i){
 }
 
 function renderHumanEvidence(i){
- const a=i.audit||{},checks=a.review_checks||[],refs=a.policy_references||[];
- const labels={prohibited:'禁售与限制',safety:'实际使用安全',ip:'知识产权',conditions:'销售条件',consistency:'商品资料核对'};
- const rows=checks.map((c,index)=>'<article><strong>'+esc(labels[c.area]||'分项判断')+'</strong><p>'+esc(reviewChinese(c.reason))+'</p><button class="linkbtn" data-action="source-evidence" data-check="'+index+'">在左侧查看商品原文依据</button></article>').join('');
+ const a=i.audit||{},checks=a.review_checks||[],refs=a.policy_references||[],seen=new Set();
+ const paragraph=(label,value)=>{const v=reviewChinese(value,'');if(!v||seen.has(v))return '';seen.add(v);return '<article><strong>'+esc(label)+'</strong><p>'+esc(v)+'</p></article>';};
+ const labels={prohibited:'禁售与侵权',ip:'侵权风险',conditions:'上架材料',safety:'使用及售后风险',consistency:'商品型号与规格核对'};
+ let findings=checks.map((c,index)=>{
+   const body=paragraph(labels[c.area]||'分项判断',c.reason);
+   return body+(body&&c.fact_ids?.length?'<button class="linkbtn" data-action="source-evidence" data-check="'+index+'">查看对应商品原文</button>':'');
+ }).join('');
+ const m=a.platform_materials||a.seller_review?.materials;
+ if(m){findings+=paragraph('涉及材料',(m.requirements||[]).join('、'));findings+=paragraph('材料适用原因',m.applicability_reason||m.reason);}
+ findings+=paragraph('售后风险',a.seller_review?.after_sales?.reason);
+ findings+=paragraph('淘汰原因',a.business_rule?.reason);
+ const human=existingManual(i);
+ if(human)findings+=paragraph('人工决定',human.reason||({passed:'人工已确认通过',excluded:'人工已确认淘汰',similar:'人工已找到同款'}[human.decision]));
+ if(validHumanProhibition(i,app.currentBatchId))findings+=paragraph('人工禁售核验',i.manualProhibition.note||'人工已确认未发现禁售或侵权问题');
  const fixed=renderSourceScreeningEvidence(a.source_screening);
- let sellers=['materials','after_sales','scope'].map((key,index)=>a.seller_review?.[key]?'<article><strong>'+['材料要求','经营与售后','实际用途'][index]+'</strong><p>'+esc(reviewChinese(a.seller_review[key].reason))+'</p></article>':'').join('');
- if(a.business_rule?.reason&&!a.seller_review?.after_sales)sellers+='<article><strong>经营排除依据</strong><p>'+esc(reviewChinese(a.business_rule.reason))+'</p></article>';
- const policies=refs.map(r=>'<article><p>'+esc(reviewChinese(r.clause_zh,'这条旧记录没有中文政策说明'))+'</p><p>'+esc(reviewChinese(r.explanation,''))+'</p>'+(/^https:\/\/(?:www\.)?ebay\.com\//i.test(r.source||'')?'<a href="'+esc(r.source)+'" target="_blank" rel="noopener">打开官方政策 ↗</a>':'')+'</article>').join('');
- const m=a.platform_materials||a.seller_review?.materials;const stages={before_listing:'上架前',listing:'填写刊登时',on_request:'收到平台通知时',import:'进口美国时',shipping:'安排运输时',not_identified:'本次未识别到额外提交要求',unclear:'还没查清提供时机'}; const materialDetail=m?'<details><summary>上架材料：具体要求与核实情况</summary><p>'+esc(materialSummary(i))+'</p><p>为什么涉及：'+esc(reviewChinese(m.applicability_reason||m.reason))+'</p><p>提供时机：'+esc(stages[m.submission_stage]||stages.unclear)+'</p><p>货源情况：'+esc(reviewChinese(m.supplier_reason,'尚未确认当前货源能否提供'))+'</p></details>':'';
- const body='<details><summary>查看判定依据</summary><div class="review-evidence">'+materialDetail+(fixed+rows+sellers||'<p>尚未取得完整分析，请查看左侧原始资料。</p>')+(policies||'<p>本次没有可展示的中文政策依据，不能据此认定已排除全部风险。</p>')+'</div></details>';
- return humanFinal(i)?'<details><summary>查看原自动审核判断与依据</summary><p>以下为原自动审核记录；当前结论以已保存的人工决定为准。</p>'+body+'</details>':body;
+ const policies=refs.map(r=>{
+   const key=[r.source,r.clause_zh].join('|');if(seen.has(key))return '';seen.add(key);
+   const url=/^https:\/\/(?:www\.)?ebay\.com\//i.test(r.source||'')?'<a href="'+esc(r.source)+'" target="_blank" rel="noopener">查看官方政策</a>':'';
+   return '<article><p>'+esc(reviewChinese(r.clause_zh,''))+'</p>'+url+'</article>';
+ }).join('');
+ if(!findings&&!fixed&&!policies)return '';
+ return '<details><summary>查看具体原因与依据</summary><div class="review-evidence">'+findings+fixed+
+ (policies?'<h4>对应官方政策</h4>'+policies:'')+'</div></details>';
 }
 
 function recordDetailBaseline(){const current=itemOf(app.currentBatchId,app.detailItemId),f=current?.collected||{};app.detailBaseline={manualReason:current?manualSuggestion(current):'',manualStatus:existingManual(current||{})?.decision||'',editTitle:text(f.title),editBullets:text(f.bullets),editDesc:text(f.description)};}
@@ -2203,13 +2224,10 @@ function auditNextStep(issue){
   return '由系统针对具体失败原因补审；已有分析且存在可核实的问题时转待人工。';
 }
 function auditRecordPanel(i){
-  const a=i.audit||{},checks=Array.isArray(a.review_checks)?a.review_checks:[];
-  const labels={clear:'已核对',no_match:'未发现适用限制',not_applicable:'不适用',needs_verification:'有具体问题待核实',blocked:'存在阻断',unresolved_risk:'具体风险未解决',not_checked:'未完成检查'};
-  const analysis=checks.map(c=>'<p><strong>'+esc(({prohibited:'禁售与限售',safety:'安全',ip:'知识产权',conditions:'必要条件',consistency:'资料一致性'}[c.area]||'其他检查'))+'：'+esc(labels[c.status]||'尚未确认')+'</strong><br>'+esc(reviewChinese(c.reason,'未保留有效中文分项说明'))+'</p>').join('');
-  return '<details class="advanced" data-audit-record="'+esc(i.itemId)+'" data-batch-id="'+esc(app.currentBatchId)+'"><summary>查看审核记录</summary>'
-    +(analysis||'<p class="muted">这条旧记录未保留完整分项分析。</p>')
-    +'<div class="audit-record-content"><p class="muted">打开后读取已保存的审核记录，不重新调用 AI。</p></div></details>';
+  return '<details class="advanced" data-audit-record="'+esc(i.itemId)+'" data-batch-id="'+esc(app.currentBatchId)+'"><summary>查看审核异常详情</summary>'
+    +'<div class="audit-record-content"><p class="muted">展开后读取失败原因，不重新提交审核。</p></div></details>';
 }
+
 async function loadAuditRecordPanel(panel){
   if(panel.dataset.loaded)return;panel.dataset.loaded='1';
   const i=itemOf(panel.dataset.batchId,panel.dataset.auditRecord),a=i?.audit||{},id=a._request_id||i?.auditRequestId;
@@ -2270,13 +2288,8 @@ function openDetail(iid,{preserveNavigation=false}={}){
  renderBrandMeta(i);
  const {summary,issue}=reviewPresentation(i),insufficient=i.reviewStatus==='skipped'&&!savedCollectionProblem(i);
  let right=summary.map((row,index)=>index===0?'<section class="overview-card"><h4>商品说明</h4><p>'+esc(row.value)+'</p></section>':'<p class="'+(row.highlight?'review-row-completed':'')+'" style="white-space:normal;overflow-wrap:anywhere"><strong>'+esc(row.label)+'：</strong>'+esc(row.value)+'</p>').join('');
- const expanded=summary.filter(row=>row.full!==row.value).map(row=>'<p><strong>'+esc(row.label)+'：</strong>'+esc(row.full)+'</p>');
- if(insufficient)expanded.push('<p>资料不足，已淘汰。</p>');
- if(humanFinal(i))expanded.push('<p>当前结论由人工决定。'+esc(reviewChinese(existingManual(i).reason,''))+'</p>');
- if(expanded.length)right+='<details><summary>查看完整摘要</summary>'+expanded.join('')+'</details>';
- if(validHumanProhibition(i,b.id))right+='<details><summary>查看人工核验记录</summary><p>当前禁售结论由人工确认，原自动审核记录保留。</p><p>'+esc(i.manualProhibition.note||i.manualProhibition.prohibition_evidence||'无备注')+'</p></details>';
- if(!insufficient)right+=renderHumanEvidence(i);
- right+=auditRecordPanel(i);
+ right+=renderHumanEvidence(i);
+ if(systemIssue(i)&&(i.audit?._request_id||i.auditRequestId))right+=auditRecordPanel(i);
  right+='<div class="review-note"><label for="manualReason">人工意见（选填）</label><textarea id="manualReason" maxlength="500">'+esc(manualSuggestion(i))+'</textarea><label><input id="rememberOpinion" type="checkbox"> 将本次意见作为同类商品的最低优先级参考</label></div>';
  $('dtBody').innerHTML='<div class="review-layout"><section class="product-column"><div class="detail-tabs"><button id="sourceTab" data-action="tab-source">采集资料</button><button id="copyTab" data-action="tab-copy" '+(i.copyData?'':'disabled')+'>清理后文案</button></div><div id="detailSource"></div><div id="detailEditPanel" hidden>'+detailPanel('edit',i)+'</div></section><section class="review-column"><div class="review-card"><div class="review-card-head"><h4>审核摘要</h4>'+badge(...status)+'</div><div class="review-brief">'+right+'</div></div></section></div>';
  renderPrimaryReview(i);renderDetailSource(i);renderDetailFooter(i);recordDetailBaseline();
