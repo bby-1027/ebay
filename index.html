@@ -154,7 +154,7 @@ button,input,textarea,select,.review-note textarea{background:#f8faf3}.toolbar,t
 // Connection settings are copied from the inspected deployment by build.py.
 const WORKER_URL = 'https://scraper-proxy.1172743763.workers.dev';
 const TOKEN = 'ebay1031';
-const BUILD = '2026-11-21-three-stage-36';
+const BUILD = '2026-11-21-two-call-39';
 const PROHIBITION_REVIEW_VERSION=4;
 const MISSING_SOURCE_NOTICE='AI 审核结果缺少能对应到商品原文的证据';
 const AUDIT_CONCURRENCY = 1;
@@ -2249,7 +2249,7 @@ async function loadAuditRecordPanel(panel){
     if(record.pending){content.textContent='原审核任务尚未保存实际回复，系统仍按原任务确认；稍后打开此记录可重新读取。';delete panel.dataset.loaded;return;}
     const attempts=Array.isArray(record.attempts)?record.attempts:[];
     const attemptLines=attempts.map(x=>{
-      const step=x.attempt||'?';const mode=({combined_initial:'完整审核',prohibition_only:'禁售及侵权',remaining_checks:'其余检查',materials:'上架材料',business:'经营风险及商品资料核对'})[x.mode]||x.stage||'模型调用';
+      const step=x.attempt||'?';const mode=({combined_initial:'完整审核',prohibition_only:'禁售及侵权',supplementary:'上架材料、经营风险及资料核对',remaining_checks:'其余检查',materials:'上架材料',business:'经营风险及商品资料核对'})[x.mode]||x.stage||'模型调用';
       const parts=['第 '+step+' 次：'+mode];
       if(x.finish_reason)parts.push('结束原因 '+x.finish_reason);
       if(Number.isFinite(x.output_chars))parts.push('正文 '+x.output_chars+' 字符');
