@@ -154,7 +154,7 @@ button,input,textarea,select,.review-note textarea{background:#f8faf3}.toolbar,t
 // Connection settings are copied from the inspected deployment by build.py.
 const WORKER_URL = 'https://scraper-proxy.1172743763.workers.dev';
 const TOKEN = 'ebay1031';
-const BUILD = '2026-11-21-two-call-39';
+const BUILD = '2026-11-21-timeout-recovery-41';
 const PROHIBITION_REVIEW_VERSION=4;
 const MISSING_SOURCE_NOTICE='AI 审核结果缺少能对应到商品原文的证据';
 const AUDIT_CONCURRENCY = 1;
@@ -636,7 +636,6 @@ function primaryReviewProblems(i){
  if(state.m?.status==='possible'&&state.stages[1].done)rows.push({kind:'pending',title:'上架材料待核实',text:'请核实这款商品上架时需要提供哪些材料。'});
  if(state.r?.level==='uncertain'&&state.stages[2].done)rows.push({kind:'pending',title:'商品售后风险待核实',text:reviewChinese(state.r.reason,'')});
  if(!source.ok)rows.push({kind:'pending',title:source.blocked?'货源不符合要求':'FBA货源待核实',text:source.reason});
- rows.push({kind:'manual',title:'专利投诉及诉讼情况待人工核实',text:''});
  return rows;
 }
 function renderPrimaryReview(i){
@@ -2110,7 +2109,7 @@ function reviewPresentation(i){
  const materialNames=(m?.requirements||[]).map(x=>reviewChinese(x,'')).filter(Boolean).join('、');
  const materialLine=materialNames&&Array.from(materialNames).length<=65?((m.status==='required'?'需要':'可能需要')+'：'+materialNames+'。'):mat;
  const risk=r?.level==='high'?'售后风险较高，详见判定依据':r?.level==='low'?'本次未发现明显售后风险':'售后风险待核实';
- const rows=[['商品说明',conciseProductName(i)],['禁售与侵权',ban],['上架材料',materialLine],['经营风险',risk+'；专利投诉及诉讼情况待人工核实']];
+ const rows=[['商品说明',conciseProductName(i)],['禁售与侵权',ban],['上架材料',materialLine],['经营风险',risk]];
  return {summary:rows.map(([label,value],index)=>({label,value:ended&&index>1&&!rs.stages[index-1].done?'已淘汰，未继续审核':value,
  highlight:index>0&&rs.some&&!rs.all&&rs.stages[index-1].done})),issue};
 }
@@ -2119,7 +2118,7 @@ function renderSourceScreeningEvidence(screening){
  if(!screening||!Array.isArray(screening.brand_matches)&&!Array.isArray(screening.chemical_matches)&&!Array.isArray(screening.brand_review_signals))return '';
  const link=(url,label)=>/^https:\/\//.test(url||'')?'<a href="'+esc(url)+'" target="_blank" rel="noopener noreferrer">'+label+' ↗</a>':'';
  const brand=(screening.brand_matches||[]).map(h=>'<article><strong>涉及品牌或角色：'+esc(h.name)+'</strong><p>原文：'+esc(h.quote)+'</p><p>按本店经营名单排除，不等于已认定假冒或平台一律禁售。</p>'+link(h.source,'查看品牌或权利主体来源')
-   +(h.litigation?.historic_only?'<p>另有可核查的历史诉讼记录；不表示当前店铺受法院禁令约束。</p>'+h.litigation.cases.map(c=>'<p>'+esc(c.court)+' · '+esc(c.order_date)+' '+link(c.source,'查看历史法院记录')+'</p>').join(''):'')+'</article>').join('');
+   +'</article>').join('');
  const chemical=(screening.chemical_matches||[]).map(c=>'<article><strong>实际内容物：'+esc(c.label)+'</strong><p>原文：'+esc(c.quote)+'</p><p>属于经营排除；是否违反平台禁售以独立禁售记录为准。</p></article>').join('');
  const review=(screening.brand_review_signals||[]).map(h=>'<article><strong>需要逐件核实的品牌或角色线索：'+esc(h.name)+'</strong><p>原文：'+esc(h.quote)+'</p><p>该名称本身不触发高风险品牌经营淘汰；仍需检查当前商品的禁售及侵权风险，最终由人工决定。</p></article>').join('');
  return brand+chemical+review;
@@ -2252,6 +2251,8 @@ async function loadAuditRecordPanel(panel){
       const step=x.attempt||'?';const mode=({combined_initial:'完整审核',prohibition_only:'禁售及侵权',supplementary:'上架材料、经营风险及资料核对',remaining_checks:'其余检查',materials:'上架材料',business:'经营风险及商品资料核对'})[x.mode]||x.stage||'模型调用';
       const parts=['第 '+step+' 次：'+mode];
       if(x.finish_reason)parts.push('结束原因 '+x.finish_reason);
+      if(Number.isFinite(x.elapsed_ms))parts.push('耗时 '+(x.elapsed_ms/1000).toFixed(1)+' 秒');
+      if(Number.isFinite(x.input_chars))parts.push('输入 '+x.input_chars+' 字符');
       if(Number.isFinite(x.output_chars))parts.push('正文 '+x.output_chars+' 字符');
       if(x.error)parts.push('错误 '+x.error);
       return '<li>'+esc(parts.join('；'))+'</li>';
