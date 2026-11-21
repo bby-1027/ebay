@@ -112,7 +112,7 @@ body,main{background:#edf2e9}header,.card,dialog,.review-card,.dialoghead,#detai
 button,input,textarea,select,.review-note textarea{background:#f8faf3}.toolbar,th,.dialogfoot{background:#eff4e9}.overview-card{background:#e3edde}.text{background:#eef3e7}.image-strip{background:#f2f6ec}.product-image{background:#f8faf4}#decisionDialog textarea{min-height:70px}#detailEditPanel{margin-top:18px}
 .review-primary{margin:12px 0 0;padding:12px 15px;border:1px solid #dfc4a3;border-radius:8px;background:#fbf1e3;color:#704c2a;font-size:14px;line-height:1.6}.review-primary.prohibition-pending{border-left:4px solid #b4783f;background:#f9ecdb;color:#71451e}.primary-problem{margin:3px 0}.primary-problem strong{display:block;font-size:15px}.primary-problem span{display:block;font-size:13px;font-weight:400}.primary-problem+.primary-problem{border-top:1px solid #e5cfb6;padding-top:8px;margin-top:8px}.primary-problem-count{display:block;margin-bottom:5px}#humanBanDialog{width:470px}#humanBanDialog label{display:block;margin:15px 0 8px}#humanBanDialog textarea{width:100%;min-height:85px;border:1px solid var(--line);border-radius:6px;padding:10px}#humanBanError{color:#9b4d29}.human-ban-choice{padding:12px;background:#f5eddc;border:1px solid #dfc9ab;border-radius:7px}
 
-</style></head>
+</style><style>.review-row-completed{background:#e7f4ec;border-radius:6px;padding:8px}.review-primary.review-completed{background:#e7f4ec;border-color:#b8d9c4;color:#225c46}</style></head>
 <body>
 <header><div class="brand"><div class="logo">✓</div><div><h1>商品审核工作台</h1><small>批次管理 · 风险审核 · 导出</small></div></div><button id="btnSettings">设置</button></header>
 <div id="connectionBanner" role="status" aria-live="polite" style="max-width:1212px;margin:16px auto 0;padding:12px 16px;border:1px solid #e2e8e4;border-radius:8px;background:#fff">
@@ -147,14 +147,14 @@ button,input,textarea,select,.review-note textarea{background:#f8faf3}.toolbar,t
 <dialog id="decisionDialog" aria-labelledby="decisionTitle"><div class="dialoghead"><h3 id="decisionTitle">修改结论</h3><button class="close" data-action="decision-cancel" aria-label="关闭修改结论">×</button></div><div class="dialogbody"><p id="decisionSourceNotice" class="review-alert" role="alert" hidden></p><label for="decisionChoice">选择结论</label><select id="decisionChoice"><option value="passed">通过</option><option value="excluded">淘汰</option><option value="similar">已找同款</option></select><label for="decisionNote">备注（选填）</label><textarea id="decisionNote" maxlength="500"></textarea><input id="decisionEvidence" type="hidden"><p class="muted">保存后以本次人工决定为准，保留原自动审核记录。</p><p id="decisionError" role="alert"></p></div><div class="dialogfoot"><button data-action="decision-cancel">取消</button><button class="primary" data-action="decision-save">保存</button></div></dialog>
 <dialog id="humanBanDialog" aria-labelledby="humanBanTitle"><div class="dialoghead"><h3 id="humanBanTitle">人工核验</h3><button class="close" data-action="human-ban-cancel" aria-label="关闭人工核验">×</button></div><div class="dialogbody"><p id="humanBanContext"></p><label class="human-ban-choice"><input id="manualBanConfirmed" type="checkbox" checked> 已自行核验，未发现禁售或侵权阻断。</label><label for="manualBanNote">备注（选填）</label><textarea id="manualBanNote" maxlength="500"></textarea><p id="humanBanError" role="alert"></p></div><div class="dialogfoot"><button data-action="human-ban-cancel">取消</button><button id="humanBanSave" class="primary" data-action="human-ban-save">确认通过</button></div></dialog>
 <style>
-.image-strip{border:1px solid var(--line);border-radius:8px;padding:10px;margin-bottom:18px}.image-strip .image-track{display:flex;flex-wrap:nowrap;gap:10px;overflow-x:auto;padding-bottom:10px;overscroll-behavior-x:contain;scrollbar-gutter:stable}.image-track .product-image{flex:0 0 110px;height:112px;cursor:pointer}.image-track img{width:100px;height:100px;object-fit:contain}.image-strip .label{margin-bottom:8px}.overview-card{padding:12px;border-radius:8px;background:#edf5f0;margin-bottom:12px}.overview-card h4{font-size:14px;margin:0 0 7px}.overview-card p{margin:0;line-height:1.7}.review-brief p{margin:8px 0;line-height:1.65}.review-alert{color:#9b3d32;background:#fff2ef;padding:10px;border-radius:6px}.detail-tools{display:flex;gap:8px}.review-column details{margin-top:14px}.review-column summary{cursor:pointer}.review-column .review-evidence{font-size:13px;line-height:1.7}.review-evidence p{white-space:pre-wrap;overflow-wrap:anywhere}.decision-note{font-size:12px;color:var(--muted)}#decisionDialog{width:460px}#decisionDialog label{display:block;margin:12px 0 6px}#decisionDialog select,#decisionDialog textarea{width:100%;padding:10px;border:1px solid var(--line);border-radius:6px}#decisionError{color:#a53d38}#dtFooter{flex-shrink:0;flex-wrap:wrap}#detailDialog .dialoghead,#dtFooter{z-index:2;background:#fff}
+.image-strip{border:1px solid var(--line);border-radius:8px;padding:10px;margin-bottom:18px}.image-strip .image-track{display:flex;flex-wrap:nowrap;gap:10px;overflow-x:auto;padding-bottom:10px;overscroll-behavior-x:contain;scrollbar-gutter:stable}.image-track .product-image{flex:0 0 110px;height:112px;cursor:pointer}.image-track img{width:100px;height:100px;object-fit:contain}.image-strip .label{margin-bottom:8px}.overview-card{padding:12px;border-radius:8px;background:transparent;margin-bottom:12px}.overview-card h4{font-size:14px;margin:0 0 7px}.overview-card p{margin:0;line-height:1.7}.review-brief p{margin:8px 0;line-height:1.65}.review-alert{color:#9b3d32;background:#fff2ef;padding:10px;border-radius:6px}.detail-tools{display:flex;gap:8px}.review-column details{margin-top:14px}.review-column summary{cursor:pointer}.review-column .review-evidence{font-size:13px;line-height:1.7}.review-evidence p{white-space:pre-wrap;overflow-wrap:anywhere}.decision-note{font-size:12px;color:var(--muted)}#decisionDialog{width:460px}#decisionDialog label{display:block;margin:12px 0 6px}#decisionDialog select,#decisionDialog textarea{width:100%;padding:10px;border:1px solid var(--line);border-radius:6px}#decisionError{color:#a53d38}#dtFooter{flex-shrink:0;flex-wrap:wrap}#detailDialog .dialoghead,#dtFooter{z-index:2;background:#fff}
 </style><style>#detailNotice{margin:10px 0 0;padding:11px 14px;border:1px solid #e6af6a;border-radius:7px;background:#fff0d9;color:#913d0b;font-size:14px;line-height:1.6;white-space:normal}#detailDialog .dialoghead{position:relative;align-items:flex-start;padding-right:66px}#detailDialog .dialoghead>.close{position:absolute;top:14px;right:18px;z-index:3}#detailDialog .dialoghead>div{flex:1}#importError{background:#fff0d9;padding:12px;border-radius:7px}#importError:empty{display:none}</style><div id="toast"></div>
 <script>
 'use strict';
 // Connection settings are copied from the inspected deployment by build.py.
 const WORKER_URL = 'https://scraper-proxy.1172743763.workers.dev';
 const TOKEN = 'ebay1031';
-const BUILD = '2026-11-20-review-stability-35';
+const BUILD = '2026-11-21-three-stage-36';
 const PROHIBITION_REVIEW_VERSION=4;
 const MISSING_SOURCE_NOTICE='AI 审核结果缺少能对应到商品原文的证据';
 const AUDIT_CONCURRENCY = 1;
@@ -618,35 +618,32 @@ function manualReviewFocus(i){
  if(a.seller_review?.after_sales?.level==='uncertain')return '商品使用及售后风险尚未确定，请人工核实';
  return '分析已完成，请人工审核';
 }
-function primaryReviewProblems(i){
- const problems=[],gate=prohibitionGate(i),source=sourceAvailability(i),collection=savedCollectionProblem(i),issue=systemIssue(i);
- const final=existingManual(i),excluded=['excluded','not_selected','skipped'].includes(i.reviewStatus);
- if(final&&['excluded','similar'].includes(final.decision))return [{kind:'final',title:currentDecisionReason(i),text:'当前人工决定已保存。'}];
- if(collection||['error','sync_error'].includes(i.collectStatus))return [{kind:'collection',title:collection?.reason||collectionProblemMessage(i,i.collectionIssue||'upstream_failed',i.collectionDiagnostic),text:'请核对本次采集任务；对应错误的资料不能用于通过。'}];
- if(excluded&&!final){
-   const category=decisionCategory(i),rows=[{kind:category.category==='A'?'prohibition':'excluded',title:category.label,text:currentDecisionReason(i)}];
-   if(source.blocked)rows.push({kind:'source',title:/不是FBA/.test(source.reason)?'另有货源问题：当前货源非FBA，不能改为通过':'另有货源问题：当前无货或不可售，不能改为通过',text:'可更新货源，或保留淘汰、选择已找同款。'});
-   return rows;
- }
- if(!gate.ok&&i.reviewStatus!=='skipped'){
-   const activeRisk=['blocked','unresolved'].includes(gate.status);
-   problems.push({kind:'prohibition',title:activeRisk?'存在禁售或侵权风险，不能通过':'禁售核验未完成，不能通过',
-     text:activeRisk?currentDecisionReason(i):issue?.kind==='audit_lookup'?'原任务结果尚未确认，请先查询原任务。':issue?reviewFailureText(i,issue):'任务结束后可补做禁售检查或人工核验。'});
- }else if(issue){
-   problems.push({kind:issue.kind==='copy'?'copy':'system',title:reviewFailureText(i,issue),
-     text:(i.audit?.attempts_exhausted&&i.audit?.model_attempts>=3?'已尝试三次仍未完成。':'')+auditNextStep(issue)});
- }
- if(source.blocked)problems.push({kind:'source',title:/不是FBA/.test(source.reason)?'当前货源非FBA，不能通过':'当前无货或不可售，不能通过',text:'可更新货源，或选择淘汰、已找同款。'});
- if(!problems.length&&!final&&gate.ok)problems.push({kind:'review',title:manualReviewFocus(i),text:'查看原资料后，可选择通过、淘汰或已找同款。'});
- return problems;
+function reviewState(i){
+ const a=i.audit||{},gate=prohibitionGate(i),checks=a.review_checks||[],progress=a.stage_progress||{};
+ const checked=area=>checks.some(c=>c.area===area&&['clear','no_match','not_applicable','blocked','needs_verification','unresolved_risk'].includes(c.status)&&c.fact_ids?.length);
+ const m=a.platform_materials||a.seller_review?.materials,r=a.seller_review?.after_sales;
+ const materials=progress.materials?progress.materials.status==='completed':!!m&&!!m.requirements&&!!a.seller_review?.materials?.fact_ids?.length&&checked('conditions');
+ const business=progress.business?progress.business.status==='completed':!!r?.fact_ids?.length&&checked('safety')&&checked('consistency');
+ const stages=[{key:'prohibition',label:'禁售与侵权',done:gate.ok||['blocked','unresolved'].includes(gate.status)},
+ {key:'materials',label:'上架材料',done:materials},{key:'business',label:'经营风险及商品资料核对',done:business}];
+ return {stages,all:stages.every(x=>x.done),some:stages.some(x=>x.done),m,r};
 }
-
+function primaryReviewProblems(i){
+ const source=sourceAvailability(i),collection=savedCollectionProblem(i),state=reviewState(i);
+ if(existingManual(i)||['excluded','not_selected','skipped','similar'].includes(i.reviewStatus))return [];
+ if(collection||['error','sync_error'].includes(i.collectStatus))return [{kind:'system',title:'商品采集资料需要重新核对',text:collection?.reason||i.reason}];
+ const rows=state.stages.filter(x=>!x.done).map(x=>({kind:'pending',title:x.label+'尚未完成',text:''}));
+ if(state.m?.status==='possible'&&state.stages[1].done)rows.push({kind:'pending',title:'上架材料待核实',text:'请核实这款商品上架时需要提供哪些材料。'});
+ if(state.r?.level==='uncertain'&&state.stages[2].done)rows.push({kind:'pending',title:'商品售后风险待核实',text:reviewChinese(state.r.reason,'')});
+ if(!source.ok)rows.push({kind:'pending',title:source.blocked?'货源不符合要求':'FBA货源待核实',text:source.reason});
+ rows.push({kind:'manual',title:'专利投诉及诉讼情况待人工核实',text:''});
+ return rows;
+}
 function renderPrimaryReview(i){
- const el=$('reviewPrimary'),rows=primaryReviewProblems(i);if(!el)return;
- el.hidden=!rows.length;
- el.className='review-primary'+(rows.some(r=>r.kind==='prohibition')?' prohibition-pending':'');
- el.innerHTML=(rows.length>1?'<strong class="primary-problem-count">当前有'+rows.length+'个问题</strong>':'')
-   +rows.map((r,n)=>'<div class="primary-problem"><strong>'+(rows.length>1?(n+1)+'. ':'')+esc(r.title)+'</strong>'+(r.text?'<span>'+esc(r.text)+'</span>':'')+'</div>').join('');
+ const el=$('reviewPrimary');if(!el)return;
+ const state=reviewState(i),rows=primaryReviewProblems(i),final=existingManual(i)||['excluded','not_selected','skipped','similar'].includes(i.reviewStatus);
+ el.hidden=!!final;el.className='review-primary'+(state.all?' review-completed':'');
+ el.innerHTML=(state.all?'<strong>本轮自动审核已完成，待人工核验</strong>':'')+rows.map(r=>'<div class="primary-problem"><strong>'+esc(r.title)+'</strong>'+(r.text?'<span>'+esc(r.text)+'</span>':'')+'</div>').join('');
 }
 function plainSourceOverview(i){
  const t=text(i.collected?.title);
@@ -654,7 +651,8 @@ function plainSourceOverview(i){
  if(/\b(?:sound\s*bar|soundbar)\b/i.test(t))return /\bbluetooth\b/i.test(t)?'蓝牙电视声霸，用于连接电视、投影仪等设备播放声音。':'电视声霸，用于播放电视等设备的声音。';
  if(/\b(?:phone\s+cases?|cell\s+phone\s+cases?)\b/i.test(t))return '手机保护壳，用于保护所适配的手机。';
  if(/\b(?:seat\s+cushions?|chair\s+cushions?)\b/i.test(t))return '座椅坐垫，用于座椅上的日常使用。';
- if(/\b(?:vacuum\s+filters?|air\s+filters?)\b/i.test(t))return '替换滤芯，用于适配设备的过滤功能。';
+ if(/\b(?:cabin|engine)\b/i.test(t)&&/\bfilter/i.test(t))return '汽车空调及发动机滤芯套装';
+ if(/\b(?:vacuum\s+filters?|air\s+filters?)\b/i.test(t))return '设备替换滤芯';
  if(/\bchristmas\s+cards?\b/i.test(t))return '圣诞贺卡套装，用于书写或邮寄节日祝福。';
  if(/\b(?:refill\s+cartridges?|glue\s+boards?)\b/i.test(t)&&/\b(?:insect|fly|flying\s+insect)\b/i.test(t))return '捕虫灯替换粘胶板，用于粘捕飞虫；是否含诱引成分需核对原资料。';
  if(/\bchristmas\s+stocking\b/i.test(t))return '圣诞装饰袜，用于悬挂装饰或放置小礼物。';
@@ -733,7 +731,7 @@ function materialSummary(i){
  if(m.status==='required')return m.supplier_status==='unavailable'?'需要'+name+'，货源无法提供。':m.supplier_status==='available'?'已取得'+name+'，还需核对本型号。':'需要'+name+'，未确认货源能否提供。';
  if(m.status==='possible')return m.requirements?.some(x=>!/(?:是否|哪些|相关材料|其他材料|待核实)/.test(text(x)))
    ?'可能需要'+reviewChinese(m.requirements[0],'指定材料').slice(0,26)+'；核对适用依据。'
-   :'具体强制材料尚未查清，不能认定免提交。';
+   :'待核实';
  return '本次未发现需额外提交的材料。';
 }
 function sourceAvailability(i){
@@ -1541,6 +1539,7 @@ function itemReason(i,b){
     if(recovery.action==='copy')return '正在重新清理文案';
   }
   const status=itemStatus(i,b)[0];
+  if(['系统异常','待人工'].includes(status)&&!existingManual(i)){const rows=primaryReviewProblems(i);return rows.map(x=>x.title).join('；')||'待人工核验';}
   if(status==='系统异常'){
     const problems=primaryReviewProblems(i);
     return problems.length?problems.map(p=>p.title).join('；'):reviewFailureText(i);
@@ -2088,16 +2087,17 @@ function reviewPresentation(i){
  const category=excluded?decisionCategory(i).category:null;
  const banText=gate.source==='human'?'人工已核验禁售与侵权':gate.status==='blocked'||gate.status==='unresolved'
    ?reviewChinese(a.prohibition_review?.reason||currentDecisionReason(i),'存在具体禁售或侵权风险，已淘汰')
-   :gate.ok?'文本核验完成，未发现具体禁售或侵权阻断'
+   :gate.ok?'本次审核未发现禁售或侵权问题'
    :category==='A'?reviewChinese(currentDecisionReason(i),'存在禁售或侵权疑点，已淘汰')
    :'核验未完成，不能通过；详见审核记录';
  const m=a.platform_materials||a.seller_review?.materials;
  const materials=m?materialSummary(i):'材料检查未完成，不能认定无需提交';
  const riskBasis=reviewChinese(a.seller_review?.after_sales?.reason||a.business_rule?.reason||a.source_business_risk?.reason,'');
- const riskText='发明专利活跃维权/诉讼：未实时核实；售后：'+(riskBasis||'亏损风险待核实');
- const rows=[['商品说明',overview,70],['禁售与侵权',banText,70],['上架材料',materials,65],['经营风险',riskText,75]];
+ const riskText='专利投诉及诉讼情况待人工核实；售后：'+(riskBasis||'待核实');
+ const rows=[['商品说明',overview,20],['禁售与侵权',banText,70],['上架材料',materials,65],['经营风险',riskText,75]];
  let budget=300-rows.reduce((n,[label])=>n+Array.from(label).length+1,0);
- return {summary:rows.map(([label,value,limit])=>{const chars=Array.from(value);const take=Math.max(12,Math.min(limit,budget));const shown=chars.length>take?chars.slice(0,take-1).join('')+'…':value;budget-=Array.from(shown).length;return {label,value:shown,full:value};}),issue};
+ const rs=reviewState(i);
+ return {summary:rows.map(([label,value,limit],index)=>{const chars=Array.from(value);const take=Math.max(12,Math.min(limit,budget));const shown=chars.length>take?chars.slice(0,take-1).join('')+'…':value;budget-=Array.from(shown).length;return {label,value:shown,full:value,highlight:index>0&&rs.some&&!rs.all&&rs.stages[index-1].done};}),issue};
 }
 
 function renderSourceScreeningEvidence(screening){
@@ -2224,7 +2224,7 @@ async function loadAuditRecordPanel(panel){
     if(record.pending){content.textContent='原审核任务尚未保存实际回复，系统仍按原任务确认；稍后打开此记录可重新读取。';delete panel.dataset.loaded;return;}
     const attempts=Array.isArray(record.attempts)?record.attempts:[];
     const attemptLines=attempts.map(x=>{
-      const step=x.attempt||'?';const mode=({combined_initial:'完整审核',prohibition_only:'禁售及侵权',remaining_checks:'其余检查'})[x.mode]||x.stage||'模型调用';
+      const step=x.attempt||'?';const mode=({combined_initial:'完整审核',prohibition_only:'禁售及侵权',remaining_checks:'其余检查',materials:'上架材料',business:'经营风险及商品资料核对'})[x.mode]||x.stage||'模型调用';
       const parts=['第 '+step+' 次：'+mode];
       if(x.finish_reason)parts.push('结束原因 '+x.finish_reason);
       if(Number.isFinite(x.output_chars))parts.push('正文 '+x.output_chars+' 字符');
@@ -2269,7 +2269,7 @@ function openDetail(iid,{preserveNavigation=false}={}){
  $('dtTitle').textContent=i.asin;const status=itemStatus(i,b);$('dtStatus').textContent=status[0];$('dtStatus').className='badge b-'+status[1];
  renderBrandMeta(i);
  const {summary,issue}=reviewPresentation(i),insufficient=i.reviewStatus==='skipped'&&!savedCollectionProblem(i);
- let right=summary.map((row,index)=>index===0?'<section class="overview-card"><h4>商品说明</h4><p>'+esc(row.value)+'</p></section>':'<p style="white-space:normal;overflow-wrap:anywhere"><strong>'+esc(row.label)+'：</strong>'+esc(row.value)+'</p>').join('');
+ let right=summary.map((row,index)=>index===0?'<section class="overview-card"><h4>商品说明</h4><p>'+esc(row.value)+'</p></section>':'<p class="'+(row.highlight?'review-row-completed':'')+'" style="white-space:normal;overflow-wrap:anywhere"><strong>'+esc(row.label)+'：</strong>'+esc(row.value)+'</p>').join('');
  const expanded=summary.filter(row=>row.full!==row.value).map(row=>'<p><strong>'+esc(row.label)+'：</strong>'+esc(row.full)+'</p>');
  if(insufficient)expanded.push('<p>资料不足，已淘汰。</p>');
  if(humanFinal(i))expanded.push('<p>当前结论由人工决定。'+esc(reviewChinese(existingManual(i).reason,''))+'</p>');
@@ -2362,7 +2362,7 @@ async function saveHumanDecision(b,i,decision,{advance=false,note='',evidence=''
    if($('humanBanDialog').open)$('humanBanDialog').close();
    if(advance){
      const nav=app.detailNav,filter=nav?.filter||'all';
-     const candidates=priorIds.slice(priorIndex+1).concat(priorIds.slice(0,Math.max(0,priorIndex)));
+     const candidates=priorIds.slice(priorIndex+1);
      const next=candidates.map(id=>itemOf(b.id,id)).find(row=>row&&detailMatches(row,b,filter)&&(filter!=='all'||['待人工','系统异常'].includes(itemStatus(row,b)[0])));
      app.detailBusy=false;
      if(next)openDetail(next.itemId,{preserveNavigation:true});
