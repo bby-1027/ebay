@@ -154,10 +154,12 @@ button,input,textarea,select,.review-note textarea{background:#f8faf3}.toolbar,t
 // Connection settings are copied from the inspected deployment by build.py.
 const WORKER_URL = 'https://scraper-proxy.1172743763.workers.dev';
 const TOKEN = 'ebay1031';
-const BUILD = '2026-11-20-glm47flash-gate-diagnostics-33';
+const BUILD = '2026-11-20-review-stability-35';
 const PROHIBITION_REVIEW_VERSION=4;
 const MISSING_SOURCE_NOTICE='AI 审核结果缺少能对应到商品原文的证据';
-const AUDIT_CONCURRENCY = 2;
+const AUDIT_CONCURRENCY = 1;
+const MIN_AUDIT_START_GAP_MS = 12000;
+let lastAuditStartAt = 0;
 const SELLER_POLICY_VERSION='2026-11-19-three-layer-v6';
 const $ = id => document.getElementById(id);
 const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -648,6 +650,13 @@ function renderPrimaryReview(i){
 }
 function plainSourceOverview(i){
  const t=text(i.collected?.title);
+ if(/\b(?:pocket\s+(?:calendar|planner)|monthly\s+pocket\s+planner)\b/i.test(t))return '便携式月历计划本，用于记录日期和日程。';
+ if(/\b(?:sound\s*bar|soundbar)\b/i.test(t))return /\bbluetooth\b/i.test(t)?'蓝牙电视声霸，用于连接电视、投影仪等设备播放声音。':'电视声霸，用于播放电视等设备的声音。';
+ if(/\b(?:phone\s+cases?|cell\s+phone\s+cases?)\b/i.test(t))return '手机保护壳，用于保护所适配的手机。';
+ if(/\b(?:seat\s+cushions?|chair\s+cushions?)\b/i.test(t))return '座椅坐垫，用于座椅上的日常使用。';
+ if(/\b(?:vacuum\s+filters?|air\s+filters?)\b/i.test(t))return '替换滤芯，用于适配设备的过滤功能。';
+ if(/\bchristmas\s+cards?\b/i.test(t))return '圣诞贺卡套装，用于书写或邮寄节日祝福。';
+ if(/\b(?:refill\s+cartridges?|glue\s+boards?)\b/i.test(t)&&/\b(?:insect|fly|flying\s+insect)\b/i.test(t))return '捕虫灯替换粘胶板，用于粘捕飞虫；是否含诱引成分需核对原资料。';
  if(/\bchristmas\s+stocking\b/i.test(t))return '圣诞装饰袜，用于悬挂装饰或放置小礼物。';
  if(/\bmagnetic\s+dart\s*board\b/i.test(t))return '磁性飞镖盘套装，用于投掷游戏。';
  if(/\bmailbox\b/i.test(t)&&/\b(?:led|light)\b/i.test(t))return '邮箱照明灯，用于照亮邮箱内部。';
@@ -722,7 +731,9 @@ function materialSummary(i){
  if(!m)return '材料检查未完成，请人工判断是否有适用要求。';
  const name=reviewChinese(m.requirements?.[0],'相关材料').slice(0,12);
  if(m.status==='required')return m.supplier_status==='unavailable'?'需要'+name+'，货源无法提供。':m.supplier_status==='available'?'已取得'+name+'，还需核对本型号。':'需要'+name+'，未确认货源能否提供。';
- if(m.status==='possible')return '是否需要材料尚待人工判断。';
+ if(m.status==='possible')return m.requirements?.some(x=>!/(?:是否|哪些|相关材料|其他材料|待核实)/.test(text(x)))
+   ?'可能需要'+reviewChinese(m.requirements[0],'指定材料').slice(0,26)+'；核对适用依据。'
+   :'具体强制材料尚未查清，不能认定免提交。';
  return '本次未发现需额外提交的材料。';
 }
 function sourceAvailability(i){
@@ -1623,6 +1634,12 @@ async function auditItem(b,i,recover=false){
       i.reason=d.audit.reason;
       invalidate(i);
       mustSave=true;
+      const rateDetail=text(d.audit.validation_detail||d.audit.model_diagnostics?.map(x=>x.error).join(' ')||'');
+      if(i.reviewStatus==='error'&&/模型接口状态码\s*429/.test(rateDetail)){
+        b.runStatus='paused';
+        b.note='模型账户触发速率限制，已暂停本批审核；额度恢复后点击继续处理，并重试这一条系统异常。';
+        i.reason='模型接口限流，审核暂未完成；其余商品已暂停排队';
+      }
       }
   }
    else throw new Error('审核返回结构不完整');
@@ -1864,6 +1881,11 @@ async function runLoop(bid,{recheckVerification=false,recheckSystemError=false,r
         const item=scopedItems().find(i=>!auditJobs.has(i.itemId)&&i.reviewStatus==='auditing'&&i.auditRequestId&&(!i.auditNextCheckAt||Date.now()>=i.auditNextCheckAt))
           ||scopedItems().find(i=>!auditJobs.has(i.itemId)&&i.collectStatus==='collected'&&i.reviewStatus==='pending');
         if(!item)break;
+        if(item.reviewStatus==='pending'){
+          const gap=MIN_AUDIT_START_GAP_MS-(Date.now()-lastAuditStartAt);
+          if(gap>0){await sleep(Math.min(gap,1000));break;}
+          lastAuditStartAt=Date.now();
+        }
         const job=auditItem(b,item,item.reviewStatus==='auditing').catch(error=>{
           auditJobError??=error;
           b.runStatus='paused';
@@ -2062,17 +2084,20 @@ function productOverview(i){
 }
 function reviewPresentation(i){
  const a=i.audit||{},issue=systemIssue(i),manual=existingManual(i),overview=productOverview(i),gate=prohibitionGate(i);
- const endedBusiness=!manual&&['excluded','not_selected'].includes(i.reviewStatus)&&decisionCategory(i).category==='C';
- const banText=endedBusiness&&!gate.ok&&!['blocked','unresolved'].includes(gate.status)?'未完成；本品已按经营标准淘汰':gate.source==='human'?'已由人工核验':gate.ok?'本次文本禁售检查已完成':gate.status==='blocked'?'存在禁售阻断':gate.status==='unresolved'?'存在具体禁售疑点':'禁售核验未完成';
- const riskText=reviewChinese(a.seller_review?.after_sales?.reason||a.business_rule?.reason||a.source_business_risk?.reason,'');
- const rows=[['商品说明',overview,60]];
- if(manual)rows.push(['当前结论',currentDecisionReason(i),300]);
- else if(['excluded','not_selected','skipped'].includes(i.reviewStatus))rows.push(['原因类别',decisionCategory(i).label,50],['淘汰原因',currentDecisionReason(i),300]);
- rows.push(['禁售核验',banText,50]);
- if(a.platform_materials||a.seller_review?.materials)rows.push(['上架材料',materialSummary(i),80]);
- if(riskText)rows.push([manual?'原审核经营风险':'经营风险',riskText,300]);
- if(manual?.decision==='passed')rows.push(['处理情况',exportCheck(i).ok?'文案准备完成，可以导出':reviewChinese(exportCheck(i).reason),100]);
- return {summary:rows.map(([label,value,limit])=>{const chars=Array.from(value);return {label,value:chars.length>limit?chars.slice(0,limit-1).join('')+'…':value};}),issue};
+ const excluded=['excluded','not_selected','skipped'].includes(i.reviewStatus);
+ const category=excluded?decisionCategory(i).category:null;
+ const banText=gate.source==='human'?'人工已核验禁售与侵权':gate.status==='blocked'||gate.status==='unresolved'
+   ?reviewChinese(a.prohibition_review?.reason||currentDecisionReason(i),'存在具体禁售或侵权风险，已淘汰')
+   :gate.ok?'文本核验完成，未发现具体禁售或侵权阻断'
+   :category==='A'?reviewChinese(currentDecisionReason(i),'存在禁售或侵权疑点，已淘汰')
+   :'核验未完成，不能通过；详见审核记录';
+ const m=a.platform_materials||a.seller_review?.materials;
+ const materials=m?materialSummary(i):'材料检查未完成，不能认定无需提交';
+ const riskBasis=reviewChinese(a.seller_review?.after_sales?.reason||a.business_rule?.reason||a.source_business_risk?.reason,'');
+ const riskText='发明专利活跃维权/诉讼：未实时核实；售后：'+(riskBasis||'亏损风险待核实');
+ const rows=[['商品说明',overview,70],['禁售与侵权',banText,70],['上架材料',materials,65],['经营风险',riskText,75]];
+ let budget=300-rows.reduce((n,[label])=>n+Array.from(label).length+1,0);
+ return {summary:rows.map(([label,value,limit])=>{const chars=Array.from(value);const take=Math.max(12,Math.min(limit,budget));const shown=chars.length>take?chars.slice(0,take-1).join('')+'…':value;budget-=Array.from(shown).length;return {label,value:shown,full:value};}),issue};
 }
 
 function renderSourceScreeningEvidence(screening){
@@ -2244,8 +2269,11 @@ function openDetail(iid,{preserveNavigation=false}={}){
  $('dtTitle').textContent=i.asin;const status=itemStatus(i,b);$('dtStatus').textContent=status[0];$('dtStatus').className='badge b-'+status[1];
  renderBrandMeta(i);
  const {summary,issue}=reviewPresentation(i),insufficient=i.reviewStatus==='skipped'&&!savedCollectionProblem(i);
- let right=insufficient?'<p class="review-alert">资料不足，已淘汰。</p>':summary.map((row,index)=>index===0?'<section class="overview-card"><h4>商品说明</h4><p>'+esc(row.value)+'</p></section>':'<p style="white-space:normal;overflow-wrap:anywhere"><strong>'+esc(row.label)+'：</strong>'+esc(row.value)+'</p>').join('');
- if(humanFinal(i))right+='<p class="decision-note">当前结论由人工决定。'+esc(reviewChinese(existingManual(i).reason,''))+'</p>';
+ let right=summary.map((row,index)=>index===0?'<section class="overview-card"><h4>商品说明</h4><p>'+esc(row.value)+'</p></section>':'<p style="white-space:normal;overflow-wrap:anywhere"><strong>'+esc(row.label)+'：</strong>'+esc(row.value)+'</p>').join('');
+ const expanded=summary.filter(row=>row.full!==row.value).map(row=>'<p><strong>'+esc(row.label)+'：</strong>'+esc(row.full)+'</p>');
+ if(insufficient)expanded.push('<p>资料不足，已淘汰。</p>');
+ if(humanFinal(i))expanded.push('<p>当前结论由人工决定。'+esc(reviewChinese(existingManual(i).reason,''))+'</p>');
+ if(expanded.length)right+='<details><summary>查看完整摘要</summary>'+expanded.join('')+'</details>';
  if(validHumanProhibition(i,b.id))right+='<details><summary>查看人工核验记录</summary><p>当前禁售结论由人工确认，原自动审核记录保留。</p><p>'+esc(i.manualProhibition.note||i.manualProhibition.prohibition_evidence||'无备注')+'</p></details>';
  if(!insufficient)right+=renderHumanEvidence(i);
  right+=auditRecordPanel(i);
