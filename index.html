@@ -305,7 +305,7 @@ function renderConnectionState(){
   }else if(recovered){
     label='连接已恢复';
   }else{
-    label=app.readAt?'':'正在连接并读取已保存批次…';
+    label=app.readAt?'':(app.readProgress||'正在连接并读取已保存批次…');
   }
 
   if(error&&!app.readRetryBlocked){
@@ -1061,6 +1061,41 @@ function itemStatus(i,b){
 }
 function exportReason(b){const c=counts(b);if(app.saving)return '正在保存，完成后可导出';if(app.stopping)return '保存未确认，请刷新读取已保存结果';if(c.exportable)return `导出本批${c.exportable}条就绪商品`;
   const candidate=b.items.find(i=>i.reviewStatus==='passed');return candidate?exportCheck(candidate).reason:'本批暂无审核通过的商品';}
+async function readCompleteWorkbench(){
+  // Build privately; only a complete, consistent read may replace current data.
+  for(let attempt=0;attempt<2;attempt++){
+    const batches=[],items=[];let version;
+    try{
+      for(const phase of ['batches','items']){
+        let after=null;
+        do{
+          const params=new URLSearchParams({phase});
+          if(after)params.set('after',JSON.stringify(after));
+          if(version!==undefined)params.set('version',String(version));
+          const page=await api('/api/data_page?'+params.toString());
+          if(!page||!Array.isArray(page.rows)||page.phase!==phase||!Number.isFinite(Number(page.version)))throw Error('批次分段响应不完整，已保留现有记录');
+          if(version!==undefined&&String(page.version)!==String(version)){const e=Error('批次记录已更新，正在重新读取');e.status=409;throw e;}
+          version=page.version;
+          (phase==='batches'?batches:items).push(...page.rows);
+          if(page.next&&JSON.stringify(page.next)===JSON.stringify(after))throw Error('批次分页未前进，已保留现有记录');
+          after=page.next;
+          app.readProgress=`正在分段读取历史记录，已接回 ${batches.length} 个批次、${items.length} 条商品…`;
+          renderConnectionState();
+        }while(after);
+      }
+      batches.sort((a,b)=>a.ordinal-b.ordinal);items.sort((a,b)=>a.ordinal-b.ordinal);
+      const loaded=new Map();
+      for(const b of batches){
+        if(loaded.has(b.id))throw Error('批次记录重复，已保留现有记录');
+        const fields=JSON.parse(b.payload);if(fields.id!==b.id)throw Error('批次编号不一致，已保留现有记录');
+        loaded.set(b.id,{...fields,items:[]});
+      }
+      for(const row of items){const b=loaded.get(row.batch_id);if(!b)throw Error('商品缺少对应批次，已保留现有记录');b.items.push(JSON.parse(row.payload));}
+      return {version,batches:[...loaded.values()],storage:'d1',data_contract:2};
+    }catch(error){if(error.status!==409||attempt===1)throw error;}
+    finally{app.readProgress='';}
+  }
+}
 async function fetchData({automatic=false}={}) {
   if(app.adminBusy)return toast('管理员操作正在保存，请稍候再刷新');
   if(app.processing) {render();toast('当前进度已更新，没有重新提交任务');return;}
@@ -1086,12 +1121,12 @@ async function fetchData({automatic=false}={}) {
       if(app.saving||app.processing||app.detailBusy||readEpoch!==(app.saveEpoch||0))return;
         if(current.version===app.serverVersion){app.readAt=now();readConnectionSucceeded();renderConnectionState();return;}
     }
-    let d=await api('/api/data'); if(!d||d.version==null||!Number.isFinite(Number(d.version))||!Array.isArray(d.batches)||!d.batches.every(b=>b&&typeof b==='object'&&typeof b.id==='string'&&(b.items==null||Array.isArray(b.items)))){const e=new Error('批次响应格式不完整，已保留当前记录');e.code='invalid_data';throw e;} if(app.saving||app.processing||app.detailBusy||readEpoch!==(app.saveEpoch||0))return;
+    let d=await readCompleteWorkbench(); if(!d||d.version==null||!Number.isFinite(Number(d.version))||!Array.isArray(d.batches)||!d.batches.every(b=>b&&typeof b==='object'&&typeof b.id==='string'&&(b.items==null||Array.isArray(b.items)))){const e=new Error('批次响应格式不完整，已保留当前记录');e.code='invalid_data';throw e;} if(app.saving||app.processing||app.detailBusy||readEpoch!==(app.saveEpoch||0))return;
     if(app.pendingSave){
       if(!savedPayloadMatches(d,app.pendingSave)){
         if(d.storage==='d1'&&d.version===app.pendingSave.version){
           await api('/api/data',{method:'POST',body:app.pendingSave});
-          d=await api('/api/data');
+          d=await readCompleteWorkbench();
           if(!savedPayloadMatches(d,app.pendingSave))throw new Error('服务器尚未确认保存，请稍后再刷新');
         }else{
           if(automatic){app.resumeAfterSave=null;toast('服务器记录与本地保存不同，请点击刷新状态核对');return;}          if(!confirm('服务器记录与本地未确认的保存不同。是否读取服务器记录？本地尚未确认的修改将被放弃。'))return;
@@ -1193,12 +1228,12 @@ function saveData(activeBatch,{create=false,draftItem=null}={}) {
           toast('正在查询服务器，确认刚才的保存结果');
           if(receipted)d=await recoverSaveReceipt(payload);
           else{
-          const saved=await api('/api/data');
+          const saved=await readCompleteWorkbench();
           if(savedPayloadMatches(saved,payload))d={version:saved.version};
           else if(useD1&&saved.version===payload.version&&!error.status){
             try{d=await api('/api/data',{method:'POST',body:payload});}
             catch(retryError){
-              const confirmed=await api('/api/data');
+              const confirmed=await readCompleteWorkbench();
               if(!savedPayloadMatches(confirmed,payload))throw retryError;
               d={version:confirmed.version};
             }
