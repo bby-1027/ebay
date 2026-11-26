@@ -155,7 +155,7 @@ button,input,textarea,select,.review-note textarea{background:#f8faf3}.toolbar,t
 // Connection settings are copied from the inspected deployment by build.py.
 const WORKER_URL = 'https://scraper-proxy.1172743763.workers.dev';
 const TOKEN = 'ebay1031';
-const BUILD = '2026-11-21-timeout-recovery-41';
+const BUILD = '2026-11-26-review-lazy-42';
 const PROHIBITION_REVIEW_VERSION=4;
 const MISSING_SOURCE_NOTICE='AI 审核结果缺少能对应到商品原文的证据';
 const AUDIT_CONCURRENCY = 1;
@@ -215,6 +215,9 @@ function badge(label,type='gray') {return `<span class="badge b-${type}">${esc(l
 function requestOperation(path,method){
   const route=path.split('?')[0];
   if(route==='/api/data')return method==='GET'?'读取已保存批次':'保存批次';
+  if(route==='/api/batch_manifest')return '读取批次列表';
+  if(route==='/api/batch_summary')return '读取批次摘要';
+  if(route==='/api/data_page')return '分段读取商品记录';
   if(route==='/api/data_version')return '检查批次版本';
   if(route==='/api/data_receipt')return '查询原保存回执';
   if(route==='/api/audit_result')return '查询原审核任务';
@@ -328,7 +331,7 @@ async function loadWorkbench({automatic=false}={}){
   if(!app.readAt||app.initialReadRestored)return;
   app.initialReadRestored=true;
   const old=sessionStorage.getItem('audit_batch'),view=sessionStorage.getItem('audit_view');
-  if(view==='items'&&batch(old))enterBatch(old);else{app.view='home';render();}
+  if(view==='items'&&batch(old))await enterBatch(old);else{app.view='home';render();}
   const interrupted=app.batches.find(b=>b.runStatus==='running'&&b.flowVersion===1);
   if(interrupted)fail(startBatch(interrupted.id));
   else if(app.batches.some(b=>b.runStatus==='running'))toast('已读取旧版运行记录；请先接回本轮结果再继续。不会自动重新采集。');
@@ -486,7 +489,7 @@ function auditIncomplete(i){
 }
 function unsupportedSafetyClaim(c){
   if(c?.area!=='safety'||!['clear','no_match','not_applicable'].includes(c.status))return false;
-  const claim=/符合(?:所有)?(?:儿童|婴幼儿|电气|产品|相关|适用)?安全(?:要求|标准)|使用安全|确保(?:使用)?安全|安全无风险|(?:已(?:经)?取得|已经?获得|通过).{0,35}(?:认证|批准)/g;
+  const claim=/符合(?:所有)?(?:儿童|婴幼儿|电气|产品|相关|适用)?安全(?:要求|标准)|使用安全|确保(?:使用)?安全|安全无风险|材料安全|绝对安全|无禁售成分|无任何风险|(?:已(?:经)?取得|已经?获得|通过).{0,35}(?:认证|批准)/g;
   for(const sentence of String(c.reason||'').split(/[。！？!?；;\n]/)){
     for(const match of sentence.matchAll(claim)){
       const before=sentence.slice(0,match.index).split(/但是|然而|不过|但/).at(-1).slice(-45);
@@ -974,6 +977,7 @@ function canRetryAudit(i) {
   return i.collectStatus==='collected'&&i.reviewStatus==='error'&&i.auditFailureKnown&&!i.auditRecoveryBlocked;
 }
 function counts(b) {
+  if(b._lazy)return b._overview?.counts||{total:0,verify:0,exportable:0};
   const a=b.items;return {total:a.length,collected:a.filter(i=>i.collectStatus==='collected').length,
     collectEnded:a.filter(i=>['collected','error','sync_error'].includes(i.collectStatus)).length,
     auditEligible:a.filter(i=>i.collectStatus==='collected' && i.reviewStatus!=='skipped').length,
@@ -987,12 +991,14 @@ function counts(b) {
     exportable:a.filter(i=>exportCheck(i).ok).length};
 }
 function stage(b) {
+ if(b._lazy)return b._overview?.label||(b._overviewError?'摘要读取失败':'正在读取摘要');
  if(!b.items.length)return '无商品';
  if(batchFinal(b))return '已完成';
  if(b.runStatus==='queued')return '待处理';
  if(b.runStatus==='paused')return app.activeId===b.id&&app.processing?'正在暂停':'已暂停';
  if((app.activeId===b.id&&(app.processing||app.starting))||b.items.some(i=>['审核中','处理中'].includes(itemStatus(i,b)[0])))return '处理中';
- if(b.items.some(i=>['待人工','系统异常'].includes(itemStatus(i,b)[0])))return '待处理';
+ if(b.items.some(i=>itemStatus(i,b)[0]==='系统异常'))return '待补审';
+ if(b.items.some(i=>itemStatus(i,b)[0]==='待人工'))return '待人工';
  return '未开始';
 }
 function progress(b) {const c=counts(b);return `采集结束 ${c.collectEnded}/${c.total}（成功${c.collected}） · 审核 ${c.auditEligible?c.audited+'/'+c.auditEligible:'无需处理'} · 文案 ${c.passed?c.copyEnded+'/'+c.passed:'无需处理'}`;}
@@ -1013,6 +1019,7 @@ function briefProgress(b,{compact=false}={}){const c=counts(b);
   if(b.items.some(i=>copyAuthorized(i)&&['pending','processing'].includes(i.copyStatus)))return `文案 ${c.copyEnded}/${c.passed}`+notes;
   return `自动处理已结束 · 有效资料 ${c.collected-c.screened}/${c.total} · 采集失败 ${b.items.filter(i=>i.collectStatus==='error').length} · 资料不足 ${c.screened}`+notes;}
 function statusSummary(b){
+ if(b._lazy)return b._overview?.progress||(b._overviewError?'摘要暂未接回，请刷新或打开明细核对':'正在读取本批摘要…');
  const labels=['待处理','审核中','处理中','可导出','淘汰','已找同款','系统异常','待人工'];
  const totals=Object.fromEntries(labels.map(label=>[label,0]));
  b.items.forEach(i=>totals[itemStatus(i,b)[0]]++);
@@ -1061,7 +1068,7 @@ function itemStatus(i,b){
 }
 function exportReason(b){const c=counts(b);if(app.saving)return '正在保存，完成后可导出';if(app.stopping)return '保存未确认，请刷新读取已保存结果';if(c.exportable)return `导出本批${c.exportable}条就绪商品`;
   const candidate=b.items.find(i=>i.reviewStatus==='passed');return candidate?exportCheck(candidate).reason:'本批暂无审核通过的商品';}
-async function readCompleteWorkbench(){
+async function readCompleteWorkbench(batchId){
   // Build privately; only a complete, consistent read may replace current data.
   for(let attempt=0;attempt<2;attempt++){
     const batches=[],items=[];let version;
@@ -1070,6 +1077,7 @@ async function readCompleteWorkbench(){
         let after=null;
         do{
           const params=new URLSearchParams({phase});
+          if(batchId!==undefined)params.set('batch_id',batchId);
           if(after)params.set('after',JSON.stringify(after));
           if(version!==undefined)params.set('version',String(version));
           const page=await api('/api/data_page?'+params.toString());
@@ -1096,6 +1104,45 @@ async function readCompleteWorkbench(){
     finally{app.readProgress='';}
   }
 }
+async function ensureBatchLoaded(id){
+  const current=batch(id);if(!current)throw Error('批次不存在，请刷新列表');if(!current._lazy)return current;
+  app.batchLoads??=new Map();if(app.batchLoads.has(id))return app.batchLoads.get(id);
+  const task=(async()=>{
+    if(app.pendingSave||app.stopping)throw Error('上次保存待确认，请先核对后再读取批次');
+    const epoch=app.saveEpoch||0;toast('正在读取本批完整商品记录…');
+    const data=await readCompleteWorkbench(id);
+    if(epoch!==(app.saveEpoch||0)||app.saving)throw Error('读取期间记录已更新，请重新打开批次');
+    const loaded=data.batches[0];if(!loaded||loaded.id!==id||data.batches.length!==1)throw Error('批次记录未完整接回，现有数据未改动');
+    if(String(data.version)!==String(app.serverVersion)){
+      if(app.processing||app.starting&&app.activeId||app.detailBusy||detailDirty)throw Error('其他页面更新了记录，请等待当前步骤完成后刷新');
+      const manifest=await api('/api/batch_manifest');
+      if(String(manifest.version)!==String(data.version)||epoch!==(app.saveEpoch||0))throw Error('批次仍在更新，请稍后重新打开');
+      app.batches=manifest.batches;app.serverVersion=manifest.version;app.savedBatches=new Map();
+    }
+    for(const i of loaded.items){if(i.dataRevision==null&&i.auditRevision==null&&i.copyRevision==null)i.legacyUnversioned=true;i.dataRevision=i.dataRevision||0;}
+    const index=app.batches.findIndex(b=>b.id===id);if(index<0)throw Error('批次已被删除，请刷新列表');
+    app.batches[index]=loaded;rememberSavedPayload({batch:loaded});repairCompletedQueuePause(loaded);return loaded;
+  })();app.batchLoads.set(id,task);
+  try{return await task;}finally{app.batchLoads.delete(id);}
+}
+async function loadVisibleBatchSummaries(rows){
+  if(app.summaryLoading||app.view!=='home'||app.processing||app.starting)return;
+  const pending=rows.filter(b=>b._lazy&&!b._overview&&!b._overviewError);if(!pending.length)return;
+  app.summaryLoading=true;const version=app.serverVersion;
+  try{
+    // Two bounded read requests at a time; no model calls or data writes.
+    for(let offset=0;offset<pending.length;offset+=2){
+      if(app.view!=='home'||app.processing||app.starting||version!==app.serverVersion)break;
+      const group=pending.slice(offset,offset+2);
+      const results=await Promise.allSettled(group.map(b=>api('/api/batch_summary?batch_id='+encodeURIComponent(b.id)+'&version='+encodeURIComponent(version))));
+      results.forEach((r,n)=>{const b=batch(group[n].id);if(!b?._lazy||version!==app.serverVersion)return;
+        if(r.status==='fulfilled'&&r.value.batch_id===b.id&&String(r.value.version)===String(version)&&r.value.summary?.counts){b._overview=r.value.summary;}
+        else b._overviewError=r.status==='rejected'?r.reason.message:'摘要响应不完整';
+      });
+      render();
+    }
+  }finally{app.summaryLoading=false;if(app.view==='home'&&version===app.serverVersion)render();}
+}
 async function fetchData({automatic=false}={}) {
   if(app.adminBusy)return toast('管理员操作正在保存，请稍候再刷新');
   if(app.processing) {render();toast('当前进度已更新，没有重新提交任务');return;}
@@ -1104,6 +1151,7 @@ async function fetchData({automatic=false}={}) {
   if (!automatic) { $('refreshState').disabled=true;$('refreshState').textContent='刷新中…'; }
   renderConnectionState();
   try {
+    if(!app.readAt){const info=await api('/api/workbench_info');if(info.lazy_contract!==1||info.audit_max_calls!==3||info.build!==BUILD)throw Error('前后端文件未配套，请先部署本次 worker.js，再替换 index.html；现有批次保留。');}
     if(app.pendingSave?.operationId&&app.dataContract===2){
       try{
         const pending=app.pendingSave,receipt=await recoverSaveReceipt(pending);
@@ -1121,7 +1169,7 @@ async function fetchData({automatic=false}={}) {
       if(app.saving||app.processing||app.detailBusy||readEpoch!==(app.saveEpoch||0))return;
         if(current.version===app.serverVersion){app.readAt=now();readConnectionSucceeded();renderConnectionState();return;}
     }
-    let d=await readCompleteWorkbench(); if(!d||d.version==null||!Number.isFinite(Number(d.version))||!Array.isArray(d.batches)||!d.batches.every(b=>b&&typeof b==='object'&&typeof b.id==='string'&&(b.items==null||Array.isArray(b.items)))){const e=new Error('批次响应格式不完整，已保留当前记录');e.code='invalid_data';throw e;} if(app.saving||app.processing||app.detailBusy||readEpoch!==(app.saveEpoch||0))return;
+    let d=app.pendingSave?await readCompleteWorkbench():await api('/api/batch_manifest'); if(!d||d.version==null||!Number.isFinite(Number(d.version))||!Array.isArray(d.batches)||!d.batches.every(b=>b&&typeof b==='object'&&typeof b.id==='string'&&(b.items==null||Array.isArray(b.items)))){const e=new Error('批次响应格式不完整，已保留当前记录');e.code='invalid_data';throw e;} if(app.saving||app.processing||app.detailBusy||readEpoch!==(app.saveEpoch||0))return;
     if(app.pendingSave){
       if(!savedPayloadMatches(d,app.pendingSave)){
         if(d.storage==='d1'&&d.version===app.pendingSave.version){
@@ -1134,9 +1182,16 @@ async function fetchData({automatic=false}={}) {
       }
       app.pendingSave=null;
     }
+    if(d.lazy_contract===1&&app.view==='items'&&app.currentBatchId&&d.batches.some(b=>b.id===app.currentBatchId)){
+      const selected=await readCompleteWorkbench(app.currentBatchId);
+      if(String(selected.version)!==String(d.version)){const e=Error('读取期间商品记录已更新，请重新刷新');e.status=409;throw e;}
+      if(selected.batches.length!==1)throw Error('当前批次未完整接回，保留当前页面');
+      d.batches=d.batches.map(b=>b.id===app.currentBatchId?selected.batches[0]:b);
+    }
+    if(app.saving||app.processing||app.detailBusy||readEpoch!==(app.saveEpoch||0))return;
     if(Number(d.version||0)<Number(app.serverVersion||0)){toast('云端状态正在同步，请稍后刷新');return;} app.batches=Array.isArray(d.batches)?d.batches:[];app.serverVersion=d.version??0;
     app.batches.forEach(b=>{b.items=b.items||[];b.items.forEach(i=>{if(i.dataRevision==null&&i.auditRevision==null&&i.copyRevision==null)i.legacyUnversioned=true;i.dataRevision=i.dataRevision||0;});});
-    app.storage=d.storage;app.dataContract=d.data_contract||0;rememberSavedPayload({batches:app.batches});app.readAt=now();app.stopping=false;app.batches.forEach(repairCompletedQueuePause);readConnectionSucceeded();render();
+    app.storage=d.storage;app.dataContract=d.data_contract||0;rememberSavedPayload({batches:app.batches});app.readAt=now();app.stopping=false;app.batches.filter(b=>!b._lazy).forEach(repairCompletedQueuePause);readConnectionSucceeded();render();
   } catch(error) {
     readConnectionFailed(error);
     if(!app.readAt)renderHome();
@@ -1151,7 +1206,7 @@ function savedBatchSnapshot(b){const {items=[],...fields}=b;return {fields:JSON.
 function rememberSavedPayload(payload){
   app.savedBatches??=new Map();
   if(payload.createBatch)app.savedBatches.set(payload.createBatch.id,savedBatchSnapshot(payload.createBatch));
-  if(payload.batches){app.savedBatches.clear();for(const b of payload.batches)app.savedBatches.set(b.id,savedBatchSnapshot(b));}
+  if(payload.batches){app.savedBatches.clear();for(const b of payload.batches)if(!b._lazy)app.savedBatches.set(b.id,savedBatchSnapshot(b));}
   else if(payload.batch)app.savedBatches.set(payload.batch.id,savedBatchSnapshot(payload.batch));
   else if(payload.patch){const p=payload.patch,old=app.savedBatches.get(p.batchId);if(old){old.fields=p.fields;for(const i of p.items)old.items.set(i.itemId,JSON.stringify(i));}}
   const pending=app.pendingHumanDecision;
@@ -1205,6 +1260,7 @@ function savedPayloadMatches(saved,payload){
   return JSON.stringify(canonical(expected))===JSON.stringify(canonical(actual));
 }
 function saveData(activeBatch,{create=false,draftItem=null}={}) {
+  if(activeBatch?._lazy||(!activeBatch&&app.batches.some(b=>b._lazy)))throw Error('商品记录尚未完整读取，已阻止保存，现有数据未改动');
   app.saveEpoch=(app.saveEpoch||0)+1;app.saving=(app.saving||0)+1;
   const work=async()=>{
     try {
@@ -1279,13 +1335,14 @@ function renderHome() {
   $('batchPageInfo').textContent=`第 ${window.index+1}/${window.pages} 页，共 ${window.total} 个批次`;
   $('prevBatchPage').disabled=window.index===0;$('nextBatchPage').disabled=window.index===window.pages-1;
   const rowsHTML=window.rows.map(b=>{
-    const c=counts(b),paused=b.runStatus==='paused',label=badgeText(b);return `<tr><td>${batchManagementCell(b)}<strong>${esc(b.name)}</strong><br><small>${esc(new Date(b.createdAt).toLocaleString())}</small></td><td>${c.total}</td>
+    const c=counts(b),paused=b.runStatus==='paused',label=badgeText(b);return `<tr><td>${batchManagementCell(b)}<strong>${esc(b.name)}</strong><br><small>${esc(new Date(b.createdAt).toLocaleString())}</small></td><td>${b._lazy&&!b._overview?'—':c.total}</td>
       <td title="${esc(collectionFailureSummary(b))}">${badge(label,label==='已完成'?'pass':paused?'err':c.verify?'warn':app.processing&&app.activeId===b.id?'run':'gray')}</td>
-      <td class="home-progress">${esc(statusSummary(b))}</td><td>${c.exportable}</td>
+      <td class="home-progress">${esc(statusSummary(b))}</td><td>${b._lazy&&!b._overview?'—':c.exportable}</td>
       <td class="row-actions"><button class="linkbtn" data-action="enter" data-bid="${esc(b.id)}">明细</button>
       <button class="linkbtn" data-action="export" data-bid="${esc(b.id)}" title="${esc(exportReason(b))}" ${c.exportable?'':'disabled'}>导出${c.exportable?'('+c.exportable+')':''}</button>${batchManagementDelete(b)}</td></tr>`;
   }).join('')||('<tr><td colspan="6" class="muted">'+(!app.readAt?(app.readError?'批次读取失败，请点击上方“重新连接”。现有数据未被删除。':'正在读取已保存批次…'):'暂无批次，可导入新批次。')+'</td></tr>');
   if(app.batchRowsHTML!==rowsHTML){$('batchRows').innerHTML=rowsHTML;app.batchRowsHTML=rowsHTML;}
+  void loadVisibleBatchSummaries(window.rows);
 }
 function searchTerms(v){return text(v).trim().toLowerCase().split(/[\s,;，；、]+/).filter(Boolean);}
 function filtered(b) {const terms=searchTerms(app.searchQuery);return b.items.filter(i=>{
@@ -1301,7 +1358,8 @@ function renderItems() {
   const pageRows=rows.slice(app.page*50,app.page*50+50);$('selectPage').checked=pageRows.length>0&&pageRows.every(i=>app.selected.has(i.itemId));$('selectPage').indeterminate=pageRows.some(i=>app.selected.has(i.itemId))&&!$('selectPage').checked;
   const pauseNote=b.runStatus==='paused'?(app.pendingSave||app.stopping?'保存结果待确认，核对后继续':b.workQueue?.note||b.note||'处理已暂停，可从原任务继续'):
     b.runStatus==='queued'?'正在等待恢复原任务':'';
-  $('batchProgress').textContent='批次状态：'+badgeText(b)+' | '+statusSummary(b)+(pauseNote?' | '+pauseNote:'');
+  const cooling=b.providerCooldownUntil>Date.now()?'模型服务冷却中，约'+Math.ceil((b.providerCooldownUntil-Date.now())/1000)+'秒后自动继续':'';
+  $('batchProgress').textContent='批次状态：'+badgeText(b)+' | '+statusSummary(b)+(cooling?' | '+cooling:pauseNote?' | '+pauseNote:'');
   const selected=b.items.filter(i=>app.selected.has(i.itemId));
   $('selectionInfo').textContent=selected.length?`已选 ${selected.length} 条，可导出 ${selected.filter(ready).length} 条`:`共 ${rows.length} 条`;
   $('selectAllFiltered').hidden=!selected.length||rows.length<=50;$('clearSelection').hidden=!selected.length;
@@ -1335,7 +1393,7 @@ function render() {
   renderConnectionState();
   if(app.view==='home')renderHome();else renderItems();
 }
-function enterBatch(id){app.currentBatchId=id;app.view='items';app.selected.clear();app.page=0;app.searchQuery='';app.filterStatus='all';$('searchInput').value='';$('filterStatus').value='all';sessionStorage.setItem('audit_batch',id);sessionStorage.setItem('audit_view','items');render();}
+async function enterBatch(id){await ensureBatchLoaded(id);app.currentBatchId=id;app.view='items';app.selected.clear();app.page=0;app.searchQuery='';app.filterStatus='all';$('searchInput').value='';$('filterStatus').value='all';sessionStorage.setItem('audit_batch',id);sessionStorage.setItem('audit_view','items');render();}
 function returnHome(){app.view='home';sessionStorage.setItem('audit_view','home');render();}
 function archive(i){if(i.audit)(i.auditHistory??=[]).push({audit:i.audit,dataRevision:i.auditRevision,manual:i.manualDecision||null,manualProhibition:i.manualProhibition||null});}
 function invalidate(i){if(i.copyData)(i.copyHistory??=[]).push({data:i.copyData,revision:i.copyRevision,time:now()});i.copyStatus='pending';i.copyData=null;i.copyRevision=null;}
@@ -1491,9 +1549,10 @@ async function syncIdleCollection(){
   if(b)await syncOriginalCollection(b.id,null,{automatic:true});
 }
 function collectionFailureSummary(b){
-  const failed=b.items.filter(i=>i.collectStatus==='error').length,sync=b.items.filter(i=>i.collectStatus==='sync_error').length;
-  const audit=b.items.filter(i=>['error','unconfirmed'].includes(i.reviewStatus)||auditIncomplete(i)).length;
-  return [[failed,'采集失败'],[sync,'结果待确认'],[audit,'审核未完成'],[b.items.filter(i=>i.copyStatus==='error').length,'文案失败']]
+ if(b._lazy)return b._overview?.failure||'';
+  const failed=b.items.filter(i=>!humanFinal(i)&&i.collectStatus==='error').length,sync=b.items.filter(i=>!humanFinal(i)&&i.collectStatus==='sync_error').length;
+  const audit=b.items.filter(i=>!humanFinal(i)&&(['error','unconfirmed'].includes(i.reviewStatus)||auditIncomplete(i))).length;
+  return [[failed,'采集失败'],[sync,'结果待确认'],[audit,'审核未完成'],[b.items.filter(i=>!humanFinal(i)&&i.copyStatus==='error').length,'文案失败']]
     .filter(([n])=>n).map(([n,label])=>label+n+'条').join('；');
 }
 function collectionSpecifications(f){
@@ -1690,7 +1749,7 @@ async function auditItem(b,i,recover=false){
  }
  try{
   const d=recover?await api('/api/audit_result?request_id='+encodeURIComponent(requestId)):
-    await api('/api/audit',{method:'POST',body:{requestId:i.auditRequestId,batchId:b.id,itemId:i.itemId,asin:i.asin,dataRevision:rev,fields,...(i.auditRequestMode?{auditMode:i.auditRequestMode}:{}),...(note?{manualReviewNote:note}:{}),...(i.auditRetrySource?{previousAuditRequestId:i.auditRetrySource}:{})},timeout:205000});
+    await api('/api/audit',{method:'POST',body:{requestId:i.auditRequestId,batchId:b.id,itemId:i.itemId,asin:i.asin,dataRevision:rev,fields,...(i.deferAuditRepairs?{deferRepairs:true}:{}),...(i.auditAutoRepair?{automaticRepair:true}:{}),...(i.auditRequestMode?{auditMode:i.auditRequestMode}:{}),...(note?{manualReviewNote:note}:{}),...(i.auditRetrySource?{previousAuditRequestId:i.auditRetrySource}:{})},timeout:205000});
   if((i.dataRevision||0)!==rev||(i.decisionRevision||0)!==decisionRevision||i.auditRequestId!==requestId)return;
    if(d.pending){if((d.input_hash&&d.input_hash!==expectedHash)||(d.data_revision!=null&&d.data_revision!==rev)){blockAuditRecovery(i,'原任务接收的商品资料与本次资料不一致，已停止恢复');mustSave=true;}else waitForOriginal(d.detail,d.started_at,d.receipt_confirmed,d.overdue);}
   else if(d.error==='product_data_missing'){i.reviewStatus='skipped';i.reason='资料不足';i.auditFailureKnown=false;i.auditNextCheckAt=0;mustSave=true;}
@@ -1715,10 +1774,20 @@ async function auditItem(b,i,recover=false){
       mustSave=true;
       const rateDetail=text(d.audit.validation_detail||d.audit.model_diagnostics?.map(x=>x.error).join(' ')||'');
       if(i.reviewStatus==='error'&&/模型接口状态码\s*429/.test(rateDetail)){
-        b.runStatus='paused';
-        b.note='模型账户触发速率限制，已暂停本批审核；额度恢复后点击继续处理，并重试这一条系统异常。';
-        i.reason='模型接口限流，审核暂未完成；其余商品已暂停排队';
-      }
+        if(/余额|额度|次数限额|使用上限|1304|套餐.*到期|订阅.*到期/.test(rateDetail)){
+          b.runStatus='paused';b.pauseKind='provider';b.note='模型账户额度不足或已到限额，请处理账户后继续；原记录和队列保留。';
+        }else{
+          b.providerCooldownFailures=(b.providerCooldownFailures||0)+1;
+          const seconds=Math.min(120,30*2**Math.min(2,b.providerCooldownFailures-1));
+          b.providerCooldownUntil=Date.now()+seconds*1000;b.note='模型暂时限流，冷却后自动接续；没有重新采集。';
+        }
+        i.reason='模型暂时限流，本商品保留原结果，等待缺项补审';
+      }else if(i.reviewStatus==='error'&&/模型接口状态码\s*(?:401|403)/.test(rateDetail)){
+        b.runStatus='paused';b.pauseKind='provider';b.note='模型密钥或访问权限异常，请修复账户配置后继续；未提交后续商品。';
+      }else if(i.reviewStatus==='error'&&/模型接口状态码\s*5\d\d|调用超时/.test(rateDetail)){
+        b.providerTransientFailures=(b.providerTransientFailures||0)+1;
+        if(b.providerTransientFailures>=3){b.providerTransientFailures=0;b.providerCooldownUntil=Date.now()+30000;b.note='模型服务连续异常，冷却后自动接续；原结果保留。';}
+      }else if(!d.audit.review_hold){b.providerTransientFailures=0;b.providerCooldownFailures=0;}
       }
   }
    else throw new Error('审核返回结构不完整');
@@ -1813,6 +1882,7 @@ async function copyItem(b,i) {
   settleManualBatch(b);await saveData(b);
 }
 function prepareQueueEntry(i,entry){
+  delete i.deferAuditRepairs;delete i.auditAutoRepair;
   if(entry.action==='copy'){invalidate(i);i.reason='等待重新清理文案';return;}
   if(entry.action==='collect_sync'){i.reason='正在查询原采集任务';return;}
   if(entry.action==='blocked')return;
@@ -1872,6 +1942,7 @@ async function runWorkQueue(b,{singleItem,recheckVerification,recheckSystemError
   try{
     await saveData(b);
     while(q.cursor<q.entries.length&&b.runStatus==='running'&&!app.stopping){
+      if(await waitProviderCooldown(b))continue;
       const entry=q.entries[q.cursor],i=b.items.find(item=>item.itemId===entry.itemId);
       if(entry.completedAt){q.cursor++;await saveData(b);continue;}
       if(!i||(i.dataRevision||0)!==entry.revision){
@@ -1921,6 +1992,10 @@ async function runWorkQueue(b,{singleItem,recheckVerification,recheckSystemError
     }else if(!app.stopping){q.state='paused';await saveData(b);}
   }finally{app.processing=false;app.activeId=null;render();}
 }
+async function waitProviderCooldown(b){
+  if(!(b.providerCooldownUntil>Date.now())){if(b.providerCooldownUntil){delete b.providerCooldownUntil;if(/模型暂时限流|模型服务连续异常/.test(b.note||''))b.note='';}return false;}
+  render();await sleep(Math.min(1000,b.providerCooldownUntil-Date.now()));return true;
+}
 async function runLoop(bid,{recheckVerification=false,recheckSystemError=false,resyncCollection=false,recheckProhibition=false,singleItem=null}={}) {
   const b=batch(bid);if(!b)return;
   if(!singleItem&&!recheckSystemError&&!recheckVerification&&!recheckProhibition&&b.suspendedQueue&&b.workQueue?.state==='completed'){
@@ -1946,11 +2021,12 @@ async function runLoop(bid,{recheckVerification=false,recheckSystemError=false,r
     }else if(checkSelection){
       try{await queueVerification(b,recheckProhibition);}catch(e){b.runStatus=previousRunStatus;throw e;}
     }else{
-      for(const i of b.items){if(i.reviewStatus==='passed'&&(!sellerAuditCurrent(i)||(!auditCurrent(i)&&!legacyAudit(i)))){archive(i);i.reviewStatus='pending';i.auditRequestId=null;i.auditRecoverCount=0;i.auditWaitSince=null;i.auditNextCheckAt=0;invalidate(i);i.reason='资料与旧结果无法对应，已保留历史，等待重新审核';}}
+      for(const i of b.items){if(i.reviewStatus==='passed'&&!existingManual(i)&&(!sellerAuditCurrent(i)||(!auditCurrent(i)&&!legacyAudit(i)))){archive(i);i.reviewStatus='pending';i.auditRequestId=null;i.auditRecoverCount=0;i.auditWaitSince=null;i.auditNextCheckAt=0;invalidate(i);i.reason='资料与旧结果无法对应，已保留历史，等待重新审核';}}
     }
     for(const i of scopedItems())if(i.reviewStatus==='auditing'&&!i.auditRequestId)blockAuditRecovery(i,'审核记录缺少原任务编号，已停止等待；请人工决定是否重新审核');
     if(!checkSelection&&!resyncIds)await saveData(b);
     while(b.runStatus==='running'&&!app.stopping) {
+      if(await waitProviderCooldown(b))continue;
       if(!scopedIds&&b.collection&&!['completed','sync_error'].includes(b.collection.state)){await pollCollection(b);render();}
       if(b.runStatus!=='running')break;
       const newItems=scopedIds?[]:b.items.filter(i=>i.collectStatus==='pending'&&!b.collection?.members?.some(m=>m.id===i.itemId));
@@ -1962,7 +2038,7 @@ async function runLoop(bid,{recheckVerification=false,recheckSystemError=false,r
         if(item.reviewStatus==='pending'){
           const gap=MIN_AUDIT_START_GAP_MS-(Date.now()-lastAuditStartAt);
           if(gap>0){await sleep(Math.min(gap,1000));continue;}
-          lastAuditStartAt=Date.now();
+          lastAuditStartAt=Date.now();item.deferAuditRepairs=!item.auditAutoRepair;
         }
         const job=auditItem(b,item,item.reviewStatus==='auditing').catch(error=>{
           auditJobError??=error;
@@ -1977,6 +2053,11 @@ async function runLoop(bid,{recheckVerification=false,recheckSystemError=false,r
         // Wake when a slot frees up, or when a saved task becomes ready to poll.
         await Promise.race([...auditJobs.values(),sleep(1000)]);
         continue;
+      }
+      const repair=scopedItems().find(i=>i.reviewStatus==='error'&&!existingManual(i)&&i.audit?._automatic_repair_available&&!i.auditAutoRepair);
+      if(repair){
+        repair.auditRetrySource=repair.audit._request_id;repair.auditAutoRepair=true;repair.deferAuditRepairs=false;
+        repair.reviewStatus='pending';repair.reason='初审已结束，正在补审本商品缺项';await saveData(b);continue;
       }
       const cp=scopedItems().find(i=>copyAuthorized(i)&&['pending','processing'].includes(i.copyStatus));
       if(cp){await copyItem(b,cp);render();continue;}
@@ -2005,11 +2086,11 @@ async function startBatch(bid,{recheckVerification=false,recheckSystemError=fals
     if(!app.readAt)await loadWorkbench();
     if(app.pendingSave||app.stopping)return toast('上次保存结果尚未确认，请先查询原保存结果；不会新建任务');
     if(!await checkBackend())return;
-    const target=batch(bid);if(!target)return;
+    await ensureBatchLoaded(bid);const target=batch(bid);if(!target)return;
     app.resumeAfterSave=null;
     scopedRun=!!(singleItem||recheckVerification||recheckSystemError||resyncCollection||recheckProhibition||target.suspendedQueue
       ||(target.workQueue&&target.workQueue.state!=='completed'));
-    if(!scopedRun&&target.items.some(i=>i.reviewStatus==='passed'&&!auditCurrent(i)&&!legacyAudit(i))&&!confirm('本批部分资料与原审核不能对应，继续需要重新审核。旧结论会保留。是否继续？'))return;
+    if(!scopedRun&&target.items.some(i=>i.reviewStatus==='passed'&&!existingManual(i)&&!auditCurrent(i)&&!legacyAudit(i))&&!confirm('本批部分资料与原审核不能对应，继续需要重新审核。旧结论会保留。是否继续？'))return;
     if(!navigator.locks)return toast('此浏览器不支持处理窗口保护，请使用新版Chrome');
     await navigator.locks.request('ebay-workbench-processing-v1',{ifAvailable:true},async lock=>{
       if(!lock){const pending=batch(bid);if(pending?.runStatus==='paused'){pending.runStatus='queued';await saveData(pending);render();}return toast('已在另一页面处理；当前批次将按队列继续');}
@@ -2193,8 +2274,8 @@ function reviewPresentation(i){
  const ban=blocked?'存在禁售或侵权问题，已淘汰':gate.ok?'本次审核未发现禁售或侵权问题':'待完成禁售与侵权审核';
  const mat=m?.status==='required'?'涉及强制上架材料，详见判定依据':m?.status==='possible'&&m.requirements?.length?'可能需要上架材料，详见判定依据':rs.stages[1].done?'本次未发现额外材料要求':'待核实';
  const materialNames=(m?.requirements||[]).map(x=>reviewChinese(x,'')).filter(Boolean).join('、');
- const materialLine=materialNames&&Array.from(materialNames).length<=65?((m.status==='required'?'需要':'可能需要')+'：'+materialNames+'。'):mat;
- const risk=r?.level==='high'?'售后风险较高，详见判定依据':r?.level==='low'?'本次未发现明显售后风险':'售后风险待核实';
+ const materialLine=!rs.stages[1].done?'上架材料核对尚未完成':materialNames&&Array.from(materialNames).length<=65?((m.status==='required'?'需要':'可能需要')+'：'+materialNames+'。'):mat;
+ const risk=!rs.stages[2].done?'售后及资料核对尚未完成':r?.level==='high'?'售后风险较高，详见判定依据':r?.level==='low'?'本次未发现明显售后风险':'售后风险待核实';
  const rejected=rejectedProduct(i),category=decisionCategory(i).category;
  const materialRejected=rejected&&(category==='B'||a.business_rule?.code==='materials_risk'||a.screening_stop?.layer==='materials');
  const businessRejected=rejected&&!materialRejected&&category==='C';
@@ -2553,7 +2634,7 @@ async function detailAction(action){
    catch(error){showDetailNotice('文案保存尚未完成，人工结论已保留：'+error.message);}
    finally{app.detailBusy=false;renderDetailFooter(i);}
  }
- if(action==='export-one'){const before=app.selected;app.selected=new Set([i.itemId]);try{doExport(b.id,true);}finally{app.selected=before;}}
+ if(action==='export-one'){const before=app.selected;app.selected=new Set([i.itemId]);try{await doExport(b.id,true);}finally{app.selected=before;}}
 }
 
 function exportRows(b,selected=false) {
@@ -2586,7 +2667,7 @@ function downloadRows(rows,name) {
   const ws=XLSX.utils.aoa_to_sheet(rows);for(let r=1;r<rows.length;r++){const cell=ws[XLSX.utils.encode_cell({r,c:0})];if(cell){cell.t='s';cell.z='@';}}
   const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'商品结果');XLSX.writeFile(wb,name.replace(/[\\/:*?"<>|]/g,'_')+'.xlsx');
 }
-function doExport(bid,selected=false){const b=batch(bid);const d=exportRows(b,selected);if(d.legacy&&!confirm(`其中${d.legacy}条是旧版已完成记录，未记录资料版本。本次按原通过结论和文案导出，不代表已按新规则重审。是否继续？`))return;downloadRows(d.rows,b.name+'_通过');toast(`已导出${d.count}条${d.omitted?'，跳过未就绪'+d.omitted+'条':''}${d.missingTotal?'；'+d.missingTotal+'条未返回采集总价，金额留空':''}`);}
+async function doExport(bid,selected=false){await ensureBatchLoaded(bid);const b=batch(bid);const d=exportRows(b,selected);if(d.legacy&&!confirm(`其中${d.legacy}条是旧版已完成记录，未记录资料版本。本次按原通过结论和文案导出，不代表已按新规则重审。是否继续？`))return;downloadRows(d.rows,b.name+'_通过');toast(`已导出${d.count}条${d.omitted?'，跳过未就绪'+d.omitted+'条':''}${d.missingTotal?'；'+d.missingTotal+'条未返回采集总价，金额留空':''}`);}
 function exportFailures(){const b=batch();const rows=[['SKU','Amazon链接','失败环节','失败原因'],...b.items.filter(hasFailure).map(i=>[i.asin,amazon(i),['error','sync_error'].includes(i.collectStatus)?'采集／结果同步':['error','unconfirmed'].includes(i.reviewStatus)?'审核':'文案',i.reason])];if(rows.length===1)return toast('没有接口或程序失败项');downloadRows(rows,b.name+'_失败清单');}
 function closeDialog(d){
   if(d.id==='importDialog'&&app.importBusy){$('importError').textContent='正在创建批次，请稍候。';return false;}
@@ -2852,7 +2933,7 @@ async function init() {
   initBatchAdmin();
   try{exportPrefs={...exportPrefs,...JSON.parse(localStorage.getItem('ebay_export_prefs')||'{}')};}catch{}
   syncSettingsControls();
-  $('backHomeBtn').onclick=returnHome;$('refreshState').onclick=()=>fail(loadWorkbench());
+  $('backHomeBtn').onclick=returnHome;$('refreshState').onclick=()=>{for(const b of app.batches)delete b._overviewError;render();fail(loadWorkbench());};
   $('connectionRetry').onclick=()=>fail(loadWorkbench());
   $('btnSettings').onclick=openSettings;$('settingsSave').onclick=saveSettings;
   $('settingsConfirmSave').onclick=saveSettings;$('settingsDiscard').onclick=discardSettings;$('settingsContinue').onclick=()=>$('settingsConfirmDialog').close();
@@ -2863,7 +2944,7 @@ async function init() {
     $('btnBatchRecheck').onclick=()=>fail(startBatch(app.currentBatchId,{recheckSystemError:true}));
   $('btnStrictReview').onclick=()=>fail(startBatch(app.currentBatchId,{recheckProhibition:true}));
   $('renameBatch').onclick=()=>{if(app.processing)return toast('请先暂停并等待当前步骤保存');const b=batch(),v=prompt('批次名称',b.name);if(v?.trim()){b.name=v.trim();fail(saveData(b).then(render));}};
-  $('btnExportItems').onclick=()=>{try{doExport(app.currentBatchId,app.selected.size>0);}catch(e){toast(e.message);}};$('btnExportFailures').onclick=()=>{try{exportFailures();}catch(e){toast(e.message);}};
+  $('btnExportItems').onclick=()=>fail(doExport(app.currentBatchId,app.selected.size>0));$('btnExportFailures').onclick=()=>{try{exportFailures();}catch(e){toast(e.message);}};
   $('searchInput').oninput=e=>{app.searchQuery=e.target.value;app.page=0;renderItems();};$('filterStatus').onchange=e=>{app.filterStatus=e.target.value;app.page=0;renderItems();};
   $('searchInput').addEventListener('paste',e=>{const value=e.clipboardData?.getData('text');if(value&&/[\r\n]/.test(value)){e.preventDefault();const el=e.target,start=el.selectionStart??el.value.length,end=el.selectionEnd??start;el.value=el.value.slice(0,start)+value.replace(/[\r\n]+/g,' ')+el.value.slice(end);app.searchQuery=el.value;app.page=0;renderItems();}});
   $('selectPage').onclick=e=>{filtered(batch()).slice(app.page*50,app.page*50+50).forEach(i=>e.target.checked?app.selected.add(i.itemId):app.selected.delete(i.itemId));renderItems();};
@@ -2890,8 +2971,8 @@ async function init() {
     if(a==='image-preview'){openImagePreview(el.dataset.src);return;}
     if(a==='image-prev'||a==='image-next'){imagePreviewState.index=Math.max(0,Math.min(imagePreviewState.links.length-1,imagePreviewState.index+(a==='image-prev'?-1:1)));showPreviewImage();return;}
     if(a==='expand-text'){app.detailExpanded??={};app.detailExpanded[el.dataset.key]=!app.detailExpanded[el.dataset.key];const i=itemOf(app.currentBatchId,app.detailItemId);if(i)renderDetailSource(i);return;}
-    if(a==='enter')enterBatch(el.dataset.bid);else if(a==='detail'){try{if(!openDetail(el.dataset.iid))toast('未找到该商品，请刷新批次');}catch(error){toast('详情打开失败：'+error.message);}}
-    else if(a==='export'){try{doExport(el.dataset.bid);}catch(e){toast(e.message);}}
+    if(a==='enter')fail(enterBatch(el.dataset.bid));else if(a==='detail'){try{if(!openDetail(el.dataset.iid))toast('未找到该商品，请刷新批次');}catch(error){toast('详情打开失败：'+error.message);}}
+    else if(a==='export')fail(doExport(el.dataset.bid));
     else fail(detailAction(a));
   });
   $('imagePreviewDialog').addEventListener('close',()=>{$('previewImage').removeAttribute('src');$('previewImage').hidden=true;});
@@ -2911,9 +2992,9 @@ async function init() {
 }
 async function checkBackend(){
   if(app.backendCompatible)return true;
-  try{const info=await api('/api/workbench_info',{timeout:10000});if(info.build!==BUILD||info.audit_contract!==2||info.audit_protocol!==3||info.audit_completion_contract!==2||!(info.audit_model_protocol>=25)||info.audit_model!=='glm-4-flash'||info.source_screening_contract!==1||info.prohibition_gate_contract!==1||info.manual_prohibition_contract!==2||info.prohibition_review_version!==PROHIBITION_REVIEW_VERSION||info.data_contract!==2||info.seller_policy_version!==SELLER_POLICY_VERSION)throw new Error('版本不对应');app.backendCompatible=true;return true;}
+  try{const info=await api('/api/workbench_info',{timeout:10000});if(info.lazy_contract!==1||info.audit_max_calls!==3||info.build!==BUILD||info.audit_contract!==2||info.audit_protocol!==3||info.audit_completion_contract!==2||!(info.audit_model_protocol>=25)||info.audit_model!=='glm-4-flash'||info.source_screening_contract!==1||info.prohibition_gate_contract!==1||info.manual_prohibition_contract!==2||info.prohibition_review_version!==PROHIBITION_REVIEW_VERSION||info.data_contract!==2||info.seller_policy_version!==SELLER_POLICY_VERSION)throw new Error('版本不对应');app.backendCompatible=true;return true;}
   catch(error){toast(error.code==='request_timeout'||error.code==='connection_lost'
-    ?'暂时无法连接审核后台，请稍后重试。':'审核后台版本未配套，请同时部署本次 worker.js 和 index.html。旧数据仍保留，需按新标准审核后导出。');return false;}
+    ?'暂时无法连接审核后台，请稍后重试。':'审核后台版本未配套，请同时部署本次 worker.js 和 index.html。旧数据和人工结论仍保留，请部署配套文件后继续。');return false;}
 }
 if(!window.__AUDIT_TEST__)fail(init());
 </script>
